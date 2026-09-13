@@ -16,7 +16,22 @@ import { fileURLToPath } from "url";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 const BACKUP = process.argv[2];
-const DB_URL = process.argv[3] || "";
+
+/** الرابط من سطر الأوامر، وإلا من .env.local — فلا يُكتب سرّ في أمر */
+function urlFromEnvFile() {
+  try {
+    const raw = fs.readFileSync(".env.local", "utf8").replace(/^﻿/, "");
+    const line = raw
+      .split(/\r?\n/)
+      .find((l) => l.trim().startsWith("DATABASE_URL="));
+    return line ? line.trim().slice("DATABASE_URL=".length).replace(/^["']|["']$/g, "") : "";
+  } catch {
+    return "";
+  }
+}
+
+const DB_URL =
+  process.argv[3] === "--local" ? "" : process.argv[3] || urlFromEnvFile();
 
 if (!BACKUP) {
   console.error("الاستعمال: node db/migrate.mjs <ملف النسخة> [رابط القاعدة]");
