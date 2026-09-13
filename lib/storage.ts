@@ -54,6 +54,18 @@ import {
 import { SEED_WORK_ITEMS } from "./work-items-seed";
 import { Invoice } from "./invoices";
 
+export type CounterpartyType = "عميل" | "مقاول" | "مورّد";
+
+export const COUNTERPARTY_TYPES: CounterpartyType[] = [
+  "عميل",
+  "مقاول",
+  "مورّد",
+];
+
+/** الدفعات واردة من العميل، وصادرة إلى المقاول والمورّد */
+export const isIncomingContract = (type: CounterpartyType): boolean =>
+  type === "عميل";
+
 export type Project = {
   id: string;
   name: string;
@@ -133,10 +145,15 @@ export type Contractor = {
   /**
    * مع مَن هذا العقد.
    *
-   * «مقاول» = الشركة تدفع له · «عميل» = الشركة تنفّذ له ويدفع هو.
-   * الشركة هي الطرف الأول في الحالتين، والفرق اتجاه الدفعات والالتزامات.
+   * «عميل»  = الشركة تنفّذ له ويدفع هو — الدفعات واردة.
+   * «مقاول» = يبيع مصنعية: حفر، حدادة، صحي، مساح — الدفعات صادرة.
+   * «مورّد» = يورّد ويركّب بضاعته: طابوق، خرسانة، ألومنيوم، تكييف،
+   *           مسبح — صادرة أيضاً، لكن التزاماته توريد ومواصفات وضمان
+   *           بضاعة لا أصول صنعة، فيُفصل عن المقاول ليُقاس كلٌّ بمعياره.
+   *
+   * والشركة هي الطرف الأول في الثلاثة.
    */
-  counterpartyType: "مقاول" | "عميل";
+  counterpartyType: CounterpartyType;
   /** «عقد» أو «ملحق عقد» — الملحق يشير إلى عقد أصلي */
   documentType: string;
   /** رقم العقد الأصلي إن كان هذا ملحقاً */
@@ -885,7 +902,11 @@ function migrateContractor(raw: unknown): Contractor {
     installmentsCount: Number(c.installmentsCount) || installments.length,
 
     // العقود المسجّلة قبل إضافة التمييز كلها عقود مقاولين
-    counterpartyType: c.counterpartyType === "عميل" ? "عميل" : "مقاول",
+    counterpartyType: COUNTERPARTY_TYPES.includes(
+      c.counterpartyType as CounterpartyType
+    )
+      ? (c.counterpartyType as CounterpartyType)
+      : "مقاول",
     documentType: str(c.documentType, "عقد") || "عقد",
     parentContractNumber: str(c.parentContractNumber),
     contractDate: str(c.contractDate),
