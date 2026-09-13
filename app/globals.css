@@ -1,0 +1,165 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+/* ==================================================================
+   الطباعة
+   ================================================================== */
+
+.print-only {
+  display: none;
+}
+
+@media print {
+  @page {
+    size: A4;
+    margin: 12mm 10mm;
+  }
+
+  /* الطباعة دائماً على أبيض بحبر أسود، مهما كان وضع الشاشة */
+  :root {
+    --background: #ffffff;
+    --foreground: #000000;
+  }
+
+  body {
+    background: #fff !important;
+    color: #000 !important;
+  }
+
+  /* عناصر التحكم لا تُطبع: القوائم والأزرار والحقول */
+  .no-print,
+  nav,
+  aside,
+  button,
+  input,
+  select,
+  textarea {
+    display: none !important;
+  }
+
+  .print-only {
+    display: block;
+  }
+
+  /* المحتوى يمتد على عرض الورقة بلا ظلال ولا حواف ملوّنة */
+  .print-area,
+  .print-area * {
+    box-shadow: none !important;
+  }
+
+  .print-area {
+    width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    background: #fff !important;
+  }
+
+  /* الجداول: ترويسة مكرّرة في كل صفحة وصفوف لا تنقسم */
+  table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    font-size: 10pt;
+  }
+
+  thead {
+    display: table-header-group;
+  }
+
+  tfoot {
+    display: table-footer-group;
+  }
+
+  tr,
+  img {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  th,
+  td {
+    border: 1px solid #999 !important;
+    padding: 4px 6px !important;
+    color: #000 !important;
+  }
+
+  thead th {
+    background: #eee !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  h3,
+  h4,
+  h5 {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+
+  /* كل لوحة تبدأ صفحة جديدة إن لزم، ولا تنقسم عبر الصفحات بلا داع */
+  .print-block {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .print-page-break {
+    break-before: page;
+    page-break-before: always;
+  }
+
+  /* السند يُطبع وحده على صفحة كاملة */
+  .voucher-sheet {
+    position: static !important;
+    inset: auto !important;
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
+    overflow: visible !important;
+    z-index: auto !important;
+  }
+
+  /* ورقة السند نفسها: بلا عرض أقصى ولا ارتفاع مفروض يولّد صفحة فارغة */
+  .voucher-body {
+    max-width: none !important;
+    width: 100% !important;
+    min-height: auto !important;
+    height: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+  }
+
+  /* السند خارج .print-area فيحتاج حدود جداوله بنفسه */
+  .voucher-body table {
+    border-collapse: collapse !important;
+  }
+
+  .hide-when-printing {
+    display: none !important;
+  }
+}

@@ -1,0 +1,3179 @@
+"use client";
+import { Fragment, useEffect, useState } from "react";export default function Home() {
+  const [page, setPage] = useState("الرئيسية");
+  const [selectedLedgerAccount, setSelectedLedgerAccount] = useState("");
+  const [message, setMessage] = useState("");
+  const [movementType, setMovementType] = useState("");
+  const [date, setDate] = useState("");
+  const [item, setItem] = useState("");
+  const [project, setProject] = useState("");
+  const [amount, setAmount] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState("");
+  const [person, setPerson] = useState("");
+  const [party, setParty] = useState("");
+  const [description, setDescription] = useState("");
+  const [movements, setMovements] = useState<any[]>([]);
+  const [projects, setProjects] = useState<any[]>([]);
+  const [contractors, setContractors] = useState<any[]>([]);
+const [contractorName, setContractorName] = useState("");
+const [contractorSpecialty, setContractorSpecialty] = useState("");
+const [contractorPhone, setContractorPhone] = useState("");
+const [contractorProject, setContractorProject] = useState("");
+const [contractorWorkType, setContractorWorkType] = useState("");
+const [contractorContractType, setContractorContractType] = useState("");
+const [contractorContractNumber, setContractorContractNumber] = useState("");
+const [contractorContractValue, setContractorContractValue] = useState("");
+const [contractorInstallmentsCount, setContractorInstallmentsCount] = useState("");
+const [contractorInstallments, setContractorInstallments] = useState<any[]>([]);
+const [selectedContractor, setSelectedContractor] = useState<any>(null);
+const totalInstallmentsValue = contractorInstallments.reduce(
+  (total, installment) => total + Number(installment.value || 0),
+  0
+);  
+const [newProjectName, setNewProjectName] = useState("");
+  const [newProjectBudget, setNewProjectBudget] = useState("");
+  const [selectedProject, setSelectedProject] = useState<any>(null);
+  const [projectMovementFilter, setProjectMovementFilter] = useState("الكل");
+  const [projectItemFilter, setProjectItemFilter] = useState("الكل");
+  const [projectDateFrom, setProjectDateFrom] = useState("");
+const [projectDateTo, setProjectDateTo] = useState("");
+const [projectSearch, setProjectSearch] = useState("");
+  const addProject = () => {
+  if (!newProjectName.trim()) return;
+
+  setProjects((prev) => [
+    ...prev,
+    {
+      id: Date.now(),
+      name: newProjectName.trim(),
+      budget: Number(newProjectBudget || 0),
+      status: "نشط",
+    },
+  ]);
+
+  setNewProjectName("");
+  setNewProjectBudget("");
+};
+  const [loaded, setLoaded] = useState(false);
+  const [openingBalances, setOpeningBalances] = useState<Record<string, any>>({});
+  const updateOpeningBalance = (
+  accountCode: string,
+  type: "debit" | "credit",
+  value: string
+) => {
+  setOpeningBalances((prev) => ({
+    ...prev,
+    [accountCode]: {
+      ...(prev[accountCode] || {}),
+      [type]: value,
+    },
+  }));
+};
+const openingDebitTotal = Object.values(openingBalances).reduce(
+  (total: number, balance: any) => total + Number(balance?.debit || 0),
+  0
+);
+
+const openingCreditTotal = Object.values(openingBalances).reduce(
+  (total: number, balance: any) => total + Number(balance?.credit || 0),
+  0
+);
+
+const openingBalancesAreBalanced =
+  openingDebitTotal === openingCreditTotal;
+  const chartOfAccounts = [
+  { code: "1110", name: "البنك", type: "أصول", nature: "مدين" },
+  { code: "1111", name: "الصندوق", type: "أصول", nature: "مدين" },
+  { code: "1120", name: "العملاء والذمم المالية", type: "أصول", nature: "مدين" },
+  { code: "1130", name: "دفعات مقدمة للموردين والمقاولين", type: "أصول", nature: "مدين" },
+  { code: "1140", name: "سلف وعهد الموظفين", type: "أصول", nature: "مدين" },
+  { code: "1213", name: "الأثاث والتجهيزات", type: "أصول", nature: "مدين" },
+  { code: "1240", name: "سلف الموظفين", type: "أصول", nature: "مدين" },
+  { code: "1520", name: "أجهزة ومعدات", type: "أصول", nature: "مدين" },
+
+  { code: "2110", name: "الموردون والذمم الدائنة", type: "التزامات", nature: "دائن" },
+  { code: "2160", name: "جاري المستثمرين", type: "التزامات", nature: "دائن" },
+
+  { code: "3100", name: "رأس المال", type: "حقوق الملكية", nature: "دائن" },
+
+  { code: "4100", name: "إيرادات المقاولات", type: "إيرادات", nature: "دائن" },
+  { code: "4110", name: "إيرادات عقود المشاريع", type: "إيرادات", nature: "دائن" },
+  { code: "4200", name: "إيرادات أخرى", type: "إيرادات", nature: "دائن" },
+
+  { code: "5110", name: "مواد إنشائية", type: "مصروفات", nature: "مدين" },
+  { code: "5120", name: "أجور مقاولين", type: "مصروفات", nature: "مدين" },
+  { code: "5130", name: "أجور العمالة المباشرة", type: "مصروفات", nature: "مدين" },
+  { code: "5140", name: "إيجار معدات", type: "مصروفات", nature: "مدين" },
+  { code: "5150", name: "نقليات", type: "مصروفات", nature: "مدين" },
+  { code: "5160", name: "وقود وديزل", type: "مصروفات", nature: "مدين" },
+  { code: "5170", name: "مصروفات حكومية للمشاريع", type: "مصروفات", nature: "مدين" },
+  { code: "5180", name: "كهرباء وماء للمشاريع", type: "مصروفات", nature: "مدين" },
+  { code: "5190", name: "تأمينات المشاريع", type: "مصروفات", nature: "مدين" },
+  { code: "5191", name: "ملابس ومعدات سلامة", type: "مصروفات", nature: "مدين" },
+  { code: "5192", name: "أدوات وعدد", type: "مصروفات", nature: "مدين" },
+  { code: "5193", name: "تجهيز موقع", type: "مصروفات", nature: "مدين" },
+  { code: "5194", name: "أعمال مساحية", type: "مصروفات", nature: "مدين" },
+  { code: "5199", name: "تكاليف مشاريع أخرى", type: "مصروفات", nature: "مدين" },
+  { code: "6110", name: "رواتب وأجور إدارية", type: "مصروفات", nature: "مدين" },
+  { code: "6120", name: "مكافآت وبدلات الموظفين", type: "مصروفات", nature: "مدين" },
+
+{ code: "6210", name: "إيجارات", type: "مصروفات", nature: "مدين" },
+{ code: "6220", name: "كهرباء وماء", type: "مصروفات", nature: "مدين" },
+{ code: "6230", name: "اتصالات وإنترنت", type: "مصروفات", nature: "مدين" },
+{ code: "6240", name: "قرطاسية ومطبوعات", type: "مصروفات", nature: "مدين" },
+{ code: "6250", name: "صيانة وإصلاحات", type: "مصروفات", nature: "مدين" },
+{ code: "6260", name: "رسوم ومصروفات حكومية", type: "مصروفات", nature: "مدين" },
+{ code: "6270", name: "أتعاب مهنية واستشارية", type: "مصروفات", nature: "مدين" },
+{ code: "6280", name: "مصروفات بنكية", type: "مصروفات", nature: "مدين" },
+{ code: "6290", name: "مصروفات إدارية أخرى", type: "مصروفات", nature: "مدين" },
+
+{ code: "6310", name: "مصروف إهلاك الأصول الثابتة", type: "مصروفات", nature: "مدين" },
+];
+const getAccountCode = (accountName: string) => {
+  const accountMap: Record<string, string> = {
+    "وقود": "5160",
+    "وقود وديزل": "5160",
+    "نقدي": "1111",
+    "النقدية": "1111",
+    "الصندوق": "1111",
+    "البنك": "1110",
+    "جاري المستثمرين": "2160",
+    "سلف وعهد الموظفين": "1140",
+    "سلف الموظفين": "1240",
+    "أجهزة ومعدات": "1520",
+    "أثاث وتجهيزات مكتبية": "1213",
+    "أدوات وعدد": "5192",
+    "تجهيز موقع": "5193",
+    "أعمال مساحية": "5194",
+  };
+
+  return (
+    accountMap[accountName] ||
+    chartOfAccounts.find((account) => account.name === accountName)?.code ||
+    ""
+  );
+};
+useEffect(() => {
+  const savedMovements = localStorage.getItem("movements");
+const savedOpeningBalances = localStorage.getItem("openingBalances");
+const savedProjects = localStorage.getItem("projects");
+const savedContractors = localStorage.getItem("contractors");
+
+if (savedContractors) {
+  setContractors(JSON.parse(savedContractors));
+}
+if (savedMovements) {
+  setMovements(JSON.parse(savedMovements));
+}
+
+if (savedOpeningBalances) {
+  setOpeningBalances(JSON.parse(savedOpeningBalances));
+}
+if (savedProjects) {
+  setProjects(JSON.parse(savedProjects));
+}
+setLoaded(true);
+}, []);
+useEffect(() => {
+  if (loaded) {
+    localStorage.setItem("movements", JSON.stringify(movements));
+    localStorage.setItem("projects", JSON.stringify(projects));
+    localStorage.setItem("contractors", JSON.stringify(contractors));
+    localStorage.setItem(
+      "openingBalances",
+      JSON.stringify(openingBalances)
+    );
+  }
+}, [movements, projects, contractors, openingBalances, loaded]);
+  const getJournalEntry = (movement: any) => {
+  const paymentAccount =
+    movement.paymentMethod === "نقدي"
+      ? "النقدية"
+      : movement.paymentMethod === "عهدة موظف"
+      ? "سلف وعهد الموظفين"
+      : "البنك";
+
+  if (movement.movementType === "مصروف") {
+    return {
+      debitAccount: movement.item,
+      debitAccountCode: getAccountCode(movement.item),
+      creditAccount: paymentAccount,
+      creditAccountCode: getAccountCode(paymentAccount),
+      debit: movement.amount,
+      credit: movement.amount,
+    };
+  }
+
+  if (movement.movementType === "شراء أصل") {
+    return {
+  debitAccount: movement.item,
+  debitAccountCode: getAccountCode(movement.item),
+  creditAccount: paymentAccount,
+  creditAccountCode: getAccountCode(paymentAccount),
+  debit: movement.amount,
+  credit: movement.amount,
+};
+  }
+
+  if (movement.movementType === "سلفة") {
+    return {
+  debitAccount: "سلف الموظفين",
+  debitAccountCode: getAccountCode("سلف الموظفين"),
+  creditAccount: paymentAccount,
+  creditAccountCode: getAccountCode(paymentAccount),
+  debit: movement.amount,
+  credit: movement.amount,
+};
+  }
+
+  if (movement.movementType === "عهد موظفين") {
+    return {
+  debitAccount: "سلف الموظفين",
+  debitAccountCode: getAccountCode("سلف الموظفين"),
+  creditAccount: paymentAccount,
+  creditAccountCode: getAccountCode(paymentAccount),
+  debit: movement.amount,
+  credit: movement.amount,
+};
+  }
+
+  if (movement.movementType === "إيرادات") {
+    return {
+  debitAccount: paymentAccount,
+  debitAccountCode: getAccountCode(paymentAccount),
+  creditAccount: movement.item,
+  creditAccountCode: getAccountCode(movement.item),
+  debit: movement.amount,
+  credit: movement.amount,
+};
+  }
+
+  return {
+    debitAccount: "",
+    creditAccount: "",
+    debit: movement.amount,
+    credit: movement.amount,
+  };
+};
+const selectedProjectExpenses = selectedProject
+  ? movements
+      .filter(
+        (movement) => movement.project === selectedProject.name
+      )
+      .reduce((total, movement) => {
+        const entry = getJournalEntry(movement);
+        const debitCode = Number(
+          getAccountCode(entry.debitAccount)
+        );
+
+        if (debitCode >= 5000 && debitCode < 7000) {
+          return total + Number(entry.debit);
+        }
+
+        return total;
+      }, 0)
+  : 0;
+
+const selectedProjectBudgetUsage =
+  selectedProject && Number(selectedProject.budget || 0) > 0
+    ? (selectedProjectExpenses /
+        Number(selectedProject.budget)) *
+      100
+    : 0;
+const handleSave = () => {
+    const movement = { date, movementType, item, project, amount, paymentMethod, person, party, description };
+    console.log(movement);
+    setMovements((prev) => [...prev, movement]);
+    setDate("");
+setMovementType("");
+setItem("");
+setProject("");
+setAmount("");
+setPaymentMethod("");
+setPerson("");
+setParty("");
+setDescription("");
+  setMessage("تم حفظ الحركة بنجاح");
+};
+  return (
+    <main dir="rtl" className="min-h-screen bg-slate-100 text-slate-900">
+      <div className="flex min-h-screen">
+        <aside className="w-72 bg-slate-900 p-6 text-white">
+          <div className="mb-10">
+            <h1 className="text-2xl font-bold">Theyab Accounting</h1>
+            <p className="mt-2 text-sm text-slate-400">النظام المالي والمحاسبي</p>
+          </div>
+
+          <nav className="space-y-2">
+            {[
+              "الرئيسية",
+              "إدخال حركة",
+              "جدول الحركات",
+              "القيود اليومية",
+              "دفتر الأستاذ",
+              "ميزان المراجعة",
+              "القوائم المالية",
+              "المشاريع",
+              "المقاولون",
+              "دليل الحسابات",
+              "الأرصدة الافتتاحية",
+              "الإعدادات",
+            ].map((item) => (
+              <button
+                key={item}
+                onClick={() => setPage(item)}
+                className="w-full rounded-lg px-4 py-3 text-right hover:bg-slate-800"
+              >
+                {item}
+              </button>
+            ))}
+          </nav>
+        </aside>
+
+        <section className="flex-1 p-8">
+          <div className="mb-8 flex items-center justify-between">
+            <div>
+              <h2 className="text-3xl font-bold">
+  {page === "الرئيسية" ? "لوحة المعلومات الرئيسية" : page}
+</h2>
+              <p className="mt-2 text-slate-500">نظرة عامة على الوضع المالي</p>
+            </div>
+
+            <div className="rounded-xl bg-white px-5 py-3 shadow-sm">
+              الشركة التجريبية
+            </div>
+          </div>
+{page === "الرئيسية" ? (
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
+            <Card title="إجمالي الإيرادات" value="81,787.500 د.ك" />
+            <Card title="إجمالي المصروفات" value="3,181.930 د.ك" />
+            <Card title="صافي الربح / الخسارة" value="-14,940.176 د.ك" />
+            <Card title="النقدية والبنوك" value="23,671.765 د.ك" />
+          </div>
+          ) : null}
+{page === "إدخال حركة" ? (
+  <div className="mt-8 rounded-2xl bg-white p-6 shadow-sm">
+    <h3 className="mb-6 text-xl font-bold">إدخال حركة مالية جديدة</h3>
+
+    <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+      <div>
+        <label className="mb-2 block text-sm font-medium">التاريخ</label>
+        <input
+          type="date"
+          value={date}
+onChange={(e) => setDate(e.target.value)}
+          className="w-full rounded-lg border border-slate-300 px-4 py-3"
+        />
+      </div>
+
+      <div>
+        <label className="mb-2 block text-sm font-medium">نوع الحركة</label>
+        <select value={movementType} onChange={(e) => setMovementType(e.target.value)} className="w-full rounded-lg border border-slate-300 px-4 py-3">
+<option value="" disabled hidden>اختر نوع الحركة</option>
+ <option>مصروف</option>
+<option>إيرادات</option>
+<option>إيداع</option>
+<option>سلفة</option>
+<option>سداد سلفة</option>
+<option>تحويل</option>
+<option>قيد افتتاحي</option>
+<option>شراء أصل</option>
+<option>عهد موظفين</option>
+</select>
+      </div>
+
+      <div>
+        <label className="mb-2 block text-sm font-medium">البند</label>
+        <select value={item} onChange={(e) => setItem(e.target.value)} className="w-full rounded-lg border border-slate-300 px-4 py-3">
+<option value="" disabled hidden>اختر البند</option>
+<option>وقود</option>
+<option>نقليات</option>
+<option>مواد إنشائية</option>
+<option>إيجار معدات</option>
+<option>كهرباء وماء</option>
+<option>رسوم</option>
+<option>صيانة</option>
+<option>نقدي</option>
+<option>مصنعية</option>
+<option>رواتب</option>
+<option>مصروف إداري</option>
+<option>إشراف</option>
+<option>هاتف</option>
+<option>سلف الموظفين</option>
+<option>أدوات وعدد</option>
+<option>جاري المستثمرين</option>
+<option>جاري الشركاء</option>
+<option>أجور مقاولين</option>
+<option>حسابات العملاء</option>
+<option>رسوم بنكية</option>
+<option>أجهزة ومعدات</option>
+<option>بطاقة إئتمان-بنك الخليج</option>
+<option>بطاقة إئتمان-بيت التمويل</option>
+<option>القيد الإفتتاحي</option>
+<option>أثاث وتجهيزات مكتبية</option>
+<option>سلف وعهد الموظفين</option>
+<option>تجهيز موقع</option>
+<option>أعمال مساحية</option>
+        </select>
+      </div>
+
+      <div>
+        <label className="mb-2 block text-sm font-medium">المشروع</label>
+        <select value={project} onChange={(e) => setProject(e.target.value)} className="w-full rounded-lg border border-slate-300 px-4 py-3">
+<option value="" disabled hidden>اختر المشروع</option>          
+{projects.map((project) => (
+  <option key={project.id} value={project.name}>
+    {project.name}
+  </option>
+))}
+        </select>
+      </div>
+
+      <div>
+        <label className="mb-2 block text-sm font-medium">المبلغ</label>
+        <input
+          type="number"
+          step="0.001"
+          value={amount}
+onChange={(e) => setAmount(e.target.value)}
+          className="w-full rounded-lg border border-slate-300 px-4 py-3"
+        />
+      </div>
+
+      <div>
+        <label className="mb-2 block text-sm font-medium">طريقة الدفع</label>
+        <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} className="w-full rounded-lg border border-slate-300 px-4 py-3">
+<option value="" disabled hidden>اختر طريقة الدفع</option>          <option>نقدي</option>
+<option>نقدي</option>
+<option>كي نت</option>
+<option>شيك</option>
+<option>تحويل ومض</option>
+<option>رابط دفع</option>
+<option>تحويل بنكي</option>
+<option>عهدة موظف</option>
+        </select>
+      </div>
+    </div>
+<div>
+  <label className="mb-2 block text-sm font-medium">
+    الدافع / المستلم
+  </label>
+
+  <select
+    value={person} onChange={(e) => setPerson(e.target.value)}
+    className="w-full rounded-lg border border-slate-300 p-3"
+  >
+    <option value="" disabled hidden>اختر الدافع / المستلم</option>
+    <option>طارق الأسد</option>
+    <option>محمد ششتري</option>
+    <option>ذياب الخميس</option>
+    <option>مصطفى الأنصاري</option>
+    <option>م. عبدالعزيز</option>
+    <option>سامي الأسد</option>
+    <option>م. نوح</option>
+    <option>البنك</option>
+  </select>
+</div>
+    <div>
+  <label className="mb-2 block text-sm font-medium">
+    الطرف
+  </label>
+
+  <input
+    type="text"
+    value={party}
+    onChange={(e) => setParty(e.target.value)}
+    placeholder="اسم المورد / العميل / المقاول / المتعامل"
+    className="w-full rounded-lg border border-slate-300 p-3"
+  />
+</div><div className="mt-6">
+      <label className="mb-2 block text-sm font-medium">البيان</label>
+      <textarea
+        rows={3}
+        value={description}
+onChange={(e) => setDescription(e.target.value)}
+        className="w-full rounded-lg border border-slate-300 px-4 py-3"
+      />
+    </div>
+
+    <button onClick={handleSave} className="mt-6 rounded-lg bg-slate-900 px-6 py-3 font-medium text-white">
+      حفظ الحركة
+    </button>
+    {message && (
+  <p className="mt-3 text-sm font-medium text-green-700">
+    {message}
+  </p>
+)}
+<p className="mt-3 text-sm text-slate-600">
+  عدد الحركات المحفوظة: {movements.length}
+</p>
+  </div>
+) : null}
+{page === "جدول الحركات" ? (
+  <div className="mt-8 rounded-2xl bg-white p-6 shadow-sm">
+    <h3 className="mb-6 text-xl font-bold">جدول الحركات</h3>
+
+    <div className="overflow-x-auto">
+  <table className="w-full text-sm text-right">
+   <thead className="bg-slate-100">
+  <tr><th className="px-4 py-3">التاريخ</th><th className="px-4 py-3">نوع الحركة</th><th className="px-4 py-3">البند</th><th className="px-4 py-3">المشروع</th><th className="px-4 py-3">المبلغ</th><th className="px-4 py-3">طريقة الدفع</th><th className="px-4 py-3">الدافع / المستلم</th><th className="px-4 py-3">الطرف</th><th className="px-4 py-3">البيان</th><th className="px-4 py-3">الإجراء</th></tr>
+</thead>
+
+<tbody>
+  {movements.map((movement, index) => (
+    <tr key={index} className="border-b border-slate-200"><td className="px-4 py-3">{movement.date}</td><td className="px-4 py-3">{movement.movementType}</td><td className="px-4 py-3">{movement.item}</td><td className="px-4 py-3">{movement.project}</td><td className="px-4 py-3">{movement.amount}</td><td className="px-4 py-3">{movement.paymentMethod}</td><td className="px-4 py-3">{movement.person}</td><td className="px-4 py-3">{movement.description}</td><td className="px-4 py-3">{movement.party}</td><td className="px-4 py-3"><button onClick={() => {
+  const confirmed = window.confirm("هل أنت متأكد من حذف هذه الحركة؟");
+  if (confirmed) {
+    setMovements((prev) => prev.filter((_, i) => i !== index));
+  }
+}} className="rounded-lg bg-red-600 px-3 py-2 text-white">حذف</button></td></tr>
+  ))}
+</tbody>
+  </table>
+</div>
+
+    {movements.length === 0 && (
+      <p className="py-6 text-center text-slate-500">
+        لا توجد حركات محفوظة حتى الآن
+      </p>
+    )}
+  </div>
+) : null}
+{page === "القيود اليومية" ? (
+  <div className="mt-8 rounded-2xl bg-white p-6 shadow-sm">
+    <h3 className="mb-6 text-xl font-bold">القيود اليومية</h3>
+
+    {movements.length === 0 ? (
+      <p className="py-6 text-center text-slate-500">
+        لا توجد قيود يومية حتى الآن
+      </p>
+    ) : (
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm text-right">
+          <thead className="bg-slate-100">
+           <tr><th className="px-4 py-3">رقم القيد</th><th className="px-4 py-3">التاريخ</th><th className="px-4 py-3">البيان</th><th className="px-4 py-3">رقم الحساب</th><th className="px-4 py-3">الحساب</th><th className="px-4 py-3">مدين</th><th className="px-4 py-3">دائن</th><th className="px-4 py-3">حالة القيد</th></tr>
+          </thead>
+
+          <tbody>
+  {movements.map((movement, index) => {
+    const entry = getJournalEntry(movement);
+
+    return (
+      <Fragment key={index}>
+       <tr className="border-b border-slate-200"><td className="px-4 py-3">{index + 1}</td><td className="px-4 py-3">{movement.date}</td><td className="px-4 py-3">{movement.description}</td><td className="px-4 py-3">{entry.debitAccountCode}</td><td className="px-4 py-3">{entry.debitAccount}</td><td className="px-4 py-3">{entry.debit}</td><td className="px-4 py-3">-</td><td className="px-4 py-3" rowSpan={2}>{entry.debit === entry.credit ? "متوازن" : "غير متوازن"}</td></tr>
+        <tr className="border-b border-slate-200"><td className="px-4 py-3">{index + 1}</td><td className="px-4 py-3">{movement.date}</td><td className="px-4 py-3">{movement.description}</td><td className="px-4 py-3">{entry.creditAccountCode}</td><td className="px-4 py-3">{entry.creditAccount}</td><td className="px-4 py-3">-</td><td className="px-4 py-3">{entry.credit}</td></tr>
+      </Fragment>
+    );
+  })}
+</tbody>
+        </table>
+      </div>
+    )}
+  </div>
+) : null}
+{page === "دفتر الأستاذ" ? (
+  <div className="mt-8 rounded-2xl bg-white p-6 shadow-sm">
+    <h3 className="mb-6 text-xl font-bold">دفتر الأستاذ</h3>
+
+    <div className="mb-6">
+      <label className="mb-2 block text-sm font-medium">اختر الحساب</label>
+      <select
+        value={selectedLedgerAccount}
+        onChange={(e) => setSelectedLedgerAccount(e.target.value)}
+        className="w-full rounded-lg border border-slate-300 px-4 py-3"
+      >
+        <option value="">اختر الحساب</option>
+        {chartOfAccounts.map((account) => (
+          <option key={account.code} value={account.code}>
+            {account.code} - {account.name}
+          </option>
+        ))}
+      </select>
+    </div>
+    {selectedLedgerAccount && (
+  <div className="mt-6 overflow-x-auto">
+    <table className="w-full text-sm text-right">
+      <thead className="bg-slate-100">
+        <tr>
+          <th className="px-4 py-3">التاريخ</th>
+          <th className="px-4 py-3">رقم القيد</th>
+          <th className="px-4 py-3">البيان</th>
+          <th className="px-4 py-3">مدين</th>
+          <th className="px-4 py-3">دائن</th>
+          <th className="px-4 py-3">الرصيد</th>
+        </tr>
+      </thead>
+
+      <tbody>
+        {movements.map((movement, index) => {
+          const entry = getJournalEntry(movement);
+          const balance = movements.slice(0, index + 1).reduce((total, m) => {
+  const e = getJournalEntry(m);
+
+  if (getAccountCode(e.debitAccount) === selectedLedgerAccount) {
+    return total + Number(e.debit);
+  }
+
+  if (getAccountCode(e.creditAccount) === selectedLedgerAccount) {
+    return total - Number(e.credit);
+  }
+
+  return total;
+}, 0);
+
+          return (
+            <Fragment key={index}>
+              {getAccountCode(entry.debitAccount) === selectedLedgerAccount && (
+                <tr className="border-b border-slate-200">
+                  <td className="px-4 py-3">{movement.date}</td>
+                  <td className="px-4 py-3">{index + 1}</td>
+                  <td className="px-4 py-3">{movement.description}</td>
+                  <td className="px-4 py-3">{entry.debit}</td>
+                  <td className="px-4 py-3">-</td>
+                  <td className="px-4 py-3">
+  {balance === 0
+    ? "-"
+    : balance > 0
+    ? `${Math.abs(balance)} مدين`
+    : `${Math.abs(balance)} دائن`}
+</td>
+                </tr>
+              )}
+
+              {getAccountCode(entry.creditAccount) === selectedLedgerAccount && (
+                <tr className="border-b border-slate-200">
+                  <td className="px-4 py-3">{movement.date}</td>
+                  <td className="px-4 py-3">{index + 1}</td>
+                  <td className="px-4 py-3">{movement.description}</td>
+                  <td className="px-4 py-3">-</td>
+                  <td className="px-4 py-3">{entry.credit}</td>
+                  <td className="px-4 py-3">
+  {balance === 0
+    ? "-"
+    : balance > 0
+    ? `${Math.abs(balance)} مدين`
+    : `${Math.abs(balance)} دائن`}
+</td>
+                </tr>
+              )}
+            </Fragment>
+          );
+        })}
+      </tbody>
+    </table>
+    <div className="mt-4 text-sm font-medium">
+  إجمالي المدين:{" "}
+  {movements.reduce((total, movement) => {
+    const entry = getJournalEntry(movement);
+
+    if (getAccountCode(entry.debitAccount) === selectedLedgerAccount) {
+      return total + Number(entry.debit);
+    }
+
+    return total;
+  }, 0)}
+</div>
+<div className="mt-2 text-sm font-medium">
+  إجمالي الدائن:{" "}
+  {movements.reduce((total, movement) => {
+    const entry = getJournalEntry(movement);
+
+    if (getAccountCode(entry.creditAccount) === selectedLedgerAccount) {
+      return total + Number(entry.credit);
+    }
+
+    return total;
+  }, 0)}
+</div>
+<div className="mt-2 text-sm font-bold">
+  الرصيد النهائي:{" "}
+  {(() => {
+    const debitTotal = movements.reduce((total, movement) => {
+      const entry = getJournalEntry(movement);
+
+      if (getAccountCode(entry.debitAccount) === selectedLedgerAccount) {
+        return total + Number(entry.debit);
+      }
+
+      return total;
+    }, 0);
+
+    const creditTotal = movements.reduce((total, movement) => {
+      const entry = getJournalEntry(movement);
+
+      if (getAccountCode(entry.creditAccount) === selectedLedgerAccount) {
+        return total + Number(entry.credit);
+      }
+
+      return total;
+    }, 0);
+
+    const finalBalance = debitTotal - creditTotal;
+
+    return finalBalance === 0
+      ? "-"
+      : finalBalance > 0
+      ? `${finalBalance} مدين`
+      : `${Math.abs(finalBalance)} دائن`;
+  })()}
+</div>
+  </div>
+)}
+  </div>
+) : null}
+{page === "ميزان المراجعة" ? (
+  <div className="mt-8 rounded-2xl bg-white p-6 shadow-sm">
+    <h3 className="mb-6 text-xl font-bold">ميزان المراجعة</h3>
+    <div className="overflow-x-auto">
+  <table className="w-full text-sm text-right">
+    <thead className="bg-slate-100">
+      <tr>
+        <th className="px-4 py-3">رقم الحساب</th>
+        <th className="px-4 py-3">اسم الحساب</th>
+        <th className="px-4 py-3">الرصيد الافتتاحي مدين</th>
+<th className="px-4 py-3">الرصيد الافتتاحي دائن</th>
+        <th className="px-4 py-3">حركة الفترة مدين</th>
+        <th className="px-4 py-3">حركة الفترة دائن</th>
+        <th className="px-4 py-3">الرصيد الختامي مدين</th>
+        <th className="px-4 py-3">الرصيد الختامي دائن</th>
+      </tr>
+    </thead>
+
+    <tbody>
+      {chartOfAccounts.map((account) => (
+  <tr key={account.code} className="border-b border-slate-200">
+    <td className="px-4 py-3">{account.code}</td>
+    <td className="px-4 py-3">{account.name}</td>
+    <td className="px-4 py-3">
+  {openingBalancesAreBalanced
+  ? Number(openingBalances[account.code]?.debit || 0)
+  : 0}
+</td>
+
+<td className="px-4 py-3">
+  {openingBalancesAreBalanced
+    ? Number(openingBalances[account.code]?.credit || 0)
+    : 0}
+</td>
+    <td className="px-4 py-3">
+  {movements.reduce((total, movement) => {
+    const entry = getJournalEntry(movement);
+
+    if (getAccountCode(entry.debitAccount) === account.code) {
+      return total + Number(entry.debit);
+    }
+
+    return total;
+  }, 0)}
+</td>
+    <td className="px-4 py-3">
+  {movements.reduce((total, movement) => {
+    const entry = getJournalEntry(movement);
+
+    if (getAccountCode(entry.creditAccount) === account.code) {
+      return total + Number(entry.credit);
+    }
+
+    return total;
+  }, 0)}
+</td>
+    <td className="px-4 py-3">
+  {(() => {
+    const debitTotal = movements.reduce((total, movement) => {
+      const entry = getJournalEntry(movement);
+
+      if (getAccountCode(entry.debitAccount) === account.code) {
+        return total + Number(entry.debit);
+      }
+
+      return total;
+    }, 0);
+
+    const creditTotal = movements.reduce((total, movement) => {
+      const entry = getJournalEntry(movement);
+
+      if (getAccountCode(entry.creditAccount) === account.code) {
+        return total + Number(entry.credit);
+      }
+
+      return total;
+    }, 0);
+
+    const balance = debitTotal - creditTotal;
+
+    return balance > 0 ? balance : "-";
+  })()}
+</td>
+    <td className="px-4 py-3">
+  {(() => {
+    const debitTotal = movements.reduce((total, movement) => {
+      const entry = getJournalEntry(movement);
+
+      if (getAccountCode(entry.debitAccount) === account.code) {
+        return total + Number(entry.debit);
+      }
+
+      return total;
+    }, 0);
+
+    const creditTotal = movements.reduce((total, movement) => {
+      const entry = getJournalEntry(movement);
+
+      if (getAccountCode(entry.creditAccount) === account.code) {
+        return total + Number(entry.credit);
+      }
+
+      return total;
+    }, 0);
+
+    const balance =
+  Number(openingBalances[account.code]?.credit || 0) +
+  creditTotal -
+  Number(openingBalances[account.code]?.debit || 0) -
+  debitTotal;
+
+    return balance > 0 ? balance : "-";
+  })()}
+</td>
+  </tr>
+))}
+<tr className="bg-slate-100 font-bold">
+  <td className="px-4 py-3" colSpan={2}>الإجمالي</td>
+  <td className="px-4 py-3">
+  {openingBalancesAreBalanced
+  ? chartOfAccounts.reduce(
+      (total, account) =>
+        total + Number(openingBalances[account.code]?.debit || 0),
+      0
+    )
+  : 0}
+</td>
+<td className="px-4 py-3">
+  {openingBalancesAreBalanced
+  ? chartOfAccounts.reduce(
+      (total, account) =>
+        total + Number(openingBalances[account.code]?.credit || 0),
+      0
+    )
+  : 0}
+</td>
+  <td className="px-4 py-3">
+  {movements.reduce((total, movement) => {
+    const entry = getJournalEntry(movement);
+    return total + Number(entry.debit);
+  }, 0)}
+</td>
+  <td className="px-4 py-3">
+  {movements.reduce((total, movement) => {
+    const entry = getJournalEntry(movement);
+    return total + Number(entry.credit);
+  }, 0)}
+</td>
+  <td className="px-4 py-3">
+  {chartOfAccounts.reduce((grandTotal, account) => {
+    const debitTotal = movements.reduce((total, movement) => {
+      const entry = getJournalEntry(movement);
+
+      if (getAccountCode(entry.debitAccount) === account.code) {
+        return total + Number(entry.debit);
+      }
+
+      return total;
+    }, 0);
+
+    const creditTotal = movements.reduce((total, movement) => {
+      const entry = getJournalEntry(movement);
+
+      if (getAccountCode(entry.creditAccount) === account.code) {
+        return total + Number(entry.credit);
+      }
+
+      return total;
+    }, 0);
+
+    const balance =
+  (openingBalancesAreBalanced
+    ? Number(openingBalances[account.code]?.debit || 0) -
+      Number(openingBalances[account.code]?.credit || 0)
+    : 0) +
+  debitTotal -
+  creditTotal;
+
+    return grandTotal + (balance > 0 ? balance : 0);
+  }, 0)}
+</td>
+  <td className="px-4 py-3">
+  {chartOfAccounts.reduce((grandTotal, account) => {
+    const debitTotal = movements.reduce((total, movement) => {
+      const entry = getJournalEntry(movement);
+
+      if (getAccountCode(entry.debitAccount) === account.code) {
+        return total + Number(entry.debit);
+      }
+
+      return total;
+    }, 0);
+
+    const creditTotal = movements.reduce((total, movement) => {
+      const entry = getJournalEntry(movement);
+
+      if (getAccountCode(entry.creditAccount) === account.code) {
+        return total + Number(entry.credit);
+      }
+
+      return total;
+    }, 0);
+
+    const balance =
+  Number(openingBalances[account.code]?.credit || 0) +
+  creditTotal -
+  Number(openingBalances[account.code]?.debit || 0) -
+  debitTotal;
+
+    return grandTotal + (balance > 0 ? balance : 0);
+  }, 0)}
+</td>
+</tr>
+    </tbody>
+  </table>
+  <div className="mt-4 rounded-xl bg-slate-100 p-4 text-sm font-bold">
+  {(
+  movements.reduce((total, movement) => {
+    const entry = getJournalEntry(movement);
+
+    return total + Number(entry.debit) - Number(entry.credit);
+  }, 0) +
+  (openingBalancesAreBalanced
+  ? chartOfAccounts.reduce(
+      (total, account) =>
+        total +
+        Number(openingBalances[account.code]?.debit || 0) -
+        Number(openingBalances[account.code]?.credit || 0),
+      0
+    )
+  : 0)
+) === 0
+  ? "✓ الميزان متوازن"
+  : "⚠ الميزان غير متوازن"}
+</div>
+</div>
+  </div>
+) : null}
+{page === "القوائم المالية" ? (
+  <div className="mt-8 rounded-2xl bg-white p-6 shadow-sm">
+    <h3 className="mb-6 text-xl font-bold">القوائم المالية</h3>
+    <div className="mt-6">
+  <h4 className="mb-4 text-lg font-bold">قائمة الدخل</h4>
+  <div className="mb-3 rounded-lg bg-slate-100 px-4 py-3 font-bold">
+الإيرادات
+</div>
+
+  <div className="overflow-x-auto">
+    <table className="w-full text-sm text-right">
+      <thead className="bg-slate-100">
+        <tr>
+          <th className="px-4 py-3">رقم الحساب</th>
+          <th className="px-4 py-3">اسم الحساب</th>
+          <th className="px-4 py-3">الإيرادات</th>
+          <th className="px-4 py-3">المصروفات</th>
+        </tr>
+      </thead>
+
+      <tbody>
+        {chartOfAccounts
+  .filter(
+  (account) =>
+    account.type === "إيرادات" &&
+    account.code !== "4100"
+)
+  .map((account) => {
+    const creditTotal = movements.reduce((total, movement) => {
+      const entry = getJournalEntry(movement);
+
+      if (getAccountCode(entry.creditAccount) === account.code) {
+        return total + Number(entry.credit);
+      }
+
+      return total;
+    }, 0);
+
+    const debitTotal = movements.reduce((total, movement) => {
+      const entry = getJournalEntry(movement);
+
+      if (getAccountCode(entry.debitAccount) === account.code) {
+        return total + Number(entry.debit);
+      }
+
+      return total;
+    }, 0);
+
+    const revenue = creditTotal - debitTotal;
+
+    return (
+      <tr key={account.code} className="border-b border-slate-200">
+        <td className="px-4 py-3">{account.code}</td>
+        <td className="px-4 py-3">{account.name}</td>
+        <td className="px-4 py-3">{revenue > 0 ? revenue : 0}</td>
+        <td className="px-4 py-3">-</td>
+      </tr>
+    );
+  })}
+  <tr className="bg-slate-100 font-bold">
+  <td colSpan={4} className="px-4 py-3">
+    تكاليف المشاريع
+  </td>
+</tr>
+  {chartOfAccounts
+  .filter(
+  (account) =>
+    account.type === "مصروفات" &&
+    Number(account.code) >= 5110 &&
+    Number(account.code) <= 5199
+)
+  .map((account) => {
+    const debitTotal = movements.reduce((total, movement) => {
+      const entry = getJournalEntry(movement);
+
+      if (getAccountCode(entry.debitAccount) === account.code) {
+        return total + Number(entry.debit);
+      }
+
+      return total;
+    }, 0);
+
+    const creditTotal = movements.reduce((total, movement) => {
+      const entry = getJournalEntry(movement);
+
+      if (getAccountCode(entry.creditAccount) === account.code) {
+        return total + Number(entry.credit);
+      }
+
+      return total;
+    }, 0);
+
+    const expense = debitTotal - creditTotal;
+
+    return (
+      <tr key={account.code} className="border-b border-slate-200">
+        <td className="px-4 py-3">{account.code}</td>
+        <td className="px-4 py-3">{account.name}</td>
+        <td className="px-4 py-3">-</td>
+        <td className="px-4 py-3">{expense > 0 ? expense : 0}</td>
+      </tr>
+    );
+  })}
+      </tbody>
+      <tfoot className="bg-slate-100 font-bold">
+  {(() => {
+    const totalRevenue = movements.reduce((total, movement) => {
+      const entry = getJournalEntry(movement);
+
+      const creditCode = getAccountCode(entry.creditAccount);
+      const debitCode = getAccountCode(entry.debitAccount);
+
+      const creditAccount = chartOfAccounts.find(
+        (account) => account.code === creditCode
+      );
+
+      const debitAccount = chartOfAccounts.find(
+        (account) => account.code === debitCode
+      );
+
+      if (creditAccount?.type === "إيرادات") {
+        total += Number(entry.credit);
+      }
+
+      if (debitAccount?.type === "إيرادات") {
+        total -= Number(entry.debit);
+      }
+
+      return total;
+    }, 0);
+
+    const totalExpenses = movements.reduce((total, movement) => {
+      const entry = getJournalEntry(movement);
+
+      const debitCode = getAccountCode(entry.debitAccount);
+      const creditCode = getAccountCode(entry.creditAccount);
+
+      const debitAccount = chartOfAccounts.find(
+        (account) => account.code === debitCode
+      );
+
+      const creditAccount = chartOfAccounts.find(
+        (account) => account.code === creditCode
+      );
+
+      if (debitAccount?.type === "مصروفات") {
+        total += Number(entry.debit);
+      }
+
+      if (creditAccount?.type === "مصروفات") {
+        total -= Number(entry.credit);
+      }
+
+      return total;
+    }, 0);
+
+    const grossProfit = totalRevenue - totalExpenses;
+
+    return (
+      <>
+        <tr>
+          <td colSpan={2} className="px-4 py-3">
+            إجمالي الإيرادات 
+          </td>
+          <td className="px-4 py-3">{totalRevenue}</td>
+          <td className="px-4 py-3">-</td>
+        </tr>
+
+        <tr>
+          <td colSpan={2} className="px-4 py-3">
+            إجمالي تكاليف المشاريع
+          </td>
+          <td className="px-4 py-3">-</td>
+          <td className="px-4 py-3">{totalExpenses}</td>
+        </tr>
+
+        <tr>
+          <td colSpan={2} className="px-4 py-3">
+            {grossProfit >= 0 ? "مجمل الربح" : "مجمل الخسارة"}
+          </td>
+          <td colSpan={2} className="px-4 py-3">
+            {Math.abs(grossProfit)}
+          </td>
+        </tr>
+      </>
+    );
+  })()}
+</tfoot>
+    </table>
+    <div className="mt-6 rounded-lg bg-slate-100 px-4 py-3 font-bold">
+  المصروفات الإدارية والعمومية
+</div>
+<div className="mt-2 overflow-x-auto">
+  <table className="w-full text-sm text-right">
+    <tbody>
+      {chartOfAccounts
+        .filter(
+          (account) =>
+            account.type === "مصروفات" &&
+            account.code.startsWith("6")
+        )
+        .map((account) => {
+  const debitTotal = movements.reduce((total, movement) => {
+    const entry = getJournalEntry(movement);
+
+    if (getAccountCode(entry.debitAccount) === account.code) {
+      return total + Number(entry.debit);
+    }
+
+    return total;
+  }, 0);
+
+  const creditTotal = movements.reduce((total, movement) => {
+    const entry = getJournalEntry(movement);
+
+    if (getAccountCode(entry.creditAccount) === account.code) {
+      return total + Number(entry.credit);
+    }
+
+    return total;
+  }, 0);
+
+  const expense = debitTotal - creditTotal;
+
+  return (
+    <tr key={account.code} className="border-b border-slate-200">
+      <td className="px-4 py-3">{account.code}</td>
+      <td className="px-4 py-3">{account.name}</td>
+      <td className="px-4 py-3">{expense > 0 ? expense : 0}</td>
+    </tr>
+  );
+})}
+    </tbody>
+    <tfoot className="bg-slate-100 font-bold">
+  <tr>
+    <td colSpan={2} className="px-4 py-3">
+      إجمالي المصروفات الإدارية والعمومية
+    </td>
+
+    <td className="px-4 py-3">
+      {chartOfAccounts
+        .filter(
+  (account) =>
+    account.type === "مصروفات" &&
+    Number(account.code) >= 6110 &&
+    Number(account.code) <= 6310
+)
+        .reduce((grandTotal, account) => {
+          const debitTotal = movements.reduce((total, movement) => {
+            const entry = getJournalEntry(movement);
+
+            if (getAccountCode(entry.debitAccount) === account.code) {
+              return total + Number(entry.debit);
+            }
+
+            return total;
+          }, 0);
+
+          const creditTotal = movements.reduce((total, movement) => {
+            const entry = getJournalEntry(movement);
+
+            if (getAccountCode(entry.creditAccount) === account.code) {
+              return total + Number(entry.credit);
+            }
+
+            return total;
+          }, 0);
+
+          return grandTotal + debitTotal - creditTotal;
+        }, 0)}
+    </td>
+  </tr>
+  <tr className="bg-slate-200">
+  <td colSpan={2} className="px-4 py-3 font-bold">
+    صافي الربح / الخسارة
+  </td>
+
+  <td className="px-4 py-3 font-bold">
+    {movements.reduce((netResult, movement) => {
+  const entry = getJournalEntry(movement);
+
+  const debitCode = getAccountCode(entry.debitAccount) || "";
+  const creditCode = getAccountCode(entry.creditAccount) || "";
+  const debitNumber = Number(debitCode);
+const creditNumber = Number(creditCode);
+
+  if (creditCode === "4110" || creditCode === "4200") {
+  netResult += Number(entry.credit);
+}
+
+if (debitCode === "4110" || debitCode === "4200") {
+  netResult -= Number(entry.debit);
+}
+
+if (
+  (debitNumber >= 5110 && debitNumber <= 5199) ||
+  (debitNumber >= 6110 && debitNumber <= 6310)
+) {
+  netResult -= Number(entry.debit);
+}
+
+if (
+  (creditNumber >= 5110 && creditNumber <= 5199) ||
+  (creditNumber >= 6110 && creditNumber <= 6310)
+) {
+  netResult += Number(entry.credit);
+}
+
+  return netResult;
+}, 0)}
+  </td>
+</tr>
+</tfoot>
+  </table>
+</div>
+  </div>
+</div>
+<div className="mt-8">
+  <h4 className="mb-4 text-lg font-bold">قائمة المركز المالي</h4>
+  <div className="mb-3 rounded-lg bg-slate-100 px-4 py-3 font-bold">
+  الأصول
+</div>
+<div className="overflow-x-auto">
+  <table className="w-full text-sm text-right">
+    <thead className="bg-slate-100">
+      <tr>
+        <th className="px-4 py-3">رقم الحساب</th>
+        <th className="px-4 py-3">اسم الحساب</th>
+        <th className="px-4 py-3">الرصيد</th>
+      </tr>
+    </thead>
+
+    <tbody>{chartOfAccounts
+  .filter((account) => account.type === "أصول")
+  .map((account) => {
+    const debitTotal = movements.reduce((total, movement) => {
+      const entry = getJournalEntry(movement);
+
+      if (getAccountCode(entry.debitAccount) === account.code) {
+        return total + Number(entry.debit);
+      }
+
+      return total;
+    }, 0);
+
+    const creditTotal = movements.reduce((total, movement) => {
+      const entry = getJournalEntry(movement);
+
+      if (getAccountCode(entry.creditAccount) === account.code) {
+        return total + Number(entry.credit);
+      }
+
+      return total;
+    }, 0);
+
+    const balance =
+  (openingBalancesAreBalanced
+    ? Number(openingBalances[account.code]?.debit || 0) -
+      Number(openingBalances[account.code]?.credit || 0)
+    : 0) +
+  debitTotal -
+  creditTotal;
+
+    return (
+      <tr key={account.code} className="border-b border-slate-200">
+        <td className="px-4 py-3">{account.code}</td>
+        <td className="px-4 py-3">{account.name}</td>
+        <td className="px-4 py-3">{balance}</td>
+      </tr>
+    );
+  })}
+
+    </tbody>
+    <tfoot className="bg-slate-100 font-bold">
+  <tr>
+    <td colSpan={2} className="px-4 py-3">
+      إجمالي الأصول
+    </td>
+
+    <td className="px-4 py-3">
+      {chartOfAccounts
+        .filter((account) => account.type === "أصول")
+        .reduce((grandTotal, account) => {
+          const balance = movements.reduce((total, movement) => {
+            const entry = getJournalEntry(movement);
+
+            if (getAccountCode(entry.debitAccount) === account.code) {
+              total += Number(entry.debit);
+            }
+
+            if (getAccountCode(entry.creditAccount) === account.code) {
+              total -= Number(entry.credit);
+            }
+
+            return total;
+          }, openingBalancesAreBalanced
+  ? Number(openingBalances[account.code]?.debit || 0) -
+    Number(openingBalances[account.code]?.credit || 0)
+  : 0);
+          return grandTotal + balance;
+        }, 0)}
+    </td>
+  </tr>
+</tfoot>
+  </table>
+</div>
+<div className="mt-6">
+  <div className="mb-3 rounded-lg bg-slate-100 px-4 py-3 font-bold">
+    الخصوم
+  </div>
+  <div className="overflow-x-auto">
+  <table className="w-full text-sm text-right">
+    <thead className="bg-slate-100">
+      <tr>
+        <th className="px-4 py-3">رقم الحساب</th>
+        <th className="px-4 py-3">اسم الحساب</th>
+        <th className="px-4 py-3">الرصيد</th>
+      </tr>
+    </thead>
+
+    <tbody>
+      {chartOfAccounts
+  .filter((account) => account.type === "التزامات")
+  .map((account) => {
+    const debitTotal = movements.reduce((total, movement) => {
+      const entry = getJournalEntry(movement);
+
+      if (getAccountCode(entry.debitAccount) === account.code) {
+        return total + Number(entry.debit);
+      }
+
+      return total;
+    }, 0);
+
+    const creditTotal = movements.reduce((total, movement) => {
+      const entry = getJournalEntry(movement);
+
+      if (getAccountCode(entry.creditAccount) === account.code) {
+        return total + Number(entry.credit);
+      }
+
+      return total;
+    }, 0);
+
+    const balance = creditTotal - debitTotal;
+
+    return (
+      <tr key={account.code} className="border-b border-slate-200">
+        <td className="px-4 py-3">{account.code}</td>
+        <td className="px-4 py-3">{account.name}</td>
+        <td className="px-4 py-3">{balance}</td>
+      </tr>
+    );
+  })}
+  <tr className="bg-slate-200 font-bold">
+  <td colSpan={2} className="px-4 py-3">
+    إجمالي الخصوم
+  </td>
+
+  <td className="px-4 py-3">
+    {chartOfAccounts
+      .filter((account) => account.code.startsWith("2"))
+      .reduce((grandTotal, account) => {
+        const debitTotal = movements.reduce((total, movement) => {
+          const entry = getJournalEntry(movement);
+
+          if (getAccountCode(entry.debitAccount) === account.code) {
+            return total + Number(entry.debit);
+          }
+
+          return total;
+        }, 0);
+
+        const creditTotal = movements.reduce((total, movement) => {
+          const entry = getJournalEntry(movement);
+
+          if (getAccountCode(entry.creditAccount) === account.code) {
+            return total + Number(entry.credit);
+          }
+
+          return total;
+        }, 0);
+
+        const balance =
+  (openingBalancesAreBalanced
+    ? Number(openingBalances[account.code]?.credit || 0) -
+      Number(openingBalances[account.code]?.debit || 0)
+    : 0) +
+  creditTotal -
+  debitTotal;
+
+        return grandTotal + balance;
+      }, 0)}
+  </td>
+</tr>
+    </tbody>
+  </table>
+</div>
+
+  <div className="mt-8">
+  <div className="mb-3 rounded-lg bg-slate-100 px-4 py-3 font-bold">
+    حقوق الملكية
+  </div>
+
+  <div className="overflow-x-auto">
+    <table className="w-full text-sm text-right">
+      <thead className="bg-slate-100">
+        <tr>
+          <th className="px-4 py-3">رقم الحساب</th>
+          <th className="px-4 py-3">اسم الحساب</th>
+          <th className="px-4 py-3">الرصيد</th>
+        </tr>
+      </thead>
+
+      <tbody>
+        {chartOfAccounts
+  .filter((account) => account.code.startsWith("3"))
+  .map((account) => {
+    const debitTotal = movements.reduce((total, movement) => {
+      const entry = getJournalEntry(movement);
+
+      if (getAccountCode(entry.debitAccount) === account.code) {
+        return total + Number(entry.debit);
+      }
+
+      return total;
+    }, 0);
+
+    const creditTotal = movements.reduce((total, movement) => {
+      const entry = getJournalEntry(movement);
+
+      if (getAccountCode(entry.creditAccount) === account.code) {
+        return total + Number(entry.credit);
+      }
+
+      return total;
+    }, 0);
+
+    const balance = creditTotal - debitTotal;
+
+    return (
+      <tr key={account.code} className="border-b border-slate-200">
+        <td className="px-4 py-3">{account.code}</td>
+        <td className="px-4 py-3">{account.name}</td>
+        <td className="px-4 py-3">{balance}</td>
+      </tr>
+    );
+  })}
+  <tr className="border-b border-slate-200 font-bold">
+  <td className="px-4 py-3">—</td>
+  <td className="px-4 py-3">صافي ربح / خسارة الفترة</td>
+
+  <td className="px-4 py-3">
+    {movements.reduce((netResult, movement) => {
+      const entry = getJournalEntry(movement);
+
+      const debitCode = getAccountCode(entry.debitAccount) || "";
+      const creditCode = getAccountCode(entry.creditAccount) || "";
+
+      if (creditCode.startsWith("4")) {
+        netResult += Number(entry.credit);
+      }
+
+      if (debitCode.startsWith("4")) {
+        netResult -= Number(entry.debit);
+      }
+
+      if (debitCode.startsWith("5") || debitCode.startsWith("6")) {
+        netResult -= Number(entry.debit);
+      }
+
+      if (creditCode.startsWith("5") || creditCode.startsWith("6")) {
+        netResult += Number(entry.credit);
+      }
+
+      return netResult;
+    }, 0)}
+  </td>
+</tr>
+      </tbody>
+      <tfoot className="bg-slate-100 font-bold">
+  <tr>
+    <td colSpan={2} className="px-4 py-3">
+      إجمالي حقوق الملكية
+    </td>
+
+    <td className="px-4 py-3">
+      {chartOfAccounts
+        .filter((account) => account.code.startsWith("3"))
+        .reduce((grandTotal, account) => {
+          const debitTotal = movements.reduce((total, movement) => {
+            const entry = getJournalEntry(movement);
+
+            if (getAccountCode(entry.debitAccount) === account.code) {
+              return total + Number(entry.debit);
+            }
+
+            return total;
+          }, 0);
+
+          const creditTotal = movements.reduce((total, movement) => {
+            const entry = getJournalEntry(movement);
+
+            if (getAccountCode(entry.creditAccount) === account.code) {
+              return total + Number(entry.credit);
+            }
+
+            return total;
+          }, 0);
+
+          return grandTotal + creditTotal - debitTotal;
+       }, 0) +
+  movements.reduce((netResult, movement) => {
+    const entry = getJournalEntry(movement);
+
+    const debitCode = getAccountCode(entry.debitAccount) || "";
+    const creditCode = getAccountCode(entry.creditAccount) || "";
+
+    if (creditCode === "4110" || creditCode === "4200") {
+      netResult += Number(entry.credit);
+    }
+
+    if (debitCode === "4110" || debitCode === "4200") {
+      netResult -= Number(entry.debit);
+    }
+
+    const debitNumber = Number(debitCode);
+    const creditNumber = Number(creditCode);
+
+    if (
+      (debitNumber >= 5110 && debitNumber <= 5199) ||
+      (debitNumber >= 6110 && debitNumber <= 6310)
+    ) {
+      netResult -= Number(entry.debit);
+    }
+
+    if (
+      (creditNumber >= 5110 && creditNumber <= 5199) ||
+      (creditNumber >= 6110 && creditNumber <= 6310)
+    ) {
+      netResult += Number(entry.credit);
+    }
+
+    return netResult;
+  }, 0)}
+    </td>
+  </tr>
+</tfoot>
+    </table>
+    <div className="mt-4 flex justify-between rounded-lg bg-slate-200 px-4 py-3 font-bold">
+  <span>إجمالي الخصوم وحقوق الملكية</span>
+  <span>
+  {chartOfAccounts
+    .filter(
+      (account) =>
+        account.code.startsWith("2") ||
+        account.code.startsWith("3")
+    )
+    .reduce((grandTotal, account) => {
+      const debitTotal = movements.reduce((total, movement) => {
+        const entry = getJournalEntry(movement);
+
+        if (getAccountCode(entry.debitAccount) === account.code) {
+          return total + Number(entry.debit);
+        }
+
+        return total;
+      }, 0);
+
+      const creditTotal = movements.reduce((total, movement) => {
+        const entry = getJournalEntry(movement);
+
+        if (getAccountCode(entry.creditAccount) === account.code) {
+          return total + Number(entry.credit);
+        }
+
+        return total;
+      }, 0);
+
+      return grandTotal + creditTotal - debitTotal;
+    }, 0) +
+
+    movements.reduce((netResult, movement) => {
+      const entry = getJournalEntry(movement);
+
+      const debitCode = getAccountCode(entry.debitAccount) || "";
+      const creditCode = getAccountCode(entry.creditAccount) || "";
+
+      const debitNumber = Number(debitCode);
+      const creditNumber = Number(creditCode);
+
+      if (creditCode === "4110" || creditCode === "4200") {
+        netResult += Number(entry.credit);
+      }
+
+      if (debitCode === "4110" || debitCode === "4200") {
+        netResult -= Number(entry.debit);
+      }
+
+      if (
+        (debitNumber >= 5110 && debitNumber <= 5199) ||
+        (debitNumber >= 6110 && debitNumber <= 6310)
+      ) {
+        netResult -= Number(entry.debit);
+      }
+
+      if (
+        (creditNumber >= 5110 && creditNumber <= 5199) ||
+        (creditNumber >= 6110 && creditNumber <= 6310)
+      ) {
+        netResult += Number(entry.credit);
+      }
+
+      return netResult;
+    }, 0)}
+</span>
+</div>
+<div className="mt-4 rounded-xl bg-green-50 p-4 text-sm font-bold text-green-700">
+  ✓ الميزانية متوازنة
+</div>
+<div className="mt-8">
+  <h4 className="mb-4 text-lg font-bold">قائمة التدفقات النقدية</h4>
+  <div className="mb-3 rounded-lg bg-slate-100 px-4 py-3 font-bold">
+  التدفقات النقدية من الأنشطة التشغيلية
+</div>
+<div className="flex justify-between border-b border-slate-200 px-4 py-3">
+  <span>صافي ربح / خسارة الفترة</span>
+  <span className="font-bold">
+  {movements.reduce((netResult, movement) => {
+    const entry = getJournalEntry(movement);
+    const debitCode = Number(getAccountCode(entry.debitAccount));
+    const creditCode = Number(getAccountCode(entry.creditAccount));
+
+    if (creditCode >= 4000 && creditCode < 5000) {
+      netResult += Number(entry.credit);
+    }
+
+    if (debitCode >= 5000 && debitCode < 6000) {
+      netResult -= Number(entry.debit);
+    }
+
+    return netResult;
+  }, 0)}
+</span>
+</div>
+<div className="flex justify-between border-b border-slate-200 px-4 py-3">
+  <span>التغير في العملاء والذمم المالية</span>
+  <span className="font-bold">
+    {chartOfAccounts
+      .filter((account) => account.code === "1120")
+      .reduce((grandTotal, account) => {
+        const debitTotal = movements.reduce((total, movement) => {
+          const entry = getJournalEntry(movement);
+
+          if (getAccountCode(entry.debitAccount) === account.code) {
+            return total + Number(entry.debit);
+          }
+
+          return total;
+        }, 0);
+
+        const creditTotal = movements.reduce((total, movement) => {
+          const entry = getJournalEntry(movement);
+
+          if (getAccountCode(entry.creditAccount) === account.code) {
+            return total + Number(entry.credit);
+          }
+
+          return total;
+        }, 0);
+
+        return grandTotal + (creditTotal - debitTotal);
+      }, 0)}
+  </span>
+</div>
+<div className="flex justify-between border-b border-slate-200 py-3">
+  <span>التغير في الموردين والذمم الدائنة</span>
+
+  <span className="font-bold">
+    {movements.reduce((netResult, movement) => {
+      const entry = getJournalEntry(movement);
+
+      const debitCode = Number(getAccountCode(entry.debitAccount));
+      const creditCode = Number(getAccountCode(entry.creditAccount));
+
+      if (creditCode === 2110) {
+        netResult += Number(entry.credit);
+      }
+
+      if (debitCode === 2110) {
+        netResult -= Number(entry.debit);
+      }
+
+      return netResult;
+    }, 0)}
+  </span>
+</div>
+<div className="flex justify-between border-b border-slate-200 py-3">
+  <span>التغير في دفعات مقدمة للموردين والمقاولين</span>
+
+  <span className="font-bold">
+    {movements.reduce((netResult, movement) => {
+      const entry = getJournalEntry(movement);
+
+      const debitCode = Number(getAccountCode(entry.debitAccount));
+      const creditCode = Number(getAccountCode(entry.creditAccount));
+
+      if (debitCode === 1130) {
+        netResult -= Number(entry.debit);
+      }
+
+      if (creditCode === 1130) {
+        netResult += Number(entry.credit);
+      }
+
+      return netResult;
+    }, 0)}
+  </span>
+</div>
+<div className="flex justify-between border-b border-slate-200 py-3">
+  <span>التغير في سلف وعهد الموظفين</span>
+
+  <span className="font-bold">
+    {movements.reduce((netResult, movement) => {
+      const entry = getJournalEntry(movement);
+
+      const debitCode = Number(getAccountCode(entry.debitAccount));
+      const creditCode = Number(getAccountCode(entry.creditAccount));
+
+      if (debitCode === 1140) {
+        netResult -= Number(entry.debit);
+      }
+
+      if (creditCode === 1140) {
+        netResult += Number(entry.credit);
+      }
+
+      return netResult;
+    }, 0)}
+  </span>
+</div>
+<div className="mt-3 flex justify-between rounded-lg bg-slate-200 px-4 py-3 font-bold">
+  <span>صافي التدفقات النقدية من الأنشطة التشغيلية</span>
+
+  <span>
+    {movements.reduce((netResult, movement) => {
+      const entry = getJournalEntry(movement);
+
+      const debitCode = Number(getAccountCode(entry.debitAccount));
+      const creditCode = Number(getAccountCode(entry.creditAccount));
+
+      if (creditCode >= 4000 && creditCode < 5000) {
+        netResult += Number(entry.credit);
+      }
+
+      if (debitCode >= 5000 && debitCode < 6000) {
+        netResult -= Number(entry.debit);
+      }
+
+      if (debitCode === 1120 || debitCode === 1130 || debitCode === 1140) {
+        netResult -= Number(entry.debit);
+      }
+
+      if (creditCode === 1120 || creditCode === 1130 || creditCode === 1140) {
+        netResult += Number(entry.credit);
+      }
+
+      if (creditCode === 2110) {
+        netResult += Number(entry.credit);
+      }
+
+      if (debitCode === 2110) {
+        netResult -= Number(entry.debit);
+      }
+
+      return netResult;
+    }, 0)}
+  </span>
+</div>
+<div className="mt-6 mb-3 rounded-lg bg-slate-100 px-4 py-3 font-bold">
+  التدفقات النقدية من الأنشطة الاستثمارية
+</div>
+<div className="flex justify-between border-b border-slate-200 py-3">
+  <span>شراء الأصول والمعدات</span>
+
+  <span className="font-bold">
+    {movements.reduce((netResult, movement) => {
+      const entry = getJournalEntry(movement);
+
+      const debitCode = Number(getAccountCode(entry.debitAccount));
+      const creditCode = Number(getAccountCode(entry.creditAccount));
+
+      if (debitCode === 1213 || debitCode === 1520) {
+        netResult -= Number(entry.debit);
+      }
+
+      if (creditCode === 1213 || creditCode === 1520) {
+        netResult += Number(entry.credit);
+      }
+
+      return netResult;
+    }, 0)}
+  </span>
+</div>
+<div className="mt-3 flex justify-between rounded-lg bg-slate-200 px-4 py-3 font-bold">
+  <span>صافي التدفقات النقدية من الأنشطة الاستثمارية</span>
+
+  <span>
+    {movements.reduce((netResult, movement) => {
+      const entry = getJournalEntry(movement);
+
+      const debitCode = Number(getAccountCode(entry.debitAccount));
+      const creditCode = Number(getAccountCode(entry.creditAccount));
+
+      if (debitCode === 1213 || debitCode === 1520) {
+        netResult -= Number(entry.debit);
+      }
+
+      if (creditCode === 1213 || creditCode === 1520) {
+        netResult += Number(entry.credit);
+      }
+
+      return netResult;
+    }, 0)}
+  </span>
+</div>
+<div className="mt-6 mb-3 rounded-lg bg-slate-100 px-4 py-3 font-bold">
+  التدفقات النقدية من الأنشطة التمويلية
+</div>
+<div className="flex justify-between border-b border-slate-200 px-4 py-3">
+  <span>التغير في رأس المال</span>
+
+  <span className="font-bold">
+    {movements.reduce((netResult, movement) => {
+      const entry = getJournalEntry(movement);
+
+      const debitCode = Number(getAccountCode(entry.debitAccount));
+      const creditCode = Number(getAccountCode(entry.creditAccount));
+
+      if (creditCode === 3100) {
+        netResult += Number(entry.credit);
+      }
+
+      if (debitCode === 3100) {
+        netResult -= Number(entry.debit);
+      }
+
+      return netResult;
+    }, 0)}
+  </span>
+</div>
+<div className="flex justify-between border-b border-slate-200 px-4 py-3">
+  <span>التغير في جاري المستثمرين</span>
+
+  <span className="font-bold">
+    {movements.reduce((netResult, movement) => {
+      const entry = getJournalEntry(movement);
+
+      const debitCode = Number(getAccountCode(entry.debitAccount));
+      const creditCode = Number(getAccountCode(entry.creditAccount));
+
+      if (creditCode === 2160) {
+        netResult += Number(entry.credit);
+      }
+
+      if (debitCode === 2160) {
+        netResult -= Number(entry.debit);
+      }
+
+      return netResult;
+    }, 0)}
+  </span>
+</div>
+<div className="mt-3 flex justify-between rounded-lg bg-slate-200 px-4 py-3 font-bold">
+  <span>صافي التدفقات النقدية من الأنشطة التمويلية</span>
+
+  <span>
+    {movements.reduce((netResult, movement) => {
+      const entry = getJournalEntry(movement);
+
+      const debitCode = Number(getAccountCode(entry.debitAccount));
+      const creditCode = Number(getAccountCode(entry.creditAccount));
+
+      if (creditCode === 3100 || creditCode === 2160) {
+        netResult += Number(entry.credit);
+      }
+
+      if (debitCode === 3100 || debitCode === 2160) {
+        netResult -= Number(entry.debit);
+      }
+
+      return netResult;
+    }, 0)}
+  </span>
+</div>
+<div className="mt-6 flex justify-between rounded-lg bg-blue-200 px-4 py-4 font-bold">
+  <span>صافي الزيادة (النقص) في النقدية وما في حكمها</span>
+
+  <span>
+    {movements.reduce((netResult, movement) => {
+      const entry = getJournalEntry(movement);
+
+      const debitCode = Number(getAccountCode(entry.debitAccount));
+      const creditCode = Number(getAccountCode(entry.creditAccount));
+
+      // الأنشطة التشغيلية
+      if (creditCode >= 4000 && creditCode < 5000) {
+        netResult += Number(entry.credit);
+      }
+
+      if (debitCode >= 5000 && debitCode < 6000) {
+        netResult -= Number(entry.debit);
+      }
+
+      // الأنشطة الاستثمارية
+      if (debitCode === 1213 || debitCode === 1520) {
+        netResult -= Number(entry.debit);
+      }
+
+      if (creditCode === 1213 || creditCode === 1520) {
+        netResult += Number(entry.credit);
+      }
+
+      // الأنشطة التمويلية
+      if (creditCode === 3100 || creditCode === 2160) {
+        netResult += Number(entry.credit);
+      }
+
+      if (debitCode === 3100 || debitCode === 2160) {
+        netResult -= Number(entry.debit);
+      }
+
+      return netResult;
+    }, 0)}
+  </span>
+</div>
+<div className="mt-3 flex justify-between rounded-lg bg-slate-100 px-4 py-3">
+  <span>النقدية وما في حكمها في بداية الفترة</span>
+
+  <span>
+    {openingBalancesAreBalanced
+  ? Number(openingBalances["1110"]?.debit || 0) -
+    Number(openingBalances["1110"]?.credit || 0) +
+    Number(openingBalances["1111"]?.debit || 0) -
+    Number(openingBalances["1111"]?.credit || 0)
+  : 0}
+  </span>
+</div>
+<div className="mt-3 flex justify-between rounded-lg bg-slate-200 px-4 py-3 font-bold">
+  <span>النقدية وما في حكمها في نهاية الفترة</span>
+
+  <span>
+    {(openingBalancesAreBalanced
+      ? Number(openingBalances["1110"]?.debit || 0) -
+        Number(openingBalances["1110"]?.credit || 0) +
+        Number(openingBalances["1111"]?.debit || 0) -
+        Number(openingBalances["1111"]?.credit || 0)
+      : 0) +
+      movements.reduce((total, movement) => {
+        const entry = getJournalEntry(movement);
+
+        const debitCode = Number(getAccountCode(entry.debitAccount));
+        const creditCode = Number(getAccountCode(entry.creditAccount));
+
+        if (debitCode === 1110 || debitCode === 1111) {
+          total += Number(entry.debit);
+        }
+
+        if (creditCode === 1110 || creditCode === 1111) {
+          total -= Number(entry.credit);
+        }
+
+        return total;
+      }, 0)}
+  </span>
+</div>
+{(() => {
+  const openingCash = openingBalancesAreBalanced
+    ? Number(openingBalances["1110"]?.debit || 0) -
+      Number(openingBalances["1110"]?.credit || 0) +
+      Number(openingBalances["1111"]?.debit || 0) -
+      Number(openingBalances["1111"]?.credit || 0)
+    : 0;
+
+  const cashFromAccounts =
+    openingCash +
+    movements.reduce((total, movement) => {
+      const entry = getJournalEntry(movement);
+
+      const debitCode = Number(getAccountCode(entry.debitAccount));
+      const creditCode = Number(getAccountCode(entry.creditAccount));
+
+      if (debitCode === 1110 || debitCode === 1111) {
+        total += Number(entry.debit);
+      }
+
+      if (creditCode === 1110 || creditCode === 1111) {
+        total -= Number(entry.credit);
+      }
+
+      return total;
+    }, 0);
+
+  const cashFromCashFlow =
+    openingCash +
+    movements.reduce((netResult, movement) => {
+      const entry = getJournalEntry(movement);
+
+      const debitCode = Number(getAccountCode(entry.debitAccount));
+      const creditCode = Number(getAccountCode(entry.creditAccount));
+
+      if (creditCode >= 4000 && creditCode < 5000) {
+        netResult += Number(entry.credit);
+      }
+
+      if (debitCode >= 5000 && debitCode < 6000) {
+        netResult -= Number(entry.debit);
+      }
+
+      if (debitCode === 1213 || debitCode === 1520) {
+        netResult -= Number(entry.debit);
+      }
+
+      if (creditCode === 1213 || creditCode === 1520) {
+        netResult += Number(entry.credit);
+      }
+
+      if (creditCode === 3100 || creditCode === 2160) {
+        netResult += Number(entry.credit);
+      }
+
+      if (debitCode === 3100 || debitCode === 2160) {
+        netResult -= Number(entry.debit);
+      }
+
+      return netResult;
+    }, 0);
+
+  const isMatched = Math.abs(cashFromAccounts - cashFromCashFlow) < 0.001;
+
+  return (
+    <div className="mt-3 rounded-lg bg-slate-100 px-4 py-3 text-center font-bold">
+      {isMatched
+        ? "✓ رصيد النقدية في نهاية الفترة متطابق مع رصيد البنك والصندوق"
+        : "⚠ رصيد النقدية في نهاية الفترة غير متطابق مع رصيد البنك والصندوق"}
+    </div>
+  );
+})()}
+</div>
+  </div>
+</div>
+</div>
+</div>
+  </div>
+) : null}
+{page === "الأرصدة الافتتاحية" ? (
+  <div className="mt-8 rounded-2xl bg-white p-6 shadow-sm">
+    <h3 className="mb-6 text-xl font-bold">الأرصدة الافتتاحية</h3>
+    <div className="overflow-x-auto">
+  <table className="w-full text-right">
+    <thead className="bg-slate-100">
+      <tr>
+        <th className="px-4 py-3">رقم الحساب</th>
+        <th className="px-4 py-3">اسم الحساب</th>
+        <th className="px-4 py-3">مدين</th>
+        <th className="px-4 py-3">دائن</th>
+      </tr>
+    </thead>
+    <tbody>
+  {chartOfAccounts.map((account) => (
+    <tr key={account.code} className="border-b border-slate-200">
+      <td className="px-4 py-3">{account.code}</td>
+      <td className="px-4 py-3">{account.name}</td>
+      <td className="px-4 py-3">
+  <input
+    type="number"
+    min="0"
+    className="w-full rounded-lg border border-slate-300 px-3 py-2"
+    placeholder="0"
+    value={openingBalances[account.code]?.debit || ""}
+onChange={(e) => updateOpeningBalance(account.code, "debit", e.target.value)}
+  />
+</td>
+      <td className="px-4 py-3">
+  <input
+    type="number"
+    min="0"
+    className="w-full rounded-lg border border-slate-300 px-3 py-2"
+    placeholder="0"
+    value={openingBalances[account.code]?.credit || ""}
+onChange={(e) => updateOpeningBalance(account.code, "credit", e.target.value)}
+  />
+</td>
+    </tr>
+  ))}
+</tbody>
+<tfoot>
+  <tr className="bg-slate-100 font-bold">
+    <td className="px-4 py-3" colSpan={2}>الإجمالي</td>
+
+    <td className="px-4 py-3">
+      {chartOfAccounts.reduce(
+        (total, account) =>
+          total + Number(openingBalances[account.code]?.debit || 0),
+        0
+      )}
+    </td>
+
+    <td className="px-4 py-3">
+      {chartOfAccounts.reduce(
+        (total, account) =>
+          total + Number(openingBalances[account.code]?.credit || 0),
+        0
+      )}
+    </td>
+  </tr>
+</tfoot>
+  </table>
+  <div className="mt-4 rounded-xl bg-slate-100 p-4 text-sm font-bold">
+  {chartOfAccounts.reduce(
+    (total, account) =>
+      total +
+      Number(openingBalances[account.code]?.debit || 0) -
+      Number(openingBalances[account.code]?.credit || 0),
+    0
+  ) === 0
+    ? "✓ الأرصدة الافتتاحية متوازنة"
+    : "⚠ الأرصدة الافتتاحية غير متوازنة — لن يتم اعتمادها في الحسابات والقوائم المالية حتى يتساوى المدين مع الدائن"}
+</div>
+</div>
+  </div>
+) : null}
+{page === "المشاريع" ? (
+  <div className="mt-8 rounded-2xl bg-white p-6 shadow-sm">
+    <h3 className="mb-6 text-xl font-bold">المشاريع</h3>
+
+    <div className="flex gap-3">
+  <input
+    type="text"
+    value={newProjectName}
+    onChange={(e) => setNewProjectName(e.target.value)}
+    placeholder="اسم المشروع"
+    className="flex-1 rounded-lg border border-slate-300 px-4 py-3"
+  />
+<input
+  type="number"
+  value={newProjectBudget}
+  onChange={(e) => setNewProjectBudget(e.target.value)}
+  placeholder="ميزانية المشروع"
+  className="flex-1 rounded-lg border border-slate-300 px-4 py-3"
+/>
+  <button
+    onClick={addProject}
+    className="rounded-lg bg-blue-600 px-6 py-3 font-bold text-white"
+  >
+    إضافة مشروع جديد
+  </button>
+</div>
+<div className="mt-6 space-y-3">
+  {projects.map((project) => (
+    <div
+      key={project.id}
+      className="flex items-center justify-between rounded-lg border border-slate-200 px-4 py-3"
+    >
+      <button
+  onClick={() => setSelectedProject(project)}
+  className="font-bold hover:underline"
+>
+  {project.name}
+</button>
+      <span className="text-sm text-slate-500">{project.status}</span>
+      <span className="text-sm font-bold text-slate-700">
+  الميزانية: {Number(project.budget || 0).toLocaleString()} د.ك
+</span>
+    </div>
+  ))}
+</div>
+{selectedProject ? (
+  <div className="mt-6 rounded-xl bg-slate-100 p-4">
+    <div className="mb-3 flex items-center justify-between">
+      <h4 className="text-lg font-bold">{selectedProject.name}</h4>
+
+      <button
+        onClick={() => setSelectedProject(null)}
+        className="text-sm text-slate-500 hover:underline"
+      >
+        إغلاق
+      </button>
+    </div>
+
+    <div className="text-sm text-slate-600">
+      حالة المشروع: {selectedProject.status}
+      <div className="mt-3 text-sm font-bold">
+  ميزانية المشروع: {Number(selectedProject.budget || 0).toLocaleString()} د.ك
+</div>
+<div className="mt-3 text-sm font-bold">
+  المتبقي من الميزانية:{" "}
+  {(
+    Number(selectedProject.budget || 0) -
+    movements
+      .filter(
+        (movement) => movement.project === selectedProject.name
+      )
+      .reduce((total, movement) => {
+        const entry = getJournalEntry(movement);
+        const debitCode = Number(
+          getAccountCode(entry.debitAccount)
+        );
+
+        if (debitCode >= 5000 && debitCode < 7000) {
+          return total + Number(entry.debit);
+        }
+
+        return total;
+      }, 0)
+  ).toLocaleString()}{" "}
+  د.ك
+</div>
+
+        <div className="mt-3 text-sm font-bold">
+  نسبة استهلاك الميزانية:{" "}
+  {selectedProjectBudgetUsage.toFixed(1)}%
+</div>
+
+ {selectedProjectBudgetUsage >= 100 ? (
+  <div className="mt-2 font-bold text-red-600">
+    ⚠ تم تجاوز ميزانية المشروع
+  </div>
+) : selectedProjectBudgetUsage >= 80 ? (
+  <div className="mt-2 font-bold text-orange-600">
+    ⚠ تنبيه: اقترب المشروع من استهلاك كامل الميزانية
+  </div>
+) : null}        
+      <div className="mt-3 text-sm font-bold">
+  إجمالي مصروفات المشروع:{" "}
+  {movements
+    .filter((movement) => movement.project === selectedProject.name)
+    .reduce((total, movement) => {
+      const entry = getJournalEntry(movement);
+      const debitCode = Number(getAccountCode(entry.debitAccount));
+
+      if (debitCode >= 5000 && debitCode < 7000) {
+        return total + Number(entry.debit);
+      }
+
+      return total;
+    }, 0)}
+</div>
+<div className="mt-2 text-sm font-bold">
+  إجمالي إيرادات المشروع:{" "}
+  {movements
+    .filter((movement) => movement.project === selectedProject.name)
+    .reduce((total, movement) => {
+      const entry = getJournalEntry(movement);
+      const creditCode = Number(getAccountCode(entry.creditAccount));
+
+      if (creditCode >= 4000 && creditCode < 5000) {
+        return total + Number(entry.credit);
+      }
+
+      return total;
+    }, 0)}
+</div>
+<div className="mt-3 rounded-lg bg-slate-200 px-4 py-3 font-bold">
+  صافي نتيجة المشروع:{" "}
+  {(() => {
+    const projectMovements = movements.filter(
+      (movement) => movement.project === selectedProject.name
+    );
+
+    const revenue = projectMovements.reduce((total, movement) => {
+      const entry = getJournalEntry(movement);
+      const creditCode = Number(getAccountCode(entry.creditAccount));
+
+      return creditCode >= 4000 && creditCode < 5000
+        ? total + Number(entry.credit)
+        : total;
+    }, 0);
+
+    const expenses = projectMovements.reduce((total, movement) => {
+      const entry = getJournalEntry(movement);
+      const debitCode = Number(getAccountCode(entry.debitAccount));
+
+      return debitCode >= 5000 && debitCode < 7000
+        ? total + Number(entry.debit)
+        : total;
+    }, 0);
+
+    return revenue - expenses;
+  })()}
+</div>
+<div className="mt-2 text-sm text-slate-600">
+  عدد الحركات المرتبطة بالمشروع:{" "}
+  {
+    movements.filter(
+      (movement) => movement.project === selectedProject.name
+    ).length
+  }
+</div>
+<button
+  onClick={() => setPage("حركات المشروع")}
+  className="mt-4 rounded-lg bg-blue-600 px-5 py-3 font-bold text-white hover:bg-blue-700"
+>
+  عرض حركات المشروع
+</button>
+    </div>
+  </div>
+) : null}
+  </div>
+) : null}
+{page === "دليل الحسابات" ? (
+  <div className="mt-8 rounded-2xl bg-white p-6 shadow-sm">
+    <h3 className="text-xl font-bold">دليل الحسابات</h3>
+
+    <div className="mt-6 overflow-x-auto">
+      <table className="w-full text-right">
+        <thead className="bg-slate-100">
+          <tr>
+            <th className="px-4 py-3">رقم الحساب</th>
+            <th className="px-4 py-3">اسم الحساب</th>
+            <th className="px-4 py-3">التصنيف</th>
+            <th className="px-4 py-3">طبيعة الحساب</th>
+            <th className="px-4 py-3">الحالة</th>
+          </tr>
+        </thead>
+
+        <tbody>
+  {[
+    ["1110", "البنك", "أصول", "مدين"],
+    ["1111", "الصندوق", "أصول", "مدين"],
+    ["1120", "العملاء والذمم المدينة", "أصول", "مدين"],
+    ["1130", "دفعات مقدمة للموردين والمقاولين", "أصول", "مدين"],
+    ["1140", "سلف وعهد الموظفين", "أصول", "مدين"],
+    ["1213", "الآلات والتجهيزات", "أصول", "مدين"],
+    ["1240", "سلف الموظفين", "أصول", "مدين"],
+    ["1520", "أجهزة ومعدات", "أصول", "مدين"],
+
+    ["2110", "الموردون والذمم الدائنة", "التزامات", "دائن"],
+    ["2160", "جاري المستثمرين", "التزامات", "دائن"],
+
+    ["3100", "رأس المال", "حقوق الملكية", "دائن"],
+
+    ["4100", "إيرادات المقاولات", "إيرادات", "دائن"],
+    ["4110", "إيرادات عقود المشاريع", "إيرادات", "دائن"],
+    ["4200", "إيرادات أخرى", "إيرادات", "دائن"],
+
+    ["5110", "مواد إنشائية", "مصروفات", "مدين"],
+    ["5120", "أجور مقاولين", "مصروفات", "مدين"],
+    ["5140", "إيجار معدات", "مصروفات", "مدين"],
+    ["5160", "وقود وديزل", "مصروفات", "مدين"],
+    ["5190", "تأمينات المشاريع", "مصروفات", "مدين"],
+    ["5191", "ملابس ومعدات سلامة", "مصروفات", "مدين"],
+    ["5192", "أدوات وعدد", "مصروفات", "مدين"],
+    ["5193", "تجهيز موقع", "مصروفات", "مدين"],
+    ["5194", "أعمال مساحية", "مصروفات", "مدين"],
+    ["5199", "تكاليف مشاريع أخرى", "مصروفات", "مدين"],
+  ].map((account) => (
+    <tr key={account[0]} className="border-b border-slate-200">
+      <td className="px-4 py-3">{account[0]}</td>
+      <td className="px-4 py-3">{account[1]}</td>
+      <td className="px-4 py-3">{account[2]}</td>
+      <td className="px-4 py-3">{account[3]}</td>
+      <td className="px-4 py-3">نشط</td>
+    </tr>
+  ))}
+</tbody>
+      </table>
+    </div>
+  </div>
+) : null}
+{page === "المقاولون" ? (
+  <div className="mt-8 rounded-2xl bg-white p-6 shadow-sm">
+    <h3 className="text-xl font-bold">المقاولون</h3>
+<div className="mt-6 grid grid-cols-1 gap-3 md:grid-cols-4">
+  <input
+    type="text"
+    value={contractorName}
+    onChange={(e) => setContractorName(e.target.value)}
+    placeholder="اسم المقاول"
+    className="rounded-lg border border-slate-300 px-4 py-3"
+  />
+
+  <input
+    type="text"
+    value={contractorSpecialty}
+    onChange={(e) => setContractorSpecialty(e.target.value)}
+    placeholder="التخصص"
+    className="rounded-lg border border-slate-300 px-4 py-3"
+  />
+
+  <input
+    type="text"
+    value={contractorPhone}
+    onChange={(e) => setContractorPhone(e.target.value)}
+    placeholder="رقم الهاتف"
+    className="rounded-lg border border-slate-300 px-4 py-3"
+  />
+<input
+  type="text"
+  value={contractorWorkType}
+  onChange={(e) => setContractorWorkType(e.target.value)}
+  placeholder="نوع الأعمال / وصف العقد"
+  className="rounded-lg border border-slate-300 px-4 py-3"
+/>
+<input
+  type="text"
+  value={contractorContractNumber}
+  onChange={(e) => setContractorContractNumber(e.target.value)}
+  placeholder="رقم العقد"
+  className="rounded-lg border border-slate-300 px-4 py-3"
+/>
+<input
+  type="text"
+  value={contractorContractType}
+  onChange={(e) => setContractorContractType(e.target.value)}
+  placeholder="نوع العقد"
+  className="rounded-lg border border-slate-300 px-4 py-3"
+/>
+<input
+  type="number"
+  value={contractorContractValue}
+  onChange={(e) => setContractorContractValue(e.target.value)}
+  placeholder="قيمة العقد"
+  className="rounded-lg border border-slate-300 px-4 py-3"
+/>
+<input
+  type="number"
+  value={contractorInstallmentsCount}
+  onChange={(e) => {
+  const count = e.target.value;
+  setContractorInstallmentsCount(count);
+
+  setContractorInstallments(
+    Array.from({ length: Number(count) }, (_, index) => ({
+  number: index + 1,
+  value: "",
+  condition: "",
+  status: "غير مستحقة",
+}))
+  );
+}}
+  placeholder="عدد الدفعات"
+  className="rounded-lg border border-slate-300 px-4 py-3"
+/>
+{contractorInstallments.map((installment, index) => (
+  <div
+    key={index}
+    className="grid grid-cols-3 gap-3 col-span-full"
+  >
+    <div className="rounded-lg border border-slate-200 px-4 py-3 bg-slate-50">
+      الدفعة {index + 1}
+    </div>
+<input
+  type="number"
+  placeholder={`قيمة الدفعة ${index + 1}`}
+  value={installment.value}
+  onChange={(e) => {
+    const updated = [...contractorInstallments];
+    updated[index].value = e.target.value;
+    setContractorInstallments(updated);
+  }}
+  className="rounded-lg border border-slate-300 px-4 py-3"
+/>
+    <input
+      type="text"
+      placeholder={`استحقاق الدفعة ${index + 1}`}
+      value={installment.condition}
+      onChange={(e) => {
+        const updated = [...contractorInstallments];
+        updated[index].condition = e.target.value;
+        setContractorInstallments(updated);
+      }}
+      className="rounded-lg border border-slate-300 px-4 py-3"
+    />
+  </div>
+))}
+<div className="col-span-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+  مجموع الدفعات: {totalInstallmentsValue.toFixed(3)} د.ك
+</div>
+  <select
+    value={contractorProject}
+    onChange={(e) => setContractorProject(e.target.value)}
+    className="rounded-lg border border-slate-300 px-4 py-3"
+  >
+    <option value="">اختر المشروع</option>
+
+    {projects.map((project) => (
+      <option key={project.id} value={project.name}>
+        {project.name}
+      </option>
+    ))}
+  </select>
+</div>
+<button
+  onClick={() => {
+    if (!contractorName.trim()) {
+  alert("يرجى إدخال اسم المقاول");
+  return;
+}
+if (!contractorContractNumber.trim()) {
+  alert("يرجى إدخال رقم العقد");
+  return;
+}
+if (!contractorSpecialty.trim()) {
+  alert("يرجى إدخال تخصص المقاول");
+  return;
+}
+
+if (!contractorPhone.trim()) {
+  alert("يرجى إدخال رقم الهاتف");
+  return;
+}
+
+if (!contractorWorkType.trim()) {
+  alert("يرجى إدخال نوع الأعمال / وصف العقد");
+  return;
+}
+if (!contractorContractValue || Number(contractorContractValue) <= 0) {
+  alert("يرجى إدخال قيمة العقد");
+  return;
+}
+const contractNumberExists = contractors.some(
+  (contractor) =>
+    String(contractor.contractNumber || "").trim().toLowerCase() ===
+    contractorContractNumber.trim().toLowerCase()
+);
+
+if (contractNumberExists) {
+  alert("رقم العقد مستخدم مسبقاً، يرجى إدخال رقم عقد آخر");
+  return;
+}
+if (!contractorContractType.trim()) {
+  alert("يرجى إدخال نوع العقد");
+  return;
+}
+if (!contractorInstallmentsCount || Number(contractorInstallmentsCount) <= 0) {
+  alert("يرجى إدخال عدد الدفعات");
+  return;
+}
+const hasIncompleteInstallment = contractorInstallments.some(
+  (installment) =>
+    !installment.value ||
+    Number(installment.value) <= 0 ||
+    !installment.condition.trim()
+);
+
+if (hasIncompleteInstallment) {
+  alert("يرجى إدخال قيمة واستحقاق جميع الدفعات");
+  return;
+}
+    if (!contractorProject) {
+  alert("يرجى اختيار المشروع");
+  return;
+}
+if (totalInstallmentsValue !== Number(contractorContractValue)) {
+  alert("مجموع الدفعات يجب أن يساوي قيمة العقد");
+  return;
+}
+    setContractors((prev) => [
+      ...prev,
+      {
+        id: Date.now(),
+        name: contractorName.trim(),
+        specialty: contractorSpecialty.trim(),
+        phone: contractorPhone.trim(),
+        project: contractorProject,
+        contractNumber: contractorContractNumber.trim(),
+        contractType: contractorContractType.trim(),
+        workType: contractorWorkType.trim(),
+contractValue: Number(contractorContractValue),
+installmentsCount: Number(contractorInstallmentsCount),
+installments: contractorInstallments,
+      },
+    ]);
+
+    setContractorName("");
+    setContractorSpecialty("");
+    setContractorPhone("");
+    setContractorProject("");
+    setContractorWorkType("");
+    setContractorContractNumber("");
+setContractorContractType("");
+setContractorContractValue("");
+setContractorInstallmentsCount("");
+setContractorInstallments([]);
+  }}
+  className="mt-4 rounded-lg bg-blue-600 px-6 py-3 font-bold text-white"
+>
+  إضافة مقاول
+</button>
+    <div className="mt-6 overflow-x-auto">
+      <table className="w-full text-right">
+        <thead className="bg-slate-100">
+          <tr>
+            <th className="px-4 py-3">اسم المقاول</th>
+            <th className="px-4 py-3">رقم العقد</th>
+            <th className="px-4 py-3">التخصص</th>
+            <th className="px-4 py-3">رقم الهاتف</th>
+            <th className="px-4 py-3">المشروع</th>
+            <th className="px-4 py-3">إجمالي المستحق</th>
+            <th className="px-4 py-3">المدفوع</th>
+            <th className="px-4 py-3">المتبقي</th>
+          </tr>
+        </thead>
+
+        <tbody>
+         
+  {contractors.length === 0 ? (
+    <tr>
+      <td
+        colSpan={7}
+        className="px-4 py-8 text-center text-slate-500"
+      >
+        لا توجد بيانات مقاولين حتى الآن
+      </td>
+    </tr>
+  ) : (
+    contractors.map((contractor) => (
+      <tr
+        key={contractor.id}
+        className="border-b border-slate-200"
+      >
+        <td className="px-4 py-3">{contractor.name}</td>
+        <td className="px-4 py-3">
+  <button
+    onClick={() => setSelectedContractor(contractor)}
+    className="text-blue-600 underline"
+  >
+    {contractor.contractNumber}
+  </button>
+</td>
+        <td className="px-4 py-3">{contractor.specialty}</td>
+        <td className="px-4 py-3">{contractor.phone}</td>
+        <td className="px-4 py-3">{contractor.project}</td>
+        <td className="px-4 py-3">0</td>
+        <td className="px-4 py-3">0</td>
+        <td className="px-4 py-3">0</td>
+      </tr>
+    ))
+  )}
+</tbody>
+        
+      </table>
+      {selectedContractor && (
+  <div className="mt-6 rounded-2xl bg-white p-6 shadow-sm">
+    <h3 className="text-xl font-bold mb-4">تفاصيل العقد</h3>
+
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div>اسم المقاول: {selectedContractor.name}</div>
+      <div>رقم العقد: {selectedContractor.contractNumber}</div>
+      <div>نوع العقد: {selectedContractor.contractType}</div>
+      <div>نوع الأعمال: {selectedContractor.workType}</div>
+      <div>المشروع: {selectedContractor.project}</div>
+      <div>
+        قيمة العقد: {Number(selectedContractor.contractValue || 0).toFixed(3)} د.ك
+      </div>
+      <div>عدد الدفعات: {selectedContractor.installmentsCount}</div>
+      <div className="col-span-full mt-4">
+  <h4 className="font-bold mb-3">جدول الدفعات</h4>
+
+  <table className="w-full text-right border">
+    <thead className="bg-slate-100">
+      <tr>
+        <th className="px-4 py-3">الدفعة</th>
+        <th className="px-4 py-3">قيمة الدفعة</th>
+        <th className="px-4 py-3">استحقاق الدفعة</th>
+        <th className="px-4 py-3">الحالة</th>
+      </tr>
+    </thead>
+
+    <tbody>
+      {selectedContractor.installments?.map((installment: any, index: number) => (
+        <tr key={index} className="border-t">
+          <td className="px-4 py-3">الدفعة {index + 1}</td>
+
+          <td className="px-4 py-3">
+            {Number(installment.value || 0).toFixed(3)} د.ك
+          </td>
+
+          <td className="px-4 py-3">
+            {installment.condition || "-"}
+          </td>
+          <td className="px-4 py-3">
+  {installment.status || "غير مستحقة"}
+</td>
+        </tr>
+      ))}
+    </tbody>
+  </table>
+  <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+  <div className="rounded-lg border border-slate-200 p-4">
+    <div className="text-sm text-slate-500">قيمة العقد</div>
+    <div className="font-bold">
+      {Number(selectedContractor.contractValue || 0).toFixed(3)} د.ك
+    </div>
+  </div>
+
+  <div className="rounded-lg border border-slate-200 p-4">
+    <div className="text-sm text-slate-500">المدفوع</div>
+    <div className="font-bold">0.000 د.ك</div>
+  </div>
+
+  <div className="rounded-lg border border-slate-200 p-4">
+    <div className="text-sm text-slate-500">المتبقي</div>
+    <div className="font-bold">
+      {Number(selectedContractor.contractValue || 0).toFixed(3)} د.ك
+    </div>
+  </div>
+</div>
+</div>
+    </div>
+  </div>
+)}
+    </div>
+  </div>
+) : null}
+{page === "حركات المشروع" ? (
+  <div className="mt-8 rounded-2xl bg-white p-6 shadow-sm">
+    <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
+      <div>
+        <h3 className="text-xl font-bold">حركات المشروع</h3>
+        <p className="mt-1 text-sm text-slate-500">
+          {selectedProject?.name}
+        </p>
+      </div>
+
+      <button
+        onClick={() => setPage("المشاريع")}
+        className="rounded-lg bg-slate-200 px-4 py-2 font-bold"
+      >
+        العودة للمشاريع
+      </button>
+      <button
+  onClick={() => {
+    setProjectMovementFilter("الكل");
+    setProjectItemFilter("الكل");
+    setProjectDateFrom("");
+    setProjectDateTo("");
+    setProjectSearch("");
+  }}
+  className="mr-3 rounded-lg bg-slate-200 px-4 py-2 font-bold"
+>
+  مسح الفلاتر
+</button>
+
+<div className="mt-6 grid w-full grid-cols-1 gap-3 md:grid-cols-3">
+  <div className="rounded-xl border border-slate-200 bg-slate-50 p-5 text-center">
+    <p className="text-sm text-slate-500">إجمالي الإيرادات</p>
+    <p className="mt-2 text-xl font-bold">
+      {movements
+        .filter(
+          (movement) =>
+            movement.project === selectedProject?.name
+        )
+        .filter(
+          (movement) =>
+            projectMovementFilter === "الكل" ||
+            movement.movementType === projectMovementFilter
+        )
+        .filter(
+          (movement) =>
+            projectItemFilter === "الكل" ||
+            movement.item === projectItemFilter
+        )
+        .filter(
+          (movement) =>
+            (!projectDateFrom || movement.date >= projectDateFrom) &&
+            (!projectDateTo || movement.date <= projectDateTo)
+        )
+        .filter(
+          (movement) =>
+            !projectSearch ||
+            (movement.description || "")
+              .toLowerCase()
+              .includes(projectSearch.toLowerCase())
+        )
+        .filter(
+  (movement) =>
+    movement.movementType === "إيراد" ||
+    movement.movementType === "إيرادات"
+)
+        .reduce(
+          (total, movement) => total + Number(movement.amount || 0),
+          0
+        )}{" "}
+      د.ك
+    </p>
+  </div>
+
+  <div className="rounded-xl border border-slate-200 bg-slate-50 p-5 text-center">
+    <p className="text-sm text-slate-500">إجمالي المصروفات</p>
+    <p className="mt-2 text-xl font-bold">
+      {movements
+        .filter(
+          (movement) =>
+            movement.project === selectedProject?.name
+        )
+        .filter(
+          (movement) =>
+            projectMovementFilter === "الكل" ||
+            movement.movementType === projectMovementFilter
+        )
+        .filter(
+          (movement) =>
+            projectItemFilter === "الكل" ||
+            movement.item === projectItemFilter
+        )
+        .filter(
+          (movement) =>
+            (!projectDateFrom || movement.date >= projectDateFrom) &&
+            (!projectDateTo || movement.date <= projectDateTo)
+        )
+        .filter(
+          (movement) =>
+            !projectSearch ||
+            (movement.description || "")
+              .toLowerCase()
+              .includes(projectSearch.toLowerCase())
+        )
+        .filter((movement) => movement.movementType === "مصروف")
+        .reduce(
+          (total, movement) => total + Number(movement.amount || 0),
+          0
+        )}{" "}
+      د.ك
+    </p>
+  </div>
+  <div className="rounded-xl border border-slate-200 bg-slate-50 p-5 text-center">
+  <p className="text-sm text-slate-500">صافي المشروع</p>
+
+  <p
+  className={`mt-2 text-xl font-bold ${
+    movements
+      .filter((movement) => movement.project === selectedProject?.name)
+      .reduce(
+        (total, movement) =>
+          (movement.movementType === "إيراد" ||
+           movement.movementType === "إيرادات")
+            ? total + Number(movement.amount || 0)
+            : movement.movementType === "مصروف"
+            ? total - Number(movement.amount || 0)
+            : total,
+        0
+      ) > 0
+      ? "text-green-600"
+      : movements
+          .filter((movement) => movement.project === selectedProject?.name)
+          .reduce(
+            (total, movement) =>
+              (movement.movementType === "إيراد" ||
+               movement.movementType === "إيرادات")
+                ? total + Number(movement.amount || 0)
+                : movement.movementType === "مصروف"
+                ? total - Number(movement.amount || 0)
+                : total,
+            0
+          ) < 0
+      ? "text-red-600"
+      : "text-slate-700"
+  }`}
+>
+    {movements
+      .filter(
+        (movement) =>
+          movement.project === selectedProject?.name
+      )
+      .filter(
+        (movement) =>
+          projectMovementFilter === "الكل" ||
+          movement.movementType === projectMovementFilter
+      )
+      .filter(
+        (movement) =>
+          projectItemFilter === "الكل" ||
+          movement.item === projectItemFilter
+      )
+      .filter(
+        (movement) =>
+          (!projectDateFrom || movement.date >= projectDateFrom) &&
+          (!projectDateTo || movement.date <= projectDateTo)
+      )
+      .filter(
+        (movement) =>
+          !projectSearch ||
+          (movement.description || "")
+            .toLowerCase()
+            .includes(projectSearch.toLowerCase())
+      )
+      .reduce(
+        (total, movement) =>
+          (movement.movementType === "إيراد" ||
+           movement.movementType === "إيرادات")
+            ? total + Number(movement.amount || 0)
+            : movement.movementType === "مصروف"
+            ? total - Number(movement.amount || 0)
+            : total,
+        0
+      )}{" "}
+    د.ك
+  </p>
+</div>
+</div>
+<div className="mt-4">
+  <label className="mb-2 block text-sm font-bold">
+    البحث في البيان
+  </label>
+
+  <input
+    type="text"
+    value={projectSearch}
+    onChange={(e) => setProjectSearch(e.target.value)}
+    placeholder="اكتب كلمة من البيان..."
+    className="w-full rounded-lg border border-slate-300 px-4 py-3"
+  />
+</div>
+    <div className="mt-6">
+  <label className="mb-2 block text-sm font-bold">
+    نوع الحركة
+  </label>
+
+  <select
+    value={projectMovementFilter}
+    onChange={(e) => setProjectMovementFilter(e.target.value)}
+    className="w-full rounded-lg border border-slate-300 px-4 py-3"
+  >
+    <option value="الكل">جميع الحركات</option>
+    <option value="مصروف">المصروفات فقط</option>
+    <option value="إيرادات">الإيرادات فقط</option>
+  </select>
+<div className="mt-4">
+  <label className="mb-2 block text-sm font-bold">
+    البند
+  </label>
+
+  <select
+    value={projectItemFilter}
+    onChange={(e) => setProjectItemFilter(e.target.value)}
+    className="w-full rounded-lg border border-slate-300 px-4 py-3"
+  >
+    <option value="الكل">جميع البنود</option>
+
+    {[...new Set(
+      movements
+        .filter(
+          (movement) => movement.project === selectedProject?.name
+        )
+        .map((movement) => movement.item)
+        .filter(Boolean)
+    )].map((item) => (
+      <option key={item} value={item}>
+        {item}
+      </option>
+    ))}
+  </select>
+</div>
+</div></div>
+<div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+  <div>
+    <label className="mb-2 block text-sm font-bold">
+      من تاريخ
+    </label>
+
+    <input
+      type="date"
+      value={projectDateFrom}
+      onChange={(e) => setProjectDateFrom(e.target.value)}
+      className="w-full rounded-lg border border-slate-300 px-4 py-3"
+    />
+  </div>
+
+  <div>
+    <label className="mb-2 block text-sm font-bold">
+      إلى تاريخ
+    </label>
+
+    <input
+      type="date"
+      value={projectDateTo}
+      onChange={(e) => setProjectDateTo(e.target.value)}
+      className="w-full rounded-lg border border-slate-300 px-4 py-3"
+    />
+  </div>
+</div>
+<div className="mt-6 overflow-x-auto">
+  <table className="w-full text-right">
+    <thead className="bg-slate-100">
+      <tr>
+        <th className="px-4 py-3">التاريخ</th>
+        <th className="px-4 py-3">نوع الحركة</th>
+        <th className="px-4 py-3">البند</th>
+        <th className="px-4 py-3">البيان</th>
+        <th className="px-4 py-3">طريقة الدفع</th>
+        <th className="px-4 py-3">المبلغ</th>
+      </tr>
+    </thead>
+
+    <tbody>
+      {movements
+        .filter(
+          (movement) =>
+            movement.project === selectedProject?.name
+        )
+        .filter(
+          (movement) =>
+            projectMovementFilter === "الكل" ||
+            movement.movementType === projectMovementFilter
+        )
+        .filter(
+          (movement) =>
+            projectItemFilter === "الكل" ||
+            movement.item === projectItemFilter
+        )
+        .filter(
+  (movement) =>
+    (!projectDateFrom || movement.date >= projectDateFrom) &&
+    (!projectDateTo || movement.date <= projectDateTo)
+)
+.filter(
+  (movement) =>
+    !projectSearch ||
+    (movement.description || "")
+      .toLowerCase()
+      .includes(projectSearch.toLowerCase())
+)
+        .map((movement, index) => (
+          <tr
+            key={index}
+            className="border-b border-slate-200"
+          >
+            <td className="px-4 py-3">{movement.date}</td>
+            <td className="px-4 py-3">{movement.movementType}</td>
+            <td className="px-4 py-3">{movement.item}</td>
+            <td className="px-4 py-3">{movement.description}</td>
+            <td className="px-4 py-3">{movement.paymentMethod}</td>
+            <td className="px-4 py-3">{movement.amount}</td>
+          </tr>
+        ))}
+    </tbody>
+  </table>
+  <div className="mt-4 rounded-lg bg-slate-100 px-4 py-3 text-lg font-bold">
+ عدد الحركات الظاهرة:{" "}
+{movements
+  .filter(
+    (movement) =>
+      movement.project === selectedProject?.name
+  )
+  .filter(
+    (movement) =>
+      projectMovementFilter === "الكل" ||
+      movement.movementType === projectMovementFilter
+  )
+  .filter(
+    (movement) =>
+      projectItemFilter === "الكل" ||
+      movement.item === projectItemFilter
+  )
+  .filter(
+    (movement) =>
+      (!projectDateFrom || movement.date >= projectDateFrom) &&
+      (!projectDateTo || movement.date <= projectDateTo)
+  ).length}
+
+{" | "}
+  إجمالي المبالغ الظاهرة:{" "}
+  {movements
+    .filter(
+      (movement) =>
+        movement.project === selectedProject?.name
+    )
+    .filter(
+      (movement) =>
+        projectMovementFilter === "الكل" ||
+        movement.movementType === projectMovementFilter
+    )
+    .filter(
+      (movement) =>
+        projectItemFilter === "الكل" ||
+        movement.item === projectItemFilter
+    )
+    .filter(
+      (movement) =>
+        (!projectDateFrom || movement.date >= projectDateFrom) &&
+        (!projectDateTo || movement.date <= projectDateTo)
+    )
+    .reduce(
+      (total, movement) => total + Number(movement.amount || 0),
+      0
+    )}
+  {" "}د.ك
+</div>
+</div>
+  </div>
+) : null}
+          {page === "الرئيسية" ? (
+  <div className="mt-8 rounded-2xl bg-white p-6 shadow-sm">
+    <h3 className="text-xl font-bold">
+      مرحباً بك في Thyab Accounting
+    </h3>
+
+    <p className="mt-2 text-slate-500">
+      سنبدأ من هنا بناء النظام المحاسبي وإضافة الحركات والقيود والتقارير
+    </p>
+  </div>
+) : null}
+        </section>
+      </div>
+    </main>
+  );
+}
+
+function Card({ title, value }: { title: string; value: string }) {
+  return (
+    <div className="rounded-2xl bg-white p-6 shadow-sm">
+      <p className="text-sm text-slate-500">{title}</p>
+      <p className="mt-4 text-2xl font-bold">{value}</p>
+    </div>
+  );
+}
