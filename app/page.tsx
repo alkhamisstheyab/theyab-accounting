@@ -103,6 +103,7 @@ import {
   DEFAULT_NOTES,
   DEFAULT_OBLIGATIONS,
   DOCUMENT_TYPES,
+  CLIENT_FIRST_CLAUSE,
   clientClosingClauses,
   clientDurationClause,
   clientPreambleTemplate,
@@ -5563,6 +5564,16 @@ function ContractorsPage({
 /* طباعة العقد                                                         */
 /* ================================================================== */
 
+/**
+ * ألوان ورق الشركة — مأخوذة من العقود المبرمة المطبوعة.
+ *
+ * العناوين حمراء، ورأس الجدول بنّي كلون الشعار، والتذييل رملي.
+ * ليست اختياراً جمالياً: العقد يُسلَّم للعميل ويُقارَن بسابقه.
+ */
+const CONTRACT_RED = "#c00000";
+const CONTRACT_BROWN = "#8a7a5b";
+const CONTRACT_SAND = "#efeae0";
+
 function ContractSheet({
   contract,
   company,
@@ -5596,6 +5607,25 @@ function ContractSheet({
   // ترقيم البنود متسلسل: الأول للتمهيد، ثم الفنية، ثم الالتزامات، ثم الختامية
   let clauseNo = 1;
 
+  /** عقد العميل يرقّم بنوده بالعربية كما في العقد المبرم */
+  const ORDINAL = [
+    "",
+    "أولاً",
+    "ثانياً",
+    "ثالثاً",
+    "رابعاً",
+    "خامساً",
+    "سادساً",
+    "سابعاً",
+    "ثامناً",
+    "تاسعاً",
+    "عاشراً",
+    "الحادي عشر",
+    "الثاني عشر",
+    "الثالث عشر",
+    "الرابع عشر",
+  ];
+
   return (
     <div
       className="voucher-sheet fixed inset-0 z-50 overflow-auto bg-slate-800/60 p-6"
@@ -5603,9 +5633,9 @@ function ContractSheet({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="voucher-body mx-auto max-w-3xl bg-white p-10 shadow-xl"
+        className="voucher-body contract-sheet mx-auto flex max-w-3xl flex-col bg-white shadow-xl"
       >
-        <div className="mb-6 flex justify-end gap-3 no-print">
+        <div className="flex justify-end gap-3 p-8 pb-0 no-print">
           <button
             onClick={() => window.print()}
             className="rounded-lg bg-slate-900 px-6 py-3 font-bold text-white"
@@ -5620,27 +5650,43 @@ function ContractSheet({
           </button>
         </div>
 
-        {/* ترويسة */}
-        <div className="mb-6 text-center">
-          {company.logo && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={company.logo} alt="" className="mx-auto mb-3 max-h-24" />
-          )}
-          <h1 className="text-2xl font-bold underline">
-            {isAddendum ? "ملحق عقد" : `عقد إتفاق عمل ${contract.workType || ""}`}
-          </h1>
-        </div>
+        <div className="flex-1 px-12 pt-8">
+          {/* الشعار أعلى اليمين، كما في ورق الشركة */}
+          <div className="mb-6 flex items-start justify-start">
+            {company.logo ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={company.logo} alt="" style={{ height: 78 }} />
+            ) : (
+              <div
+                className="text-2xl font-bold tracking-widest"
+                style={{ color: CONTRACT_BROWN }}
+              >
+                {company.name}
+              </div>
+            )}
+          </div>
 
-        <p className="mb-4 text-sm">التاريخ: {contract.contractDate || "…"}</p>
-        <p className="mb-4 text-sm">تم تحرير عقد الإتفاق التالي بين كل من:</p>
+          <h1 className="mb-8 text-center text-2xl font-bold">
+            {isAddendum
+              ? `ملحق عقد${contract.workType ? ` — ${contract.workType}` : ""}`
+              : contract.workType || "عقد اتفاق"}
+          </h1>
+
+        <p className="mb-3 text-sm font-bold">
+          التاريخ: {contract.contractDate || "…"}
+        </p>
+        <p className="mb-4 text-sm font-bold">
+          تم تحرير عقد الاتفاق بين كل من:
+        </p>
 
         {/* الأطراف */}
-        <div className="mb-5 space-y-3 text-sm leading-relaxed">
+        <div className="mb-6 space-y-2 text-sm font-bold leading-relaxed">
           <p>
-            <b className="underline">الطرف الأول:</b> {company.name}
-            {company.address && <> — عنوانها: {company.address}</>}
-            {company.phone && <> — تليفون: {company.phone}</>}
+            الطرف الأول: السادة/ {company.name}
           </p>
+          {company.address && (
+            <p className="pr-4">العنوان: {company.address}</p>
+          )}
           <p>
             <b className="underline">الطرف الثاني:</b>{" "}
             {isClient ? "السادة / " : "السيد / "}
@@ -5654,12 +5700,49 @@ function ContractSheet({
         {/* التمهيد */}
         {contract.preamble && (
           <div className="mb-5">
-            <h2 className="mb-2 text-center font-bold underline">تمهيد</h2>
+            <h2 className="mb-2 text-center text-lg font-bold" style={{ color: CONTRACT_RED }}>تمهيد</h2>
             <p className="text-sm leading-loose">{contract.preamble}</p>
           </div>
         )}
 
-        {!isAddendum && (
+        {/*
+          عقد العميل يتبع ترتيب العقد المبرم وترقيمه العربي حرفياً:
+          أولاً التمهيد · ثانياً قيمة العقد · ثالثاً المدة · رابعاً الأعمال ·
+          خامساً وسادساً الالتزامات · ثم الجزائية فالعامة فالدعاية فالكفالة
+          فالأحكام فالعقد. العقد مراجَع قانونياً، والترتيب جزء منه.
+        */}
+        {isClient && !isAddendum && (
+          <>
+            <div className="mb-5">
+              <h3 className="mb-1 font-bold" style={{ color: CONTRACT_RED }}>{ORDINAL[clauseNo++]}:</h3>
+              <p className="text-sm leading-loose">{CLIENT_FIRST_CLAUSE}</p>
+            </div>
+
+            <div className="mb-5">
+              <h3 className="mb-1 font-bold" style={{ color: CONTRACT_RED }}>
+                {ORDINAL[clauseNo++]}: قيمة العقد
+              </h3>
+              <ul className="list-inside list-disc text-sm leading-loose">
+                <li>
+                  القيمة الإجمالية للعقد = <b>{fmt(contract.contractValue)}</b>{" "}
+                  دينار كويتي لا غير.
+                </li>
+                {contract.notes && <li>{contract.notes}</li>}
+              </ul>
+            </div>
+
+            <div className="mb-5">
+              <h3 className="mb-1 font-bold" style={{ color: CONTRACT_RED }}>
+                {ORDINAL[clauseNo++]}: مدة العقد
+              </h3>
+              <p className="text-sm leading-loose">
+                {clientDurationClause(contract.durationDays)}
+              </p>
+            </div>
+          </>
+        )}
+
+        {!isClient && !isAddendum && (
           <>
             <div className="mb-5">
               <h3 className="mb-1 font-bold underline">
@@ -5682,40 +5765,10 @@ function ContractSheet({
               </div>
             )}
 
-            {isClient && (
-              <>
-                <div className="mb-5">
-                  <h3 className="mb-1 font-bold underline">
-                    البند {clauseNo++} — مدة العقد
-                  </h3>
-                  <p className="text-sm leading-loose">
-                    {clientDurationClause(contract.durationDays)}
-                  </p>
-                </div>
-
-                <div className="mb-5">
-                  <h3 className="mb-2 font-bold underline">
-                    البند {clauseNo++} — التزامات الطرف الأول (الشركة)
-                  </h3>
-                  <ol className="space-y-2 text-sm leading-loose">
-                    {CLIENT_FIRST_PARTY_DUTIES.map((text, index) => (
-                      <li key={index} className="flex gap-2">
-                        <span className="font-bold">{index + 1}.</span>
-                        <span>{text}</span>
-                      </li>
-                    ))}
-                  </ol>
-                </div>
-              </>
-            )}
-
             {contract.obligations.length > 0 && (
               <div className="mb-5">
                 <h3 className="mb-2 font-bold underline">
-                  البند {clauseNo++} —{" "}
-                  {isClient
-                    ? "التزامات الطرف الثاني (المالك)"
-                    : "الالتزامات والمواصفات الفنية"}
+                  البند {clauseNo++} — الالتزامات والمواصفات الفنية
                 </h3>
                 <ol className="space-y-2 text-sm leading-loose">
                   {contract.obligations.map((text, index) => (
@@ -5733,27 +5786,34 @@ function ContractSheet({
         {/* القيمة والدفعات */}
         <div className="mb-5">
           {!isAddendum && (
-            <h3 className="mb-2 font-bold underline">
-              البند {clauseNo++} — السعر الإجمالي
+            <h3 className="mb-2 font-bold" style={{ color: CONTRACT_RED }}>
+              {isClient
+                ? `${ORDINAL[clauseNo++]}: الأعمال والبنود المتفق عليها`
+                : `البند ${clauseNo++} — السعر الإجمالي`}
             </h3>
           )}
-          <p className="text-sm leading-loose">
-            السعر الإجمالي المتفق عليه بين الطرفين مبلغ وقدره (
-            <b>{fmt(contract.contractValue)}</b>) دينار كويتي —{" "}
-            {amountInWords(contract.contractValue)} —{" "}
-            {isClient
-              ? "تسدد من قبل الطرف الثاني للطرف الأول"
-              : "تسدد من قبل الطرف الأول للطرف الثاني"}{" "}
-            على النحو التالي:
-          </p>
+          {!isClient && (
+            <p className="text-sm leading-loose">
+              السعر الإجمالي المتفق عليه بين الطرفين مبلغ وقدره (
+              <b>{fmt(contract.contractValue)}</b>) دينار كويتي —{" "}
+              {amountInWords(contract.contractValue)} — تسدد من قبل الطرف الأول
+              للطرف الثاني على النحو التالي:
+            </p>
+          )}
 
           <table className="mt-3 w-full border-collapse text-right text-sm">
             <thead>
               <tr className="bg-slate-200">
                 <th className="border border-slate-400 px-3 py-2">م</th>
-                <th className="border border-slate-400 px-3 py-2">الدفعة</th>
-                <th className="border border-slate-400 px-3 py-2">البند</th>
-                <th className="border border-slate-400 px-3 py-2">القيمة</th>
+                <th className="border border-slate-400 px-3 py-2">
+                  {isClient ? "المرحلة والبند" : "الدفعة"}
+                </th>
+                <th className="border border-slate-400 px-3 py-2">
+                  {isClient ? "وصف البند" : "البند"}
+                </th>
+                <th className="border border-slate-400 px-3 py-2">
+                  {isClient ? "الدفعة المستحقة" : "القيمة"}
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -5761,17 +5821,20 @@ function ContractSheet({
                 <tr key={i.number}>
                   <td className="border border-slate-400 px-3 py-2">{i.number}</td>
                   <td className="border border-slate-400 px-3 py-2">
-                    الدفعة {i.number}
+                    {isClient ? i.condition.split(" — ")[0] : `الدفعة ${i.number}`}
                   </td>
                   <td className="border border-slate-400 px-3 py-2">
-                    {i.condition || "—"}
+                    {isClient
+                      ? i.condition.split(" — ").slice(1).join(" — ") ||
+                        i.condition
+                      : i.condition || "—"}
                   </td>
                   <td className="border border-slate-400 px-3 py-2 tabular-nums">
                     {fmt(Number(i.value) || 0)} د.ك
                   </td>
                 </tr>
               ))}
-              <tr className="bg-slate-200 font-bold">
+              <tr className="font-bold" style={{ background: CONTRACT_SAND }}>
                 <td colSpan={3} className="border border-slate-400 px-3 py-2">
                   إجمالي الدفعات
                 </td>
@@ -5783,22 +5846,54 @@ function ContractSheet({
           </table>
         </div>
 
+        {/* التزامات الطرفين — بعد جدول الأعمال كما في العقد المبرم */}
+        {isClient && !isAddendum && (
+          <>
+            <div className="mb-5">
+              <h3 className="mb-2 font-bold" style={{ color: CONTRACT_RED }}>
+                {ORDINAL[clauseNo++]}: التزامات الطرف الأول (الشركة)
+              </h3>
+              <ul className="list-inside list-disc space-y-1 text-sm leading-loose">
+                {CLIENT_FIRST_PARTY_DUTIES.map((text, index) => (
+                  <li key={index}>{text}</li>
+                ))}
+              </ul>
+            </div>
+
+            {contract.obligations.length > 0 && (
+              <div className="mb-5">
+                <h3 className="mb-2 font-bold" style={{ color: CONTRACT_RED }}>
+                  {ORDINAL[clauseNo++]}: التزامات الطرف الثاني (المالك)
+                </h3>
+                <ul className="list-inside list-disc space-y-1 text-sm leading-loose">
+                  {contract.obligations.map((text, index) => (
+                    <li key={index}>{text}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </>
+        )}
+
         {/* البنود الختامية */}
         {!isAddendum &&
           closing.map((clause) => (
             <div key={clause.title} className="mb-4">
-              <h3 className="mb-1 font-bold underline">
-                البند {clauseNo++} — {clause.title}
+              <h3 className="mb-1 font-bold" style={{ color: CONTRACT_RED }}>
+                {isClient
+                  ? `${ORDINAL[clauseNo++]}: ${clause.title}`
+                  : `البند ${clauseNo++} — ${clause.title}`}
               </h3>
               {clause.body.split("\n").map((line, index) => (
                 <p key={index} className="text-sm leading-loose">
-                  {line}
+                  {isClient ? `• ${line}` : line}
                 </p>
               ))}
             </div>
           ))}
 
-        {contract.notes && (
+        {/* ملاحظات العقد تظهر مع قيمته في عقد العميل، فلا تُكرَّر هنا */}
+        {contract.notes && !isClient && (
           <div className="mb-6">
             <h4 className="font-bold underline">ملاحظة:</h4>
             <p className="text-sm">{contract.notes}</p>
@@ -5806,21 +5901,43 @@ function ContractSheet({
         )}
 
         <p className="mb-10 text-center font-bold">
-          هذا و تفضلوا منا فائق الإحترام و التقدير ،،،،،
+          {isClient
+            ? "هذا وتفضلوا منا بقبول فائق الاحترام والتقدير ،،،،"
+            : "هذا و تفضلوا منا فائق الإحترام و التقدير ،،،،،"}
         </p>
 
         {/* التواقيع */}
         <div className="grid grid-cols-2 gap-12 text-sm">
           <div>
-            <p className="mb-1 font-bold underline">طرف أول (الشركة)</p>
+            <p className="mb-1 font-bold underline">
+              {isClient ? "توقيع الطرف الأول" : "طرف أول (الشركة)"}
+            </p>
             <p>الاسم / {company.name}</p>
             <p className="mt-10">التوقيع / ..............................</p>
           </div>
           <div>
-            <p className="mb-1 font-bold underline">طرف ثاني (المقاول)</p>
-            <p>السيد / {contract.name}</p>
+            <p className="mb-1 font-bold underline">
+              {isClient
+                ? "توقيع الطرف الثاني"
+                : `طرف ثاني (${contract.counterpartyType})`}
+            </p>
+            <p>
+              {isClient ? "السيد/ة / " : "السيد / "}
+              {contract.name}
+            </p>
             <p className="mt-10">التوقيع / ..............................</p>
           </div>
+        </div>
+        </div>
+
+        {/* تذييل ورق الشركة — يتكرّر أسفل كل صفحة عند الطباعة */}
+        <div
+          className="mt-10 px-12 pb-8 pt-4 text-xs leading-relaxed"
+          style={{ color: CONTRACT_BROWN, borderTop: `1px solid ${CONTRACT_SAND}` }}
+        >
+          {company.phone && <div>📞 {company.phone}</div>}
+          {company.email && <div>✉ {company.email}</div>}
+          {company.address && <div>📍 {company.address}</div>}
         </div>
       </div>
     </div>

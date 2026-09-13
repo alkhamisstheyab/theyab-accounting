@@ -61,15 +61,18 @@ const contractors = CONTRACTS.map((c) => ({
   block: PLOT.block,
   area: PLOT.area,
   licenseNumber: "",
-  buildingDescription: BUILDING,
+  // وصف المبنى كما في كل عقد — العقد الأساسي بلا بيت درج، وعقود
+  // المقاولين تذكره. لا يُوحَّد بينها.
+  buildingDescription: c.building ?? "",
   durationDays: c.durationDays ?? 0,
   delayPenaltyPerDay: c.delayPenaltyPerDay ?? 0,
   maxPenaltyPercent: c.maxPenaltyPercent ?? 0,
-  terminationAfterDays: 0,
+  terminationAfterDays: c.terminationAfterDays ?? 0,
   warrantyYears: c.warrantyYears ?? 0,
-  preamble: "",
+  // التمهيد والالتزامات بنصّ العقد — وتركهما فارغين يحذفهما من المطبوعة
+  preamble: c.preamble ?? "",
   clauses: [],
-  obligations: [],
+  obligations: c.obligations ?? [],
   notes: c.notes ?? "",
 }));
 
