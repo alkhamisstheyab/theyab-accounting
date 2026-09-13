@@ -38,11 +38,14 @@ CREATE TABLE users (
   job_title       text NOT NULL DEFAULT '',
   role            text NOT NULL,
   permissions     text[] NOT NULL DEFAULT '{}',
-  -- تجزئة كلمة المرور على الخادم — لا يصل النصّ الصريح إلى القاعدة أبداً
+  -- تجزئة كلمة المرور بـ bcrypt — لا يصل النصّ الصريح إلى القاعدة أبداً
   password_hash   text NOT NULL DEFAULT '',
   must_change_pin boolean NOT NULL DEFAULT false,
   active          boolean NOT NULL DEFAULT true,
   last_seen_at    timestamptz,
+  -- إيقاف مؤقت بعد محاولات خاطئة: النظام على الإنترنت يُجرَّب عليه آلياً
+  failed_attempts smallint NOT NULL DEFAULT 0,
+  locked_until    timestamptz,
   created_at      timestamptz NOT NULL DEFAULT now()
 );
 
