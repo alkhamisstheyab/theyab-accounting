@@ -5850,7 +5850,8 @@ function ContractSheet({
         <div
           className="contract-letterhead"
           style={{
-            height: 100,
+            width: "100%",
+            aspectRatio: "1529 / 340",
             backgroundImage: `url(${LETTERHEAD})`,
             backgroundSize: "100% auto",
             backgroundPosition: "top center",
@@ -6093,11 +6094,20 @@ function ContractSheet({
                   ? `${ORDINAL[clauseNo++]}: ${clause.title}`
                   : `البند ${clauseNo++} — ${clause.title}`}
               </h3>
-              {clause.body.split("\n").map((line, index) => (
-                <p key={index} className="text-sm leading-loose">
-                  {isClient ? `• ${line}` : line}
-                </p>
-              ))}
+              {/* نقاط العقد بتعدادٍ واحد في كل بنوده، كالأصل */}
+              {isClient ? (
+                <ul className="list-inside list-disc space-y-1 text-sm leading-loose">
+                  {clause.body.split("\n").map((line, index) => (
+                    <li key={index}>{line}</li>
+                  ))}
+                </ul>
+              ) : (
+                clause.body.split("\n").map((line, index) => (
+                  <p key={index} className="text-sm leading-loose">
+                    {line}
+                  </p>
+                ))
+              )}
             </div>
           ))}
 
@@ -6143,7 +6153,8 @@ function ContractSheet({
         <div
           className="contract-letterhead mt-10"
           style={{
-            height: 132,
+            width: "100%",
+            aspectRatio: "1529 / 300",
             backgroundImage: `url(${LETTERHEAD})`,
             backgroundSize: "100% auto",
             backgroundPosition: "bottom center",

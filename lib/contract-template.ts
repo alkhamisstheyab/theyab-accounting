@@ -186,7 +186,7 @@ export const CLIENT_CONTRACT_DEFAULTS = {
 export const clientDurationClause = (durationDays: number) =>
   `مدة العقد ${Math.round(
     durationDays / 30
-  )} شهراً (${durationDays} يوم عمل)، ولا تحتسب أيام العطل والراحة والإجازات الرسمية والأعياد وأي ظروف قاهرة تلزم عدم العمل من قبل الحكومة أو الظروف المناخية القاسية.`;
+  )} شهر (${durationDays} يوم عمل)، ولا تحتسب أيام العطل والراحة والإجازات الرسمية والأعياد وأي ظروف قاهرة تلزم عدم العمل من قبل الحكومة أو الظروف المناخية القاسية.`;
 
 /** القيم الرقمية الافتراضية، من العقود المبرمة */
 export const CONTRACT_DEFAULTS = {
