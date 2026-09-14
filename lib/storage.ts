@@ -110,7 +110,43 @@ export type Installment = {
   confirmedBy: string;
   confirmedAt: string;
   confirmNote: string;
+
+  /* --------------------------------------------------------------
+   * تمثيل جدول «الأعمال والبنود المتفق عليها» كما في العقد المبرم.
+   *
+   * الجدول ستة أعمدة: م · المرحلة · البند · وصف البند · المواد ·
+   * الدفعة المستحقة. والمرحلة الواحدة تضم عدة بنود تُدمج خلاياها
+   * رأسياً، وقد تضم أكثر من دفعة — فالدفعة مجموعةُ صفوفٍ لا صفّاً.
+   *
+   * الحقول اختيارية: العقود المسجّلة قبل هذا التمثيل تبقى كما هي،
+   * ويُطبع وصفها من condition.
+   * -------------------------------------------------------------- */
+
+  /**
+   * رقم الصفّ في عمود «م» بالعقد المبرم. الدفعات المتتالية التي تحمل
+   * الرقم نفسه صفٌّ واحد في المطبوعة تُدمج خلية «م» فيها — فمرحلة
+   * التشطيب رقمها 9 وفيها تسع دفعات.
+   */
+  no?: number;
+  /** اسم المرحلة — يُدمج رأسياً على كل دفعات المرحلة */
+  stage?: string;
+  /** عمود المواد: على مَن توريدها */
+  materials?: string;
+  /** صفوف هذه الدفعة: البند ووصفه */
+  rows?: { item: string; description: string }[];
+  /**
+   * صفّ توثيقي لا دفعة — كصفّ «عقد التراخيص والمخططات (4000-)» الذي
+   * يوثّق خصماً مطبَّقاً سلفاً على القيمة الإجمالية. يُطبع في الجدول
+   * ولا يدخل قيمة العقد ولا دورة الاعتماد.
+   */
+  informational?: boolean;
+  /** سطر عريض يلي المرحلة: «الانتهاء من الهيكل الأسود» */
+  banner?: string;
 };
+
+/** الدفعة القابلة للصرف — التوثيقية ليست منها */
+export const isPayableInstallment = (i: Installment): boolean =>
+  i.informational !== true;
 
 /** الدفعة مستحقة متى اعتمد المهندس إنجازها وأقرّتها الإدارة */
 export const isInstallmentDue = (installment: Installment): boolean =>
@@ -976,6 +1012,18 @@ function migrateContractor(raw: unknown): Contractor {
         confirmedBy: str(item.confirmedBy),
         confirmedAt: str(item.confirmedAt),
         confirmNote: str(item.confirmNote),
+        // تمثيل جدول العقد — اختياري، والقديم بلا شيء منه
+        no: Number(item.no) > 0 ? Number(item.no) : undefined,
+        stage: str(item.stage) || undefined,
+        materials: str(item.materials) || undefined,
+        rows: Array.isArray(item.rows)
+          ? (item.rows as unknown[]).map((r) => {
+              const row = (r ?? {}) as Record<string, unknown>;
+              return { item: str(row.item), description: str(row.description) };
+            })
+          : undefined,
+        informational: item.informational === true ? true : undefined,
+        banner: str(item.banner) || undefined,
       };
     }),
   };

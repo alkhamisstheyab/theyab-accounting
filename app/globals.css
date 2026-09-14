@@ -33,6 +33,29 @@ body {
   display: none;
 }
 
+/* ==================================================================
+   ورقة العقد — خطّها أكبر من خطّ الشاشة وجدولها بألوان الأصل الموقّع
+   ================================================================== */
+
+.contract-sheet {
+  font-size: 15px;
+}
+
+.contract-sheet .text-sm {
+  font-size: 15px;
+  line-height: 2;
+}
+
+.contract-sheet table {
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+/* شريطا ورق الشركة: الصورة نفسها، أعلاها ثم أسفلها */
+.contract-letterhead {
+  flex: none;
+}
+
 @media print {
   @page {
     size: A4;
@@ -157,6 +180,37 @@ body {
   /* السند خارج .print-area فيحتاج حدود جداوله بنفسه */
   .voucher-body table {
     border-collapse: collapse !important;
+  }
+
+/* ورقة العقد تُطبع بألوان العقد المبرم وخطٍّ أكبر وضوحاً */
+  .contract-sheet,
+  .contract-sheet * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .contract-sheet .text-sm {
+    font-size: 11pt;
+  }
+
+  .contract-sheet table {
+    font-size: 10.5pt;
+  }
+
+  /* حدود جدول العقد سوداء كالأصل، ولا يفرض عليها تنسيق الطباعة العام */
+  .contract-sheet th,
+  .contract-sheet td {
+    border: 1px solid #000 !important;
+    color: #000 !important;
+  }
+
+  /* ترويسة الجدول بنّية لا رمادية */
+  .contract-sheet thead th {
+    background: #847450 !important;
+  }
+
+  .contract-letterhead {
+    display: block !important;
   }
 
   .hide-when-printing {

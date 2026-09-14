@@ -1832,11 +1832,49 @@ export default function HomeV2() {
                   return [...merged, ...next.filter((n) => !names.has(n.name))];
                 })
               }
-              onImportContractors={(next) =>
+              /*
+                الاستيراد يضيف الجديد دائماً. و«التحديث» يستبدل نصَّ عقدٍ
+                موجودٍ برقمه بما في الملف — يُستعمل حين يُصحَّح نقلُ عقدٍ
+                عن أصله الموقّع. ويبقى معرّف العقد كما هو فلا تنقطع
+                روابطه، وتبقى اعتمادات الدفعات المطابقة قيمةً وشرطاً،
+                فالاعتماد قرار إداري لا ينقله ملفُ نصوص.
+              */
+              onImportContractors={(next, replaceExisting) =>
                 setContractors((prev) => {
                   const numbers = new Set(prev.map((c) => c.contractNumber));
+                  const kept = prev.map((old) => {
+                    const fresh = replaceExisting
+                      ? next.find(
+                          (c) => c.contractNumber === old.contractNumber
+                        )
+                      : undefined;
+                    if (!fresh) return old;
+                    return {
+                      ...fresh,
+                      id: old.id,
+                      installments: fresh.installments.map((i) => {
+                        const was = old.installments.find(
+                          (o) =>
+                            o.value === i.value && o.condition === i.condition
+                        );
+                        if (!was) return i;
+                        return {
+                          ...i,
+                          status: was.status,
+                          approved: was.approved,
+                          approvedBy: was.approvedBy,
+                          approvedAt: was.approvedAt,
+                          approvalNote: was.approvalNote,
+                          confirmed: was.confirmed,
+                          confirmedBy: was.confirmedBy,
+                          confirmedAt: was.confirmedAt,
+                          confirmNote: was.confirmNote,
+                        };
+                      }),
+                    };
+                  });
                   return [
-                    ...prev,
+                    ...kept,
                     ...next.filter((c) => !numbers.has(c.contractNumber)),
                   ];
                 })
@@ -5570,9 +5608,160 @@ function ContractorsPage({
  * العناوين حمراء، ورأس الجدول بنّي كلون الشعار، والتذييل رملي.
  * ليست اختياراً جمالياً: العقد يُسلَّم للعميل ويُقارَن بسابقه.
  */
-const CONTRACT_RED = "#c00000";
-const CONTRACT_BROWN = "#8a7a5b";
+/*
+ * ألوان العقد وأبعاد جدوله مقروءة من العقد المبرم الموقّع نفسه
+ * (عقد عواطف القرطاس): عناوين البنود أحمر صريح، ورأس الجدول وعمود «م»
+ * والسطور العريضة بنّي 132,116,80، والخلايا مظلّلة، والحدود سوداء.
+ */
+const CONTRACT_RED = "#ff0000";
+const CONTRACT_BROWN = "#847450";
+const CONTRACT_SHADE = "#f2f2f2";
 const CONTRACT_SAND = "#efeae0";
+/** ورق الشركة — مستخرَج من العقد المبرم، الشعار أعلاه وبيانات التواصل أسفله */
+const LETTERHEAD = "/letterhead.jpg";
+
+/**
+ * أرقام جدول العقد تُكتب كما في الأصل: بلا فاصل آلاف ولا كسور
+ * صفرية — 9000 لا 9,000.000. والكسر يُكتب حين يوجد فقط.
+ */
+const plainAmount = (value: number): string =>
+  Number.isInteger(value) ? String(value) : String(round3(value));
+
+/** عرض أعمدة جدول «رابعاً» بنسب العقد المبرم */
+const WORKS_COLUMNS = ["7%", "17%", "14.5%", "32%", "12.5%", "17%"];
+const WORKS_HEADERS = ["م", "المرحلة", "البند", "وصف البند", "المواد", "الدفعة المستحقة"];
+
+/**
+ * جدول «رابعاً: الأعمال والبنود المتفق عليها» بستة أعمدة كما في العقد.
+ *
+ * الدفعة الواحدة عدة بنود، والمرحلة الواحدة قد تضم عدة دفعات (التشطيب
+ * تسع دفعات برقم 9) — فخلايا «م» و«المرحلة» و«المواد» تُدمج رأسياً على
+ * ما تشترك فيه الدفعات المتتالية. والسطر العريض («الانتهاء من الهيكل
+ * الأسود») يقطع الدمج كما يقطعه في الأصل.
+ */
+function ClientWorksTable({ installments }: { installments: Installment[] }) {
+  const items = installments.map((i) => ({
+    inst: i,
+    rows:
+      i.rows && i.rows.length > 0
+        ? i.rows
+        : [{ item: "", description: i.condition }],
+  }));
+
+  /** لكل دفعةٍ طولُ الدمج الرأسي إن كانت بداية مجموعة، وإلا صفر */
+  const merges = (key: (i: Installment) => string) => {
+    const span = new Array(items.length).fill(0);
+    let g = 0;
+    while (g < items.length) {
+      let end = g;
+      let rows = items[g].rows.length;
+      while (
+        !items[end].inst.banner &&
+        end + 1 < items.length &&
+        key(items[end + 1].inst) === key(items[g].inst)
+      ) {
+        end++;
+        rows += items[end].rows.length;
+      }
+      span[g] = rows;
+      g = end + 1;
+    }
+    return span;
+  };
+
+  const noSpan = merges((i) => String(i.no ?? ""));
+  const stageSpan = merges((i) => i.stage ?? "");
+  const matSpan = merges((i) => i.materials ?? "");
+
+  const cell: React.CSSProperties = {
+    border: "1px solid #000",
+    padding: "6px 8px",
+    verticalAlign: "middle",
+  };
+  const mid: React.CSSProperties = { ...cell, textAlign: "center", fontWeight: 700 };
+
+  return (
+    <table className="mt-3 w-full text-right" style={{ borderCollapse: "collapse" }}>
+      <colgroup>
+        {WORKS_COLUMNS.map((w, index) => (
+          <col key={index} style={{ width: w }} />
+        ))}
+      </colgroup>
+      <thead>
+        <tr>
+          {WORKS_HEADERS.map((h) => (
+            <th key={h} style={{ ...mid, background: CONTRACT_BROWN }}>
+              {h}
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {items.map((it, index) => {
+          /* صفّ التسليم لا دفعة له، فيُميَّز بالبنّي كالأصل */
+          const closing = Number(it.inst.value) === 0;
+          const fill = closing ? CONTRACT_BROWN : CONTRACT_SHADE;
+          /* لا اسم للمرحلة في الصفّ الأول، فتبتلع خانتَها خانةُ البند */
+          const wide = it.inst.stage ? 0 : 1;
+          return (
+            <Fragment key={index}>
+              {it.rows.map((r, k) => (
+                <tr key={k}>
+                  {k === 0 && noSpan[index] > 0 && (
+                    <td rowSpan={noSpan[index]} style={{ ...mid, background: CONTRACT_BROWN }}>
+                      {it.inst.no || index + 1}
+                    </td>
+                  )}
+                  {k === 0 && wide === 0 && stageSpan[index] > 0 && (
+                    <td rowSpan={stageSpan[index]} style={{ ...mid, background: fill }}>
+                      {it.inst.stage}
+                    </td>
+                  )}
+                  {r.item ? (
+                    <>
+                      <td colSpan={1 + wide} style={{ ...mid, background: fill }}>
+                        {r.item}
+                      </td>
+                      <td style={{ ...cell, background: fill }}>{r.description}</td>
+                    </>
+                  ) : (
+                    <td colSpan={2 + wide} style={{ ...mid, background: fill }}>
+                      {r.description}
+                    </td>
+                  )}
+                  {k === 0 && matSpan[index] > 0 && (
+                    <td rowSpan={matSpan[index]} style={{ ...mid, background: fill }}>
+                      {it.inst.materials}
+                    </td>
+                  )}
+                  {k === 0 && (
+                    <td
+                      rowSpan={it.rows.length}
+                      className="tabular-nums"
+                      style={{ ...mid, background: fill }}
+                    >
+                      {closing
+                        ? ""
+                        : (it.inst.informational ? "- " : "") +
+                          plainAmount(Number(it.inst.value) || 0)}
+                    </td>
+                  )}
+                </tr>
+              ))}
+              {it.inst.banner && (
+                <tr>
+                  <td colSpan={6} style={{ ...mid, background: CONTRACT_BROWN }}>
+                    {it.inst.banner}
+                  </td>
+                </tr>
+              )}
+            </Fragment>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+}
 
 function ContractSheet({
   contract,
@@ -5620,7 +5809,7 @@ function ContractSheet({
     "ثامناً",
     "تاسعاً",
     "عاشراً",
-    "الحادي عشر",
+    "الحادي عشرة",
     "الثاني عشر",
     "الثالث عشر",
     "الرابع عشر",
@@ -5633,7 +5822,7 @@ function ContractSheet({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="voucher-body contract-sheet mx-auto flex max-w-3xl flex-col bg-white shadow-xl"
+        className="voucher-body contract-sheet mx-auto flex max-w-4xl flex-col bg-white shadow-xl"
       >
         <div className="flex justify-end gap-3 p-8 pb-0 no-print">
           <button
@@ -5650,21 +5839,22 @@ function ContractSheet({
           </button>
         </div>
 
-        <div className="flex-1 px-12 pt-8">
-          {/* الشعار أعلى اليمين، كما في ورق الشركة */}
-          <div className="mb-6 flex items-start justify-start">
-            {company.logo ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={company.logo} alt="" style={{ height: 78 }} />
-            ) : (
-              <div
-                className="text-2xl font-bold tracking-widest"
-                style={{ color: CONTRACT_BROWN }}
-              >
-                {company.name}
-              </div>
-            )}
-          </div>
+        {/*
+          ترويسة ورق الشركة — الشريط الأعلى من صورة الورق نفسها التي
+          طُبع عليها العقد المبرم، فالشعار بموضعه ومقاسه لا بتقديرنا.
+        */}
+        <div
+          className="contract-letterhead"
+          style={{
+            height: 100,
+            backgroundImage: `url(${LETTERHEAD})`,
+            backgroundSize: "100% auto",
+            backgroundPosition: "top center",
+            backgroundRepeat: "no-repeat",
+          }}
+        />
+
+        <div className="flex-1 px-12 pt-2">
 
           <h1 className="mb-8 text-center text-2xl font-bold">
             {isAddendum
@@ -5673,28 +5863,30 @@ function ContractSheet({
           </h1>
 
         <p className="mb-3 text-sm font-bold">
-          التاريخ: {contract.contractDate || "…"}
+          التاريخ : {contract.contractDate || "…"}
         </p>
         <p className="mb-4 text-sm font-bold">
-          تم تحرير عقد الاتفاق بين كل من:
+          تم تحرير عقد الاتفاق بين كل من :
         </p>
 
-        {/* الأطراف */}
+        {/*
+          الأطراف بترتيب العقد المبرم وأسطره: الطرف الأول فعنوانه، ثم
+          الطرف الثاني فرقم تواصله فرقمه المدني — كلٌّ في سطر، لا
+          مجموعةً على سطرٍ واحد بشرطات.
+        */}
         <div className="mb-6 space-y-2 text-sm font-bold leading-relaxed">
+          <p>الطرف الأول : السادة / {company.name}</p>
+          {company.address && <p>العنوان : {company.address}</p>}
           <p>
-            الطرف الأول: السادة/ {company.name}
-          </p>
-          {company.address && (
-            <p className="pr-4">العنوان: {company.address}</p>
-          )}
-          <p>
-            <b className="underline">الطرف الثاني:</b>{" "}
-            {isClient ? "السادة / " : "السيد / "}
+            الطرف الثاني : {isClient ? <>السادة / </> : <>السيد / </>}
             {contract.name}
-            {contract.civilId && <> — رقم مدني: {contract.civilId}</>}
-            {contract.passportNumber && <> — رقم الجواز: {contract.passportNumber}</>}
-            {contract.nationality && <> — جنسية: {contract.nationality}</>}
           </p>
+          {contract.phone && <p>رقم التواصل : {contract.phone}</p>}
+          {contract.civilId && <p>الرقم المدني : {contract.civilId}</p>}
+          {contract.passportNumber && (
+            <p>رقم الجواز : {contract.passportNumber}</p>
+          )}
+          {contract.nationality && <p>الجنسية : {contract.nationality}</p>}
         </div>
 
         {/* التمهيد */}
@@ -5722,12 +5914,23 @@ function ContractSheet({
               <h3 className="mb-1 font-bold" style={{ color: CONTRACT_RED }}>
                 {ORDINAL[clauseNo++]}: قيمة العقد
               </h3>
+              {/*
+                نقاط «ثانياً» بنصّها وترتيبها كما في العقد المبرم: القيمة
+                الإجمالية، ثم خصم عقد التراخيص، ثم القيمة النهائية — كلٌّ
+                في سطرٍ ونقطةٍ وحده. وكتابة قيمة العقد هنا مولَّدةً تكرّر
+                النقطة الأولى وتخالف نصّها، فلا تُكتب إلا حين لا نقاط.
+              */}
               <ul className="list-inside list-disc text-sm leading-loose">
-                <li>
-                  القيمة الإجمالية للعقد = <b>{fmt(contract.contractValue)}</b>{" "}
-                  دينار كويتي لا غير.
-                </li>
-                {contract.notes && <li>{contract.notes}</li>}
+                {(contract.notes
+                  ? contract.notes.split("\n").filter((line) => line.trim())
+                  : [
+                      `القيمة الإجمالية للعقد = ${fmt(
+                        contract.contractValue
+                      )} دينار كويتي لا غير.`,
+                    ]
+                ).map((line, index) => (
+                  <li key={index}>{line}</li>
+                ))}
               </ul>
             </div>
 
@@ -5801,49 +6004,51 @@ function ContractSheet({
             </p>
           )}
 
-          <table className="mt-3 w-full border-collapse text-right text-sm">
-            <thead>
-              <tr className="bg-slate-200">
-                <th className="border border-slate-400 px-3 py-2">م</th>
-                <th className="border border-slate-400 px-3 py-2">
-                  {isClient ? "المرحلة والبند" : "الدفعة"}
-                </th>
-                <th className="border border-slate-400 px-3 py-2">
-                  {isClient ? "وصف البند" : "البند"}
-                </th>
-                <th className="border border-slate-400 px-3 py-2">
-                  {isClient ? "الدفعة المستحقة" : "القيمة"}
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {contract.installments.map((i) => (
-                <tr key={i.number}>
-                  <td className="border border-slate-400 px-3 py-2">{i.number}</td>
-                  <td className="border border-slate-400 px-3 py-2">
-                    {isClient ? i.condition.split(" — ")[0] : `الدفعة ${i.number}`}
-                  </td>
-                  <td className="border border-slate-400 px-3 py-2">
-                    {isClient
-                      ? i.condition.split(" — ").slice(1).join(" — ") ||
-                        i.condition
-                      : i.condition || "—"}
+          {/*
+            عقد العميل يُطبع بجدوله الأصلي ذي الأعمدة الستة وبلا سطر
+            إجمالي — فالعقد المبرم لا إجمالي فيه، ومجموع دفعاته الموجبة
+            هو القيمة النهائية المنصوص عليها في «ثانياً».
+          */}
+          {isClient ? (
+            <ClientWorksTable installments={contract.installments} />
+          ) : (
+            <table className="mt-3 w-full border-collapse text-right text-sm">
+              <thead>
+                <tr className="bg-slate-200">
+                  <th className="border border-slate-400 px-3 py-2">م</th>
+                  <th className="border border-slate-400 px-3 py-2">الدفعة</th>
+                  <th className="border border-slate-400 px-3 py-2">البند</th>
+                  <th className="border border-slate-400 px-3 py-2">القيمة</th>
+                </tr>
+              </thead>
+              <tbody>
+                {contract.installments.map((i) => (
+                  <tr key={i.number}>
+                    <td className="border border-slate-400 px-3 py-2">
+                      {i.number}
+                    </td>
+                    <td className="border border-slate-400 px-3 py-2">
+                      الدفعة {i.number}
+                    </td>
+                    <td className="border border-slate-400 px-3 py-2">
+                      {i.condition || "—"}
+                    </td>
+                    <td className="border border-slate-400 px-3 py-2 tabular-nums">
+                      {fmt(Number(i.value) || 0)} د.ك
+                    </td>
+                  </tr>
+                ))}
+                <tr className="font-bold" style={{ background: CONTRACT_SAND }}>
+                  <td colSpan={3} className="border border-slate-400 px-3 py-2">
+                    إجمالي الدفعات
                   </td>
                   <td className="border border-slate-400 px-3 py-2 tabular-nums">
-                    {fmt(Number(i.value) || 0)} د.ك
+                    {fmt(contract.contractValue)} د.ك
                   </td>
                 </tr>
-              ))}
-              <tr className="font-bold" style={{ background: CONTRACT_SAND }}>
-                <td colSpan={3} className="border border-slate-400 px-3 py-2">
-                  إجمالي الدفعات
-                </td>
-                <td className="border border-slate-400 px-3 py-2 tabular-nums">
-                  {fmt(contract.contractValue)} د.ك
-                </td>
-              </tr>
-            </tbody>
-          </table>
+              </tbody>
+            </table>
+          )}
         </div>
 
         {/* التزامات الطرفين — بعد جدول الأعمال كما في العقد المبرم */}
@@ -5930,15 +6135,17 @@ function ContractSheet({
         </div>
         </div>
 
-        {/* تذييل ورق الشركة — يتكرّر أسفل كل صفحة عند الطباعة */}
+        {/* تذييل ورق الشركة — الشريط الأسفل من الصورة نفسها */}
         <div
-          className="mt-10 px-12 pb-8 pt-4 text-xs leading-relaxed"
-          style={{ color: CONTRACT_BROWN, borderTop: `1px solid ${CONTRACT_SAND}` }}
-        >
-          {company.phone && <div>📞 {company.phone}</div>}
-          {company.email && <div>✉ {company.email}</div>}
-          {company.address && <div>📍 {company.address}</div>}
-        </div>
+          className="contract-letterhead mt-10"
+          style={{
+            height: 132,
+            backgroundImage: `url(${LETTERHEAD})`,
+            backgroundSize: "100% auto",
+            backgroundPosition: "bottom center",
+            backgroundRepeat: "no-repeat",
+          }}
+        />
       </div>
     </div>
   );
@@ -6856,7 +7063,11 @@ function SettingsPage({
   ) => void;
   onImportEmployees: (employees: Employee[]) => void;
   onImportProjects: (projects: Project[]) => void;
-  onImportContractors: (contractors: Contractor[]) => void;
+  /** replaceExisting: يستبدل نصّ العقود المطابقة برقمها لا يتخطّاها */
+  onImportContractors: (
+    contractors: Contractor[],
+    replaceExisting: boolean
+  ) => void;
   company: CompanyProfile;
   setCompany: Dispatch<SetStateAction<CompanyProfile>>;
   backupMeta: BackupMeta | null;
@@ -6917,6 +7128,8 @@ function SettingsPage({
     null
   );
   const [picked, setPicked] = useState<Record<string, boolean>>({});
+  /** تحديث نصّ عقدٍ موجود لا تخطّيه — يُطلب صراحةً في كل استيراد */
+  const [replaceContracts, setReplaceContracts] = useState(false);
 
   const readForPicking = (file: File) => {
     const reader = new FileReader();
@@ -6925,6 +7138,7 @@ function SettingsPage({
         const parsed = parseBackup(String(reader.result));
         setPending(parsed);
         setPicked({});
+        setReplaceContracts(false);
         setError("");
       } catch {
         setError("الملف غير صالح");
@@ -7261,6 +7475,34 @@ function SettingsPage({
                     ))}
                   </div>
 
+                  {picked.contractors &&
+                    (() => {
+                      const existing = pending.contractors.filter((c) =>
+                        state.contractors.some(
+                          (o) => o.contractNumber === c.contractNumber
+                        )
+                      );
+                      if (existing.length === 0) return null;
+                      return (
+                        <label className="mt-3 flex items-start gap-2 rounded-lg bg-amber-50 p-3 text-sm">
+                          <input
+                            type="checkbox"
+                            className="mt-1"
+                            checked={replaceContracts}
+                            onChange={(e) => setReplaceContracts(e.target.checked)}
+                          />
+                          <span>
+                            <b>تحديث نصّ العقود الموجودة</b> — في الملف{" "}
+                            {existing.length} عقداً موجوداً عندك بالرقم نفسه (
+                            {existing.map((c) => c.contractNumber).join("، ")}).
+                            بدون هذا الخيار تُتخطّى ويبقى نصّها القديم. ومعه
+                            يُستبدل نصّها ويبقى اعتمادُ كل دفعة لم تتغيّر قيمتها
+                            ولا شرطها.
+                          </span>
+                        </label>
+                      );
+                    })()}
+
                   <p className="mt-3 text-sm text-slate-600">
                     الحركات والقيود والأرصدة الافتتاحية لا تُمَس. الدمج يتجنّب
                     التكرار بالمعرّف أو الاسم.
@@ -7279,8 +7521,14 @@ function SettingsPage({
                           done.push(`${pending.projects.length} مشروع`);
                         }
                         if (picked.contractors) {
-                          onImportContractors(pending.contractors);
-                          done.push(`${pending.contractors.length} عقد`);
+                          onImportContractors(
+                            pending.contractors,
+                            replaceContracts
+                          );
+                          done.push(
+                            `${pending.contractors.length} عقد` +
+                              (replaceContracts ? " (مع تحديث الموجود)" : "")
+                          );
                         }
                         if (picked.materials || picked.receipts) {
                           onImportMaterials(

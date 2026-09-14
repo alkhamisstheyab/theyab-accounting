@@ -12,6 +12,7 @@
  */
 
 import fs from "fs";
+import { createHash } from "crypto";
 import path from "path";
 import { CONTRACTS } from "./contracts-awatef.data.mjs";
 
@@ -19,13 +20,26 @@ const PROJECT = "مشروع عواطف القرطاس";
 const PLOT = { area: "الخيران السكنية", block: "2", plot: "439" };
 const BUILDING = "أرضي + أول + نصف ثاني + بيت درج";
 
-const id = () =>
-  "xxxxxxxx-xxxx-4xxx-8xxx-xxxxxxxxxxxx".replace(/x/g, () =>
-    Math.floor(Math.random() * 16).toString(16)
-  );
+/**
+ * معرّف ثابت مشتقّ من رقم العقد.
+ *
+ * المعرّف العشوائي يجعل كل تصدير عقداً جديداً في نظر المتصفح، فلا
+ * يُحدَّث عقدٌ صُحّح نصّه بل يُرفض كمكرّر أو يُضاف مرتين. والثابت
+ * يجعل إعادة التصدير تصحيحاً لا تكراراً.
+ */
+const id = (key) => {
+  const h = createHash("sha1").update("theyab-contract:" + key).digest("hex");
+  return [
+    h.slice(0, 8),
+    h.slice(8, 12),
+    "4" + h.slice(13, 16),
+    "8" + h.slice(17, 20),
+    h.slice(20, 32),
+  ].join("-");
+};
 
 const contractors = CONTRACTS.map((c) => ({
-  id: id(),
+  id: id(c.number),
   name: c.name,
   specialty: c.workType,
   phone: c.phone ?? "",
@@ -34,7 +48,7 @@ const contractors = CONTRACTS.map((c) => ({
   contractType: "جاري التنفيذ",
   workType: c.workType,
   contractValue: c.value,
-  installmentsCount: c.installments.length,
+  installmentsCount: c.installments.filter((i) => !i.informational).length,
   installments: c.installments.map((i, index) => ({
     number: index + 1,
     value: i.value,
@@ -48,6 +62,13 @@ const contractors = CONTRACTS.map((c) => ({
     confirmedBy: "",
     confirmedAt: "",
     confirmNote: "",
+    // تمثيل جدول العقد كما هو — الحقول الغائبة تُترك غائبة
+    ...(i.no ? { no: i.no } : {}),
+    ...(i.stage ? { stage: i.stage } : {}),
+    ...(i.materials ? { materials: i.materials } : {}),
+    ...(i.rows && i.rows.length ? { rows: i.rows } : {}),
+    ...(i.informational ? { informational: true } : {}),
+    ...(i.banner ? { banner: i.banner } : {}),
   })),
   counterpartyType: c.counterparty,
   documentType: "عقد",
