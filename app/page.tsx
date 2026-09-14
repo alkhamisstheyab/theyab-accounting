@@ -4691,8 +4691,20 @@ function ContractorsPage({
   const set = (key: keyof typeof BLANK_CONTRACT, value: string) =>
     setForm((prev) => ({ ...prev, [key]: value }));
 
+  /*
+    الصفّ التوثيقي (عقد التراخيص والمخططات المخصوم) ليس دفعة: خصمُه
+    مطبَّق سلفاً على القيمة الإجمالية. فعدّه في المجموع يجعل الدفعات
+    تزيد عن قيمة العقد بقيمته، ويطالب النموذج بمعادلةٍ مستحيلة.
+  */
+  const documented = round3(
+    installments
+      .filter((i) => !isPayableInstallment(i))
+      .reduce((a, i) => a + (Number(i.value) || 0), 0)
+  );
   const installmentsTotal = round3(
-    installments.reduce((a, i) => a + (Number(i.value) || 0), 0)
+    installments
+      .filter(isPayableInstallment)
+      .reduce((a, i) => a + (Number(i.value) || 0), 0)
   );
   const contractValue = round3(Number(form.contractValue) || 0);
 
@@ -5253,10 +5265,25 @@ function ContractorsPage({
 
               {installments.length > 0 && (
                 <div className="mt-3 space-y-2">
-                  {installments.map((installment, index) => (
+                  {installments.map((installment, index) => {
+                    const documentary = !isPayableInstallment(installment);
+                    return (
                     <div key={index} className="grid grid-cols-12 gap-2">
-                      <div className="col-span-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm">
-                        الدفعة {index + 1}
+                      <div
+                        className={`col-span-2 rounded-lg border px-3 py-3 text-sm ${
+                          documentary
+                            ? "border-amber-200 bg-amber-50 text-amber-900"
+                            : "border-slate-200 bg-slate-50"
+                        }`}
+                        title={
+                          documentary
+                            ? "صفّ توثيقي — يُطبع في الجدول ولا يدخل المجموع"
+                            : installment.stage || ""
+                        }
+                      >
+                        {documentary
+                          ? "صفّ توثيقي"
+                          : installment.stage || `الدفعة ${index + 1}`}
                       </div>
                       <input
                         type="number"
@@ -5277,19 +5304,26 @@ function ContractorsPage({
                         placeholder="شرط الاستحقاق — بعد صب سقف الدور الأرضي"
                         className={`${inputClass} col-span-5`}
                       />
-                      <select
-                        value={installment.status}
-                        onChange={(e) =>
-                          updateInstallment(index, "status", e.target.value)
-                        }
-                        className={`${inputClass} col-span-2`}
-                      >
-                        {INSTALLMENT_STATUSES.map((s) => (
-                          <option key={s}>{s}</option>
-                        ))}
-                      </select>
+                      {documentary ? (
+                        <div className="col-span-2 px-3 py-3 text-sm text-amber-900">
+                          مخصوم
+                        </div>
+                      ) : (
+                        <select
+                          value={installment.status}
+                          onChange={(e) =>
+                            updateInstallment(index, "status", e.target.value)
+                          }
+                          className={`${inputClass} col-span-2`}
+                        >
+                          {INSTALLMENT_STATUSES.map((s) => (
+                            <option key={s}>{s}</option>
+                          ))}
+                        </select>
+                      )}
                     </div>
-                  ))}
+                    );
+                  })}
 
                   <div
                     className={`rounded-lg border px-4 py-3 font-medium ${
@@ -5300,14 +5334,28 @@ function ContractorsPage({
                   >
                     مجموع الدفعات {fmt(installmentsTotal)} — قيمة العقد{" "}
                     {fmt(contractValue)}
+                    {documented > 0 && (
+                      <span className="block text-sm font-normal">
+                        ومعها صفّ توثيقي بقيمة {fmt(documented)} مخصومة سلفاً —
+                        يُطبع في الجدول ولا يدخل المجموع.
+                      </span>
+                    )}
                   </div>
                 </div>
               )}
             </div>
 
-            <Field label="ملاحظات ختامية">
-              <input
-                type="text"
+            {/*
+              نقاط «ثانياً: قيمة العقد» سطرٌ لكل نقطة. وحقل السطر الواحد
+              كان يبتلع فواصل الأسطر بلا إنذار، فتنقلب النقاط الثلاث
+              نقطةً واحدة عند أول حفظ — ويضيع نصُّ العقد.
+            */}
+            <Field
+              label="ملاحظات العقد"
+              hint="سطرٌ لكل نقطة — تُطبع نقاطاً تحت «ثانياً: قيمة العقد»"
+            >
+              <textarea
+                rows={3}
                 value={form.notes}
                 onChange={(e) => set("notes", e.target.value)}
                 className={inputClass}
@@ -8663,25 +8711,44 @@ function ContractTermsSheet({
   const partsOf = (stage: string) => Math.max(1, counts[stage] ?? 1);
   const partOfSection = (stage: string, section: string) =>
     Math.min(assign[`${stage}|${section}`] ?? 0, partsOf(stage) - 1);
-  const nameOf = (stage: string, index: number) =>
-    names[`${stage}|${index}`] ?? stage;
+
+  /**
+   * خطّة القسمة كما اختيرت — تُشتقّ من الحالة مرّةً واحدة، فتُبنى
+   * منها الشروط وتُعرض الشاشة من المصدر نفسه. فلا تفترق صورةٌ
+   * يراها عن عقدٍ يُبرم.
+   */
+  const plan = useMemo(
+    () =>
+      stages.map(({ stage, sections, total }) => {
+        const count = Math.max(1, counts[stage] ?? 1);
+        return {
+          stage,
+          sections,
+          total,
+          count,
+          parts: Array.from({ length: count }, (_, index) => ({
+            name: names[`${stage}|${index}`] ?? stage,
+            sections: sections.filter(
+              (s) =>
+                Math.min(assign[`${stage}|${s}`] ?? 0, count - 1) === index
+            ),
+          })),
+        };
+      }),
+    [stages, counts, assign, names]
+  );
 
   /** الشروط كما ستُبنى منها الدفعات — تُحسب حيّةً ليراها قبل الإبرام */
   const terms: ContractTerms = useMemo(() => {
     const stageParts: Record<string, StagePart[]> = {};
-    for (const { stage, sections } of stages) {
-      const count = partsOf(stage);
-      if (count <= 1) continue;
-      stageParts[stage] = Array.from({ length: count }, (_, index) => ({
-        name: nameOf(stage, index),
-        sections: sections.filter((s) => partOfSection(stage, s) === index),
-      }));
+    for (const row of plan) {
+      if (row.count > 1) stageParts[row.stage] = row.parts;
     }
     return {
       stageParts,
       consultancy: hasConsultancy ? Number(consultancy) || 0 : 0,
     };
-  }, [stages, counts, assign, names, hasConsultancy, consultancy]);
+  }, [plan, hasConsultancy, consultancy]);
 
   const installments = useMemo(
     () => installmentsFromQuotation(quotation, terms),
@@ -8690,12 +8757,12 @@ function ContractTermsSheet({
   const contractValue = quotationTotals(quotation.lines, quotation.pricingMode).price;
   const payable = installments.filter((i) => !i.informational);
   /** دفعةٌ بلا قسم = قيمتها صفر، فتسقط من الجدول ويُنبَّه عليها */
-  const emptyParts = stages.reduce((sum, { stage, sections }) => {
-    const count = partsOf(stage);
-    if (count <= 1) return sum;
-    const used = new Set(sections.map((s) => partOfSection(stage, s)));
-    return sum + (count - used.size);
-  }, 0);
+  const emptyParts = plan.reduce(
+    (sum, row) =>
+      sum +
+      (row.count <= 1 ? 0 : row.parts.filter((p) => p.sections.length === 0).length),
+    0
+  );
 
   return (
     <div
@@ -8715,8 +8782,7 @@ function ContractTermsSheet({
         </p>
 
         <div className="space-y-4">
-          {stages.map(({ stage, sections, total }) => {
-            const count = partsOf(stage);
+          {plan.map(({ stage, sections, total, count, parts }) => {
             return (
               <div
                 key={stage}
@@ -8759,14 +8825,11 @@ function ContractTermsSheet({
                 ) : (
                   <>
                     <div className="mb-3 grid gap-2 md:grid-cols-2">
-                      {Array.from({ length: count }, (_, index) => {
-                        const part = sections.filter(
-                          (s) => partOfSection(stage, s) === index
-                        );
+                      {parts.map((part, index) => {
                         const value = partTotal(
                           quotation.lines,
                           stage,
-                          part,
+                          part.sections,
                           quotation.pricingMode
                         );
                         return (
@@ -8778,7 +8841,7 @@ function ContractTermsSheet({
                               {index + 1}
                             </span>
                             <input
-                              value={nameOf(stage, index)}
+                              value={part.name}
                               onChange={(e) =>
                                 setNames((prev) => ({
                                   ...prev,
