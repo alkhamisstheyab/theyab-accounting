@@ -9161,6 +9161,47 @@ function ContractLinksPage({
           </Field>
         </div>
 
+        <div className="print-only">
+          <h2 className="mb-1 text-xl font-bold">حركات تنتظر الربط بعقودها</h2>
+          <p className="mb-4 text-sm">
+            {project === "الكل" ? "كل المشاريع" : project} · {visible.length} مجموعة ·{" "}
+            {visible.reduce((n, g) => n + g.movements.length, 0)} حركة ·{" "}
+            {fmt(visible.reduce((n, g) => n + g.total, 0))} د.ك
+          </p>
+          {visible.map((g) => (
+            <div key={g.project + "|" + g.key} className="print-block mb-4">
+              <p className="font-bold">
+                {g.label} — {g.project} · {g.movements.length} حركة ·{" "}
+                {fmt(g.total)} د.ك
+              </p>
+              <table className="w-full text-right text-sm">
+                <thead>
+                  <tr>
+                    <Th>القيد</Th>
+                    <Th>التاريخ</Th>
+                    <Th>الوصف</Th>
+                    <Th>المبلغ</Th>
+                    <Th>رقم العقد</Th>
+                    <Th>رقم الدفعة</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {g.movements.map((m) => (
+                    <tr key={m.id}>
+                      <Td>{m.entryNo}</Td>
+                      <Td>{m.date}</Td>
+                      <Td>{m.description}</Td>
+                      <Td>{fmt(m.amount)}</Td>
+                      <Td>&nbsp;</Td>
+                      <Td>&nbsp;</Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ))}
+        </div>
+
         {visible.length === 0 ? (
           <p className="rounded-xl bg-green-50 p-4 font-bold text-green-800">
             ✓ لا حركات تنتظر الربط في هذا النطاق.
@@ -9188,6 +9229,13 @@ function ContractLinksPage({
                   ? `${picked.length} مجموعة · ${rows.length} حركة`
                   : "اختر مجموعة أو أكثر، ثم العقد"}
               </span>
+              {/* ورقة تُراجَع مع المهندس قبل فتح الشاشة */}
+              <button
+                onClick={() => window.print()}
+                className="rounded-lg bg-slate-900 px-4 py-2 font-bold text-white"
+              >
+                🖨 اطبع القائمة
+              </button>
             </div>
 
             <div className="space-y-2">
