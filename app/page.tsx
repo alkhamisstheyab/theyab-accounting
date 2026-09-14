@@ -155,6 +155,7 @@ import {
   Contractor,
   DEFAULT_PEOPLE,
   Installment,
+  isPayableInstallment,
   Material,
   MaterialReceipt,
   Project,
@@ -2999,7 +3000,8 @@ function MovementForm({
                   <option value="">دفعة غير محدّدة</option>
                   {contractors
                     .find((c) => c.contractNumber === form.contractNumber)
-                    ?.installments.map((i) => (
+                    ?.installments.filter(isPayableInstallment)
+                    .map((i) => (
                       <option key={i.number} value={i.number}>
                         الدفعة {i.number} — {fmt(Number(i.value) || 0)} د.ك
                         {i.condition ? ` · ${i.condition}` : ""}
@@ -5451,7 +5453,7 @@ function ContractorsPage({
                     </tr>
                   </thead>
                   <tbody>
-                    {selected.installments.map((i) => {
+                    {selected.installments.filter(isPayableInstallment).map((i) => {
                       const value = round3(Number(i.value) || 0);
                       const paid = p.byInstallment.get(i.number) ?? 0;
                       return (
@@ -5541,11 +5543,13 @@ function ContractorsPage({
                           className={inputClass}
                         >
                           <option value="">دفعة غير محدّدة</option>
-                          {selected.installments.map((i) => (
+                          {selected.installments
+                            .filter(isPayableInstallment)
+                            .map((i) => (
                             <option key={i.number} value={i.number}>
                               الدفعة {i.number} — {fmt(Number(i.value) || 0)} د.ك
                             </option>
-                          ))}
+                            ))}
                         </select>
                       </Field>
                     </div>
@@ -10023,12 +10027,14 @@ function InvoicesPage({
               className={inputClass}
             >
               <option value="">—</option>
-              {(contract?.installments ?? []).map((i) => (
+              {(contract?.installments ?? [])
+                .filter(isPayableInstallment)
+                .map((i) => (
                 <option key={i.number} value={i.number}>
                   {installmentLabel(i.number)} — {fmt(Number(i.value) || 0)} د.ك
                   {i.approved ? " · معتمدة" : ""}
                 </option>
-              ))}
+                ))}
             </select>
           </Field>
         </div>
@@ -11472,7 +11478,7 @@ function ApprovalsPage({
 
           const approvedValue = round3(
             contract.installments
-              .filter((i) => i.approved)
+              .filter((i) => isPayableInstallment(i) && i.approved)
               .reduce((sum, i) => sum + (Number(i.value) || 0), 0)
           );
           const progress =
@@ -11551,7 +11557,9 @@ function ApprovalsPage({
                     </tr>
                   </thead>
                   <tbody>
-                    {contract.installments.map((installment) => {
+                    {contract.installments
+                      .filter(isPayableInstallment)
+                      .map((installment) => {
                       const value = round3(Number(installment.value) || 0);
                       const paid =
                         payments.byInstallment.get(installment.number) ?? 0;
