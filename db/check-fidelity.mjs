@@ -7,13 +7,36 @@
 import fs from "fs";
 import path from "path";
 
-const p = path.join(process.env.USERPROFILE, "Desktop", "عقود-عواطف-للاستيراد.json");
+const p = path.join(process.env.USERPROFILE, "Desktop", "عقود-المشاريع-للاستيراد.json");
 const cs = JSON.parse(fs.readFileSync(p, "utf8")).data.contractors;
 let bad = 0;
 const fail = (m) => {
   bad++;
   console.log("  ✗ " + m);
 };
+
+/*
+  مجموع الدفعات يجب أن يساوي قيمة العقد في كل عقد.
+
+  هذا أهم فحصٍ في الملف: خطأ رقمٍ واحد في نقل جدول الدفعات يمرّ
+  بلا أثر ظاهر، ثم يظهر بعد شهور كدفعةٍ ناقصة أو زائدة على مقاول.
+  والصفّ التوثيقي لا يدخل المجموع — خصمُه مطبَّق سلفاً.
+*/
+console.log("العقد  قيمة العقد  مجموع الدفعات");
+for (const c of cs) {
+  const sum =
+    Math.round(
+      c.installments
+        .filter((i) => !i.informational)
+        .reduce((a, i) => a + (Number(i.value) || 0), 0) * 1000
+    ) / 1000;
+  const ok = Math.abs(sum - c.contractValue) < 0.001;
+  if (!ok) fail(`العقد ${c.contractNumber}: الدفعات ${sum} لا تساوي قيمته ${c.contractValue}`);
+  console.log(
+    `  ${c.contractNumber}  ${String(c.contractValue).padStart(9)}  ` +
+      `${String(sum).padStart(12)}  ${ok ? "✓" : "✗"}`
+  );
+}
 
 console.log("العقد   تمهيد  التزامات  وصف المبنى  ملاحظات");
 for (const c of cs) {

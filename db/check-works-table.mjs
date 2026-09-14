@@ -10,7 +10,7 @@
 import fs from "fs";
 import path from "path";
 
-const p = path.join(process.env.USERPROFILE, "Desktop", "عقود-عواطف-للاستيراد.json");
+const p = path.join(process.env.USERPROFILE, "Desktop", "عقود-المشاريع-للاستيراد.json");
 const cs = JSON.parse(fs.readFileSync(p, "utf8")).data.contractors;
 
 let bad = 0;
