@@ -186,7 +186,11 @@ import {
   PricingMode,
   clearChoices,
   customLine,
+  ContractTerms,
+  StagePart,
   installmentsFromQuotation,
+  partTotal,
+  sectionsOfStage,
   isFreeFormScope,
   quotationAgeDays,
   selectAllChoices,
@@ -1234,13 +1238,22 @@ export default function HomeV2() {
               onPrint={(quotation, internal) =>
                 setQuoteSheet({ quotation, internal })
               }
-              onConvert={(quotation) => {
+              /*
+                رقم العقد يُحسب هنا لا في شاشة الإبرام: المصدر واحد،
+                فلا يختلف ما يراه عمّا يُكتب.
+              */
+              nextContractNumber={String(
+                contractors
+                  .map((c) => Number(c.contractNumber) || 0)
+                  .reduce((max, n) => Math.max(max, n), 1000) + 1
+              )}
+              onConvert={(quotation, terms) => {
                 if (!allow("contractors.manage")) {
                   window.alert("إنشاء العقد يحتاج صلاحية «إدارة العقود والدفعات».");
                   return null;
                 }
                 const totals = quotationTotals(quotation.lines, quotation.pricingMode);
-                const rows = installmentsFromQuotation(quotation);
+                const rows = installmentsFromQuotation(quotation, terms);
                 if (rows.length === 0) {
                   window.alert("لا توجد بنود مختارة بقيمة — راجع العرض أولاً.");
                   return null;
@@ -1252,15 +1265,7 @@ export default function HomeV2() {
                   .reduce((max, n) => Math.max(max, n), 1000);
                 const number = String(top + 1);
 
-                if (
-                  !window.confirm(
-                    `إنشاء عقد رقم ${number} للعميل ${
-                      quotation.clientName || "—"
-                    } بقيمة ${fmt(totals.price)} د.ك و${rows.length} دفعات؟`
-                  )
-                ) {
-                  return null;
-                }
+
 
                 const scopeText =
                   quotation.scope === "تشطيب كامل"
@@ -1291,7 +1296,7 @@ export default function HomeV2() {
                   contractType: "جاري التنفيذ",
                   workType: `عقد ${quotation.scope}`,
                   contractValue: totals.price,
-                  installmentsCount: rows.length,
+                  installmentsCount: rows.filter((r) => !r.informational).length,
                   installments: rows.map((r) => ({
                     ...r,
                     status: "غير مستحقة",
@@ -1334,11 +1339,23 @@ export default function HomeV2() {
                   clauses: [],
                   obligations: CLIENT_SECOND_PARTY_DUTIES,
                   /*
-                   * بلا ملاحظات: «ثانياً» يكتب قيمة العقد وحدها ما لم
-                   * تُنقل نقاطُ عقدٍ مبرم. وملاحظة النسختين بندٌ قائم
-                   * في «الثاني عشر: العقد» فلا تُكرَّر هنا.
+                   * «ثانياً» يكتب قيمة العقد وحدها، إلا أن يُخصم منها
+                   * عقد مكتب استشاري فيصير ثلاث نقاط كعقد عواطف:
+                   * الإجمالية، ثم الخصم، ثم النهائية. وملاحظة النسختين
+                   * بندٌ قائم في «الثاني عشر: العقد» فلا تُكرَّر هنا.
                    */
-                  notes: "",
+                  notes:
+                    terms.consultancy > 0
+                      ? [
+                          `القيمة الإجمالية للعقد = ${round3(
+                            totals.price + terms.consultancy
+                          )} دينار كويتي لا غير.`,
+                          "تم خصم قيمة عقد التراخيص والمخططات من القيمة الإجمالية لهذا العقد",
+                          `القيمة النهائية للعقد = ${round3(
+                            totals.price
+                          )} دينار كويتي لا غير.`,
+                        ].join("\n")
+                      : "",
                 };
 
                 setContractors((prev) => [...prev, contract]);
@@ -1347,7 +1364,13 @@ export default function HomeV2() {
                   "عقد",
                   `عقد عميل ${number} من عرض السعر ${quotation.number} — ${
                     quotation.clientName
-                  } · ${fmt(totals.price)} د.ك · ${rows.length} دفعات`
+                  } · ${fmt(totals.price)} د.ك · ${
+                    rows.filter((r) => !r.informational).length
+                  } دفعات${
+                    terms.consultancy > 0
+                      ? ` · خصم عقد استشاري ${fmt(terms.consultancy)}`
+                      : ""
+                  }`
                 );
 
                 /*
@@ -8566,6 +8589,298 @@ function WorkItemsPage({
 /* عروض الأسعار                                                        */
 /* ================================================================== */
 
+/* ================================================================== */
+/* إبرام العقد — قسمة الدفعات وخصم العقد الاستشاري                     */
+/* ================================================================== */
+
+/**
+ * ما يُقرَّر مع العميل قبل التوقيع، لا ما يفرضه النظام.
+ *
+ * قسمةُ المرحلة قرارُ تفاوض: عقد عواطف يقسّم الهيكل الأسود على أدواره
+ * ويجعل التشطيب تسع دفعات، وعقدٌ آخر يجعل المرحلة دفعةً واحدة. فالشاشة
+ * تعرض كل مرحلة وأقسامها، ويوزّع صاحب القرار الأقسام على دفعاتٍ
+ * يسمّيها. وقيمة كل دفعة تُجمع من أقسامها — فلا يُدخَل مبلغ يدوياً،
+ * ولا يختلّ مجموع الدفعات عن قيمة العقد أبداً.
+ *
+ * وعقد المكتب الاستشاري اختياري: يظهر صفّه التوثيقي ونقطتا «ثانياً»
+ * إن وُجد، ويغيب كلّه إن لم يوجد.
+ */
+function ContractTermsSheet({
+  quotation,
+  contractNumber,
+  onCancel,
+  onConfirm,
+}: {
+  quotation: Quotation;
+  contractNumber: string;
+  onCancel: () => void;
+  onConfirm: (terms: ContractTerms) => void;
+}) {
+  /** عدد دفعات كل مرحلة — الغائبة دفعة واحدة */
+  const [counts, setCounts] = useState<Record<string, number>>({});
+  /** لكل قسم رقمُ دفعته داخل مرحلته */
+  const [assign, setAssign] = useState<Record<string, number>>({});
+  /** اسم كل دفعة كما يظهر في عمود المرحلة */
+  const [names, setNames] = useState<Record<string, string>>({});
+  const [hasConsultancy, setHasConsultancy] = useState(false);
+  const [consultancy, setConsultancy] = useState("");
+
+  const stages = useMemo(
+    () =>
+      stagesOfScope(quotation.scope)
+        .map((stage) => ({
+          stage,
+          sections: sectionsOfStage(quotation.lines, stage),
+          total: stageTotals(quotation.lines, stage, quotation.pricingMode).price,
+        }))
+        .filter((s) => s.total > 0),
+    [quotation]
+  );
+
+  const partsOf = (stage: string) => Math.max(1, counts[stage] ?? 1);
+  const partOfSection = (stage: string, section: string) =>
+    Math.min(assign[`${stage}|${section}`] ?? 0, partsOf(stage) - 1);
+  const nameOf = (stage: string, index: number) =>
+    names[`${stage}|${index}`] ?? stage;
+
+  /** الشروط كما ستُبنى منها الدفعات — تُحسب حيّةً ليراها قبل الإبرام */
+  const terms: ContractTerms = useMemo(() => {
+    const stageParts: Record<string, StagePart[]> = {};
+    for (const { stage, sections } of stages) {
+      const count = partsOf(stage);
+      if (count <= 1) continue;
+      stageParts[stage] = Array.from({ length: count }, (_, index) => ({
+        name: nameOf(stage, index),
+        sections: sections.filter((s) => partOfSection(stage, s) === index),
+      }));
+    }
+    return {
+      stageParts,
+      consultancy: hasConsultancy ? Number(consultancy) || 0 : 0,
+    };
+  }, [stages, counts, assign, names, hasConsultancy, consultancy]);
+
+  const installments = useMemo(
+    () => installmentsFromQuotation(quotation, terms),
+    [quotation, terms]
+  );
+  const contractValue = quotationTotals(quotation.lines, quotation.pricingMode).price;
+  const payable = installments.filter((i) => !i.informational);
+  /** دفعةٌ بلا قسم = قيمتها صفر، فتسقط من الجدول ويُنبَّه عليها */
+  const emptyParts = stages.reduce((sum, { stage, sections }) => {
+    const count = partsOf(stage);
+    if (count <= 1) return sum;
+    const used = new Set(sections.map((s) => partOfSection(stage, s)));
+    return sum + (count - used.size);
+  }, 0);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 overflow-auto bg-slate-800/60 p-6"
+      onClick={onCancel}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="mx-auto max-w-4xl rounded-2xl bg-white p-6 shadow-xl"
+      >
+        <h2 className="mb-1 text-xl font-bold">
+          إبرام العقد رقم {contractNumber}
+        </h2>
+        <p className="mb-5 text-sm text-slate-600">
+          {quotation.clientName || "—"} · {quotation.scope} ·{" "}
+          <b>{fmt(contractValue)}</b> د.ك · تسعير {quotation.pricingMode}
+        </p>
+
+        <div className="space-y-4">
+          {stages.map(({ stage, sections, total }) => {
+            const count = partsOf(stage);
+            return (
+              <div
+                key={stage}
+                className="rounded-xl border border-slate-300 p-4"
+              >
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                  <p className="font-bold">
+                    {stage}{" "}
+                    <span className="font-normal text-slate-500">
+                      — {fmt(total)} د.ك · {sections.length} بند
+                    </span>
+                  </p>
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className="text-slate-600">عدد الدفعات:</span>
+                    {[1, 2, 3, 4, 5, 6]
+                      .filter((n) => n <= Math.max(1, sections.length))
+                      .map((n) => (
+                        <button
+                          key={n}
+                          onClick={() =>
+                            setCounts((prev) => ({ ...prev, [stage]: n }))
+                          }
+                          className={`h-9 w-9 rounded-lg font-bold ${
+                            count === n
+                              ? "bg-blue-600 text-white"
+                              : "bg-slate-100 text-slate-700"
+                          }`}
+                        >
+                          {n}
+                        </button>
+                      ))}
+                  </div>
+                </div>
+
+                {count === 1 ? (
+                  <p className="text-sm text-slate-600">
+                    دفعة واحدة تُستحق عند الانتهاء من المرحلة، وبنودها كلها
+                    في صفّ واحد من الجدول.
+                  </p>
+                ) : (
+                  <>
+                    <div className="mb-3 grid gap-2 md:grid-cols-2">
+                      {Array.from({ length: count }, (_, index) => {
+                        const part = sections.filter(
+                          (s) => partOfSection(stage, s) === index
+                        );
+                        const value = partTotal(
+                          quotation.lines,
+                          stage,
+                          part,
+                          quotation.pricingMode
+                        );
+                        return (
+                          <div
+                            key={index}
+                            className="flex items-center gap-2 rounded-lg bg-slate-50 p-2"
+                          >
+                            <span className="shrink-0 text-sm font-bold text-slate-500">
+                              {index + 1}
+                            </span>
+                            <input
+                              value={nameOf(stage, index)}
+                              onChange={(e) =>
+                                setNames((prev) => ({
+                                  ...prev,
+                                  [`${stage}|${index}`]: e.target.value,
+                                }))
+                              }
+                              placeholder={stage}
+                              className={inputClass}
+                            />
+                            <span
+                              className={`shrink-0 tabular-nums text-sm font-bold ${
+                                value > 0 ? "text-slate-800" : "text-red-600"
+                              }`}
+                            >
+                              {fmt(value)}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    <p className="mb-2 text-sm text-slate-600">
+                      وزّع بنود المرحلة على دفعاتها:
+                    </p>
+                    <div className="grid gap-2 md:grid-cols-2">
+                      {sections.map((section) => (
+                        <label
+                          key={section}
+                          className="flex items-center gap-2 text-sm"
+                        >
+                          <select
+                            value={partOfSection(stage, section)}
+                            onChange={(e) =>
+                              setAssign((prev) => ({
+                                ...prev,
+                                [`${stage}|${section}`]: Number(e.target.value),
+                              }))
+                            }
+                            className="w-16 rounded-lg border border-slate-300 px-2 py-1"
+                          >
+                            {Array.from({ length: count }, (_, index) => (
+                              <option key={index} value={index}>
+                                {index + 1}
+                              </option>
+                            ))}
+                          </select>
+                          <span>{section}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* عقد المكتب الاستشاري — يظهر إن وُجد ويغيب إن لم يوجد */}
+        <div className="mt-5 rounded-xl border border-slate-300 p-4">
+          <label className="flex items-center gap-2 font-bold">
+            <input
+              type="checkbox"
+              checked={hasConsultancy}
+              onChange={(e) => setHasConsultancy(e.target.checked)}
+            />
+            <span>عقد مكتب استشاري (تراخيص ومخططات) يُخصم من هذا العقد</span>
+          </label>
+          {hasConsultancy ? (
+            <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
+              <span>قيمته:</span>
+              <input
+                value={consultancy}
+                onChange={(e) => setConsultancy(e.target.value)}
+                inputMode="decimal"
+                placeholder="4000"
+                className="w-32 rounded-lg border border-slate-300 px-3 py-2 tabular-nums"
+              />
+              <span>د.ك — فيُكتب في «ثانياً»:</span>
+              <span className="rounded-lg bg-slate-100 px-3 py-2 tabular-nums">
+                الإجمالية {fmt(contractValue + (Number(consultancy) || 0))} ·
+                الخصم {fmt(Number(consultancy) || 0)} · النهائية{" "}
+                {fmt(contractValue)}
+              </span>
+            </div>
+          ) : (
+            <p className="mt-2 text-sm text-slate-600">
+              بلا عقد استشاري: لا صفّ خصمٍ في الجدول، و«ثانياً» يكتب قيمة
+              العقد وحدها.
+            </p>
+          )}
+        </div>
+
+        <div className="mt-5 rounded-xl bg-blue-50 p-4 text-sm">
+          <b>{payable.length}</b> دفعة، مجموعها{" "}
+          <b className="tabular-nums">
+            {fmt(payable.reduce((s, i) => s + (Number(i.value) || 0), 0))}
+          </b>{" "}
+          د.ك — وقيمة العقد <b className="tabular-nums">{fmt(contractValue)}</b>{" "}
+          د.ك.
+          {emptyParts > 0 && (
+            <span className="mr-2 font-bold text-red-700">
+              و{emptyParts} دفعة بلا بنود، ستسقط من الجدول.
+            </span>
+          )}
+        </div>
+
+        <div className="mt-5 flex gap-3">
+          <button
+            onClick={() => onConfirm(terms)}
+            className="rounded-lg bg-blue-600 px-6 py-3 font-bold text-white"
+          >
+            أبرِم العقد
+          </button>
+          <button
+            onClick={onCancel}
+            className="rounded-lg bg-slate-200 px-6 py-3 font-bold"
+          >
+            إلغاء
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function QuotationsPage({
   quotations,
   workItems,
@@ -8576,6 +8891,7 @@ function QuotationsPage({
   setQuotations,
   onPrint,
   onConvert,
+  nextContractNumber,
   onLog,
 }: {
   quotations: Quotation[];
@@ -8586,8 +8902,10 @@ function QuotationsPage({
   currentUserName: string;
   setQuotations: Dispatch<SetStateAction<Quotation[]>>;
   onPrint: (quotation: Quotation, internal: boolean) => void;
-  /** يُنشئ عقد العميل من العرض المقبول ويعيد رقمه */
-  onConvert: (quotation: Quotation) => string | null;
+  /** يُنشئ عقد العميل من العرض المقبول بشروط الإبرام، ويعيد رقمه */
+  onConvert: (quotation: Quotation, terms: ContractTerms) => string | null;
+  /** رقم العقد الذي سيُعطى — يُعرض في شاشة الإبرام قبل الإنشاء */
+  nextContractNumber: string;
   onLog: (
     action: AuditAction,
     entity: AuditEntity,
@@ -8596,6 +8914,8 @@ function QuotationsPage({
   ) => void;
 }) {
   const [openId, setOpenId] = useState<string | null>(null);
+  /** شاشة الإبرام: قسمة الدفعات وخصم العقد الاستشاري */
+  const [terms, setTerms] = useState(false);
   /** وضع العرض: يخفي التكلفة والهامش لتُدار الشاشة نحو العميل */
   const [clientMode, setClientMode] = useState(false);
 
@@ -8911,14 +9231,25 @@ function QuotationsPage({
                 يومه الأول.
               </p>
               <button
-                onClick={() => {
-                  const number = onConvert(open);
-                  if (number) set({ contractNumber: number });
-                }}
+                onClick={() => setTerms(true)}
                 className="rounded-lg bg-blue-600 px-6 py-3 font-bold text-white"
               >
                 أنشئ العقد من هذا العرض
               </button>
+
+              {/* القسمة والخصم يُقرَّران قبل الإبرام لا بعده */}
+              {terms && (
+                <ContractTermsSheet
+                  quotation={open}
+                  contractNumber={nextContractNumber}
+                  onCancel={() => setTerms(false)}
+                  onConfirm={(chosen) => {
+                    setTerms(false);
+                    const number = onConvert(open, chosen);
+                    if (number) set({ contractNumber: number });
+                  }}
+                />
+              )}
             </>
           )}
         </Panel>

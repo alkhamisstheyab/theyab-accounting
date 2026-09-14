@@ -14,8 +14,13 @@ import { createJiti } from "jiti";
 
 const jiti = createJiti(import.meta.url);
 const { SEED_WORK_ITEMS } = await jiti.import("../lib/work-items-seed.ts");
-const { SCOPES, linesForScope, installmentsFromQuotation, quotationTotals } =
-  await jiti.import("../lib/quotations.ts");
+const {
+  SCOPES,
+  linesForScope,
+  installmentsFromQuotation,
+  quotationTotals,
+  sectionsOfStage,
+} = await jiti.import("../lib/quotations.ts");
 
 let bad = 0;
 const fail = (m) => {
@@ -106,6 +111,70 @@ for (const scope of SCOPES) {
   }
 }
 
+/* ---------------------------------------------------------------- */
+/* القسمة والخصم — ما يختاره صاحب القرار عند الإبرام                  */
+/* ---------------------------------------------------------------- */
+
+{
+  const lines = linesForScope(SEED_WORK_ITEMS, "تشطيب كامل", []).map((l) => ({
+    ...l,
+    chosen: true,
+    quantity: l.quantity || 1,
+    price: 100,
+    materialPrice: 40,
+  }));
+  const quotation = { scope: "تشطيب كامل", lines, pricingMode: "مصنعية ومواد" };
+  const value = quotationTotals(lines, "مصنعية ومواد").price;
+
+  // الهيكل الأسود يُقسَّم على أقسامه قسمين، كما يُقسَّم على الأدوار
+  const sections = sectionsOfStage(lines, "الهيكل الأسود");
+  const half = Math.ceil(sections.length / 2);
+  const terms = {
+    stageParts: {
+      "الهيكل الأسود": [
+        { name: "الهيكل الأسود : الأرضي", sections: sections.slice(0, half) },
+        { name: "الهيكل الأسود : الأول", sections: sections.slice(half) },
+      ],
+    },
+    consultancy: 4000,
+  };
+
+  const inst = installmentsFromQuotation(quotation, terms);
+  console.log("\n=== إبرامٌ بقسمة الهيكل الأسود وخصم عقد استشاري 4000 ===");
+  console.log("   م  المرحلة                    بنود  الدفعة");
+  for (const i of inst) {
+    console.log(
+      `  ${String(i.no).padStart(2)}  ${(i.stage || "—").padEnd(24)}  ` +
+        `${String(i.rows.length).padStart(3)}  ` +
+        `${(i.informational ? "(" + i.value + "-)" : i.value).padStart(8)}` +
+        (i.banner ? "   ▶ " + i.banner : "")
+    );
+  }
+
+  const payable = inst.filter((i) => !i.informational);
+  const sum = payable.reduce((a, i) => a + Number(i.value), 0);
+  console.log(`  مجموع الدفعات القابلة للصرف ${sum} · قيمة العقد ${value}`);
+
+  if (Math.abs(sum - value) > 0.001)
+    fail(`القسمة غيّرت المجموع: ${sum} لا ${value}`);
+  if (inst.filter((i) => i.informational).length !== 1)
+    fail("صفّ العقد الاستشاري التوثيقي مفقود أو مكرّر");
+  if (inst[0].stage !== "" || !inst[0].informational)
+    fail("صفّ الخصم يجب أن يتصدّر الجدول بلا اسم مرحلة");
+  const black = inst.filter((i) => i.stage.startsWith("الهيكل الأسود"));
+  if (black.length !== 2) fail("الهيكل الأسود لم ينقسم دفعتين");
+  if (black.filter((i) => i.banner).length !== 1)
+    fail("السطر العريض يجب أن يلي آخر أجزاء المرحلة وحده");
+  if (black[1].banner !== "الانتهاء من الهيكل الأسود")
+    fail("السطر العريض في غير موضعه");
+  if (new Set(inst.map((i) => i.no)).size !== inst.length)
+    fail("أرقام صفوف «م» متكرّرة");
+
+  // وبلا خصم: لا صفّ توثيقي البتّة
+  const plain = installmentsFromQuotation(quotation, { stageParts: {}, consultancy: 0 });
+  if (plain.some((i) => i.informational))
+    fail("صفّ الخصم ظهر مع أنه لا عقد استشاري");
+}
 console.log(
   bad === 0
     ? "\n✓ العقد المولَّد من العرض يحمل بنية جدول «رابعاً» كاملة"

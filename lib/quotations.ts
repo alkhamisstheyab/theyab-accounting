@@ -389,21 +389,43 @@ const STAGE_BANNERS: Record<string, string> = {
   "النصف تشطيب": "الانتهاء من أعمال النصف تشطيب",
 };
 
+/** القسم هو «البند» في جدول العقد؛ وبند بلا قسم يمثّل نفسه */
+export const sectionKey = (line: QuotationLine): string =>
+  line.section || line.name;
+
+/** أقسام المرحلة المختارة، بترتيب ظهورها — وهي بنود العقد */
+export function sectionsOfStage(
+  lines: QuotationLine[],
+  stage: string
+): string[] {
+  const seen: string[] = [];
+  for (const line of lines) {
+    if (line.stage !== stage || !line.chosen) continue;
+    const key = sectionKey(line);
+    if (!seen.includes(key)) seen.push(key);
+  }
+  return seen;
+}
+
 /**
  * بنود المرحلة مجموعةً بأقسامها: القسم بندٌ، وأسماء بنوده وصفُه.
  *
  * الكتالوج أربعة مستويات، وجدول العقد عمودان — فالقسم هو البند
  * («التجهيز»، «الحفر»)، وما تحته وصفُه. وبغير هذا التجميع يخرج
  * الجدول بأربعين صفاً للمرحلة الواحدة.
+ *
+ * only: أقسام هذا الجزء وحده حين تُقسَّم المرحلة إلى دفعات.
  */
-function sectionRows(
+export function sectionRows(
   lines: QuotationLine[],
-  stage: string
+  stage: string,
+  only?: string[]
 ): { item: string; description: string }[] {
   const bySection = new Map<string, string[]>();
   for (const line of lines) {
     if (line.stage !== stage || !line.chosen) continue;
-    const key = line.section || line.name;
+    const key = sectionKey(line);
+    if (only && !only.includes(key)) continue;
     const label = [line.name, line.detail].filter(Boolean).join(" ");
     const names = bySection.get(key) ?? [];
     if (label && !names.includes(label)) names.push(label);
@@ -415,6 +437,49 @@ function sectionRows(
   }));
 }
 
+/** قيمة جزءٍ من مرحلة: مجموع أقسامه وحدها */
+export function partTotal(
+  lines: QuotationLine[],
+  stage: string,
+  sections: string[],
+  mode: PricingMode = "مصنعية ومواد"
+): number {
+  return quotationTotals(
+    lines.filter((l) => l.stage === stage && sections.includes(sectionKey(l))),
+    mode
+  ).price;
+}
+
+/**
+ * شروط الإبرام — ما يقرّره صاحب القرار قبل التوقيع مع العميل.
+ *
+ * المرحلة قد تكون دفعة واحدة وقد تُقسَّم: عقد عواطف يقسّم الهيكل
+ * الأسود على الأدوار ويجعل التشطيب تسع دفعات، وعقدٌ آخر لا يقسّم.
+ * فالقسمة قرارُ تفاوضٍ لا قاعدةَ نظام.
+ */
+export type StagePart = {
+  /** اسم الجزء في عمود المرحلة — «الهيكل الأسود : الأرضي» */
+  name: string;
+  /** أقسام المرحلة الداخلة في هذه الدفعة */
+  sections: string[];
+};
+
+export type ContractTerms = {
+  /** لكل مرحلة أجزاؤها — والمرحلة الغائبة دفعةٌ واحدة بكل بنودها */
+  stageParts: Record<string, StagePart[]>;
+  /**
+   * عقد المكتب الاستشاري المخصوم من قيمة هذا العقد — صفر: لا عقد.
+   * يُكتب صفّاً توثيقياً في الجدول ونقطتين في «ثانياً»، كما في
+   * عقد عواطف: 120000 إجمالاً، يُخصم منها 4000، فالنهائي 116000.
+   */
+  consultancy: number;
+};
+
+export const NO_CONTRACT_TERMS: ContractTerms = {
+  stageParts: {},
+  consultancy: 0,
+};
+
 /** دفعة عقدٍ مبنيّة من عرض سعر، ببنية جدول «رابعاً» */
 export type QuotationInstallment = {
   number: number;
@@ -425,32 +490,78 @@ export type QuotationInstallment = {
   materials: string;
   rows: { item: string; description: string }[];
   banner?: string;
+  /** صفٌّ يوثّق خصماً ولا يُصرف — عقد المكتب الاستشاري */
+  informational?: boolean;
 };
 
 export function installmentsFromQuotation(
-  quotation: Quotation
+  quotation: Quotation,
+  terms: ContractTerms = NO_CONTRACT_TERMS
 ): QuotationInstallment[] {
   /* «مصنعيات فقط» تعني أن المواد على المالك — وهو الطرف الثاني */
   const materials =
     quotation.pricingMode === "مصنعيات فقط" ? "الطرف الثاني" : "الطرف الأول";
 
-  const stages: QuotationInstallment[] = stagesOfScope(quotation.scope)
-    .map((stage) => ({
-      stage,
-      total: stageTotals(quotation.lines, stage, quotation.pricingMode).price,
-      rows: sectionRows(quotation.lines, stage),
-    }))
-    .filter((row) => row.total > 0)
-    .map((row, index) => ({
-      number: index + 1,
-      no: index + 1,
-      value: String(row.total),
-      stage: row.stage,
-      materials,
-      rows: row.rows,
-      condition: `عند الانتهاء من مرحلة «${row.stage}»`,
-      banner: STAGE_BANNERS[row.stage],
-    }));
+  const stages: QuotationInstallment[] = [];
+
+  /*
+   * عقد المكتب الاستشاري صفٌّ توثيقي لا دفعة: خصمُه مطبَّق سلفاً على
+   * القيمة الإجمالية، فإدخاله في المجموع يُنقص العقد مرتين.
+   */
+  if (terms.consultancy > 0) {
+    stages.push({
+      number: 1,
+      no: 1,
+      value: String(terms.consultancy),
+      stage: "",
+      materials: "-",
+      rows: [
+        {
+          item: "عقد التراخيص والمخططات",
+          description: `قيمة العقد = ${terms.consultancy} د. ك مخصومة`,
+        },
+      ],
+      condition: "عقد التراخيص والمخططات — مخصوم من القيمة الإجمالية",
+      informational: true,
+    });
+  }
+
+  for (const stage of stagesOfScope(quotation.scope)) {
+    const parts = terms.stageParts[stage]?.length
+      ? terms.stageParts[stage]
+      : [{ name: stage, sections: sectionsOfStage(quotation.lines, stage) }];
+
+    const priced = parts
+      .map((part) => ({
+        part,
+        total: partTotal(
+          quotation.lines,
+          stage,
+          part.sections,
+          quotation.pricingMode
+        ),
+        rows: sectionRows(quotation.lines, stage, part.sections),
+      }))
+      .filter((row) => row.total > 0);
+
+    priced.forEach((row, index) => {
+      stages.push({
+        number: stages.length + 1,
+        no: stages.length + 1,
+        value: String(row.total),
+        stage: row.part.name || stage,
+        materials,
+        rows: row.rows,
+        condition:
+          priced.length > 1
+            ? `عند الانتهاء من «${row.part.name || stage}»`
+            : `عند الانتهاء من مرحلة «${stage}»`,
+        /* السطر العريض يلي آخر أجزاء المرحلة لا أوّلها */
+        banner:
+          index === priced.length - 1 ? STAGE_BANNERS[stage] : undefined,
+      });
+    });
+  }
 
   /*
    * صفّ التسليم كما في العقد المبرم: لا دفعة له، وإنما يوثّق نهاية
