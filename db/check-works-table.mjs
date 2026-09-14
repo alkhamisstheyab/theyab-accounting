@@ -47,7 +47,7 @@ for (const c of cs.filter((x) => x.counterpartyType === "عميل")) {
   const cols = {
     "م": merges((i) => String(i.no ?? "")),
     "المرحلة": merges((i) => i.stage ?? ""),
-    "المواد": merges((i) => i.materials ?? ""),
+    "المواد": merges((i) => (i.no ?? "") + "|" + (i.materials ?? "")),
   };
 
   console.log(`العقد ${c.contractNumber} — ${total} صفاً في الجدول`);

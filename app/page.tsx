@@ -5675,7 +5675,13 @@ function ClientWorksTable({ installments }: { installments: Installment[] }) {
 
   const noSpan = merges((i) => String(i.no ?? ""));
   const stageSpan = merges((i) => i.stage ?? "");
-  const matSpan = merges((i) => i.materials ?? "");
+  /*
+    المواد تُدمج داخل صفّ «م» الواحد لا عبره: الدمج عبر الصفوف يصنع
+    خليّةً بخمسةٍ وعشرين صفاً لا تنقسم بين صفحتين، فيدفعها المتصفّح
+    إلى صفحة جديدة ويترك ما قبلها بياضاً. والعقد المبرم نفسه يعيد
+    كتابتها في كل صفحة.
+  */
+  const matSpan = merges((i) => (i.no ?? "") + "|" + (i.materials ?? ""));
 
   const cell: React.CSSProperties = {
     border: "1px solid #000",
@@ -5685,7 +5691,10 @@ function ClientWorksTable({ installments }: { installments: Installment[] }) {
   const mid: React.CSSProperties = { ...cell, textAlign: "center", fontWeight: 700 };
 
   return (
-    <table className="mt-3 w-full text-right" style={{ borderCollapse: "collapse" }}>
+    <table
+      className="works-table mt-3 w-full text-right"
+      style={{ borderCollapse: "collapse" }}
+    >
       <colgroup>
         {WORKS_COLUMNS.map((w, index) => (
           <col key={index} style={{ width: w }} />
@@ -5826,7 +5835,7 @@ function ContractSheet({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="voucher-body contract-sheet mx-auto flex max-w-4xl flex-col bg-white shadow-xl"
+        className="voucher-body contract-sheet mx-auto max-w-4xl bg-white shadow-xl"
       >
         <div className="flex justify-end gap-3 p-8 pb-0 no-print">
           <button
@@ -5844,22 +5853,52 @@ function ContractSheet({
         </div>
 
         {/*
-          ترويسة ورق الشركة — الشريط الأعلى من صورة الورق نفسها التي
-          طُبع عليها العقد المبرم، فالشعار بموضعه ومقاسه لا بتقديرنا.
+          ورق الشركة يتكرّر على كل صفحة عند الطباعة لا على الأولى
+          وحدها. و thead و tfoot هما الوحيدان اللذان تكرّرهما
+          المتصفّحات على كل صفحة وتحجز لهما مكاناً، فلا يركبان على
+          النصّ كما يفعل الثابت الموضع. والشريطان من صورة الورق
+          نفسها التي طُبع عليها العقد المبرم: أعلاها الشعار وأسفلها
+          بيانات التواصل، بمواضعها ومقاساتها لا بتقديرنا.
         */}
-        <div
-          className="contract-letterhead"
-          style={{
-            width: "100%",
-            aspectRatio: "1529 / 340",
-            backgroundImage: `url(${LETTERHEAD})`,
-            backgroundSize: "100% auto",
-            backgroundPosition: "top center",
-            backgroundRepeat: "no-repeat",
-          }}
-        />
-
-        <div className="flex-1 px-12 pt-2">
+        <table className="contract-paper">
+          <thead>
+            <tr>
+              <td>
+                <div
+                  className="contract-letterhead"
+                  style={{
+                    width: "100%",
+                    aspectRatio: "1529 / 340",
+                    backgroundImage: `url(${LETTERHEAD})`,
+                    backgroundSize: "100% auto",
+                    backgroundPosition: "top center",
+                    backgroundRepeat: "no-repeat",
+                  }}
+                />
+              </td>
+            </tr>
+          </thead>
+          <tfoot>
+            <tr>
+              <td>
+                <div
+                  className="contract-letterhead"
+                  style={{
+                    width: "100%",
+                    aspectRatio: "1529 / 300",
+                    backgroundImage: `url(${LETTERHEAD})`,
+                    backgroundSize: "100% auto",
+                    backgroundPosition: "bottom center",
+                    backgroundRepeat: "no-repeat",
+                  }}
+                />
+              </td>
+            </tr>
+          </tfoot>
+          <tbody>
+            <tr>
+              <td>
+        <div className="px-12 pb-8 pt-2">
 
           <h1 className="mb-8 text-center text-2xl font-bold">
             {isAddendum
@@ -6017,7 +6056,7 @@ function ContractSheet({
           {isClient ? (
             <ClientWorksTable installments={contract.installments} />
           ) : (
-            <table className="mt-3 w-full border-collapse text-right text-sm">
+            <table className="works-table mt-3 w-full border-collapse text-right text-sm">
               <thead>
                 <tr className="bg-slate-200">
                   <th className="border border-slate-400 px-3 py-2">م</th>
@@ -6125,8 +6164,8 @@ function ContractSheet({
             : "هذا و تفضلوا منا فائق الإحترام و التقدير ،،،،،"}
         </p>
 
-        {/* التواقيع */}
-        <div className="grid grid-cols-2 gap-12 text-sm">
+        {/* التواقيع — لا تنقسم بين صفحتين */}
+        <div className="print-block grid grid-cols-2 gap-12 text-sm">
           <div>
             <p className="mb-1 font-bold underline">
               {isClient ? "توقيع الطرف الأول" : "طرف أول (الشركة)"}
@@ -6148,19 +6187,10 @@ function ContractSheet({
           </div>
         </div>
         </div>
-
-        {/* تذييل ورق الشركة — الشريط الأسفل من الصورة نفسها */}
-        <div
-          className="contract-letterhead mt-10"
-          style={{
-            width: "100%",
-            aspectRatio: "1529 / 300",
-            backgroundImage: `url(${LETTERHEAD})`,
-            backgroundSize: "100% auto",
-            backgroundPosition: "bottom center",
-            backgroundRepeat: "no-repeat",
-          }}
-        />
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
   );

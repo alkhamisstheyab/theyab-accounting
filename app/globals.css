@@ -46,9 +46,25 @@ body {
   line-height: 2;
 }
 
-.contract-sheet table {
+.contract-sheet .works-table {
   font-size: 14px;
   line-height: 1.7;
+}
+
+/*
+  جدول الورقة: وعاءٌ لا شكل له. ترويسته وتذييله شريطا ورق الشركة،
+  والمتصفّح يكرّرهما على كل صفحة عند الطباعة ويحجز لهما مكانهما.
+*/
+.contract-paper {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.contract-paper > thead > tr > td,
+.contract-paper > tfoot > tr > td,
+.contract-paper > tbody > tr > td {
+  padding: 0;
+  border: 0;
 }
 
 /* شريطا ورق الشركة: الصورة نفسها، أعلاها ثم أسفلها */
@@ -193,19 +209,47 @@ body {
     font-size: 11pt;
   }
 
-  .contract-sheet table {
+  .contract-sheet .works-table {
     font-size: 10.5pt;
   }
 
   /* حدود جدول العقد سوداء كالأصل، ولا يفرض عليها تنسيق الطباعة العام */
-  .contract-sheet th,
-  .contract-sheet td {
+  .contract-sheet .works-table th,
+  .contract-sheet .works-table td {
     border: 1px solid #000 !important;
     color: #000 !important;
   }
 
+  /* وعاء الورقة نفسه لا حدود له ولا حشو — وإلا أُطِّر ورقُ الشركة */
+  .contract-sheet .contract-paper > thead > tr > td,
+  .contract-sheet .contract-paper > tfoot > tr > td,
+  .contract-sheet .contract-paper > tbody > tr > td {
+    border: 0 !important;
+    padding: 0 !important;
+  }
+
+  /*
+    صفّ الوعاء وحده يُستثنى من «الصفّ لا ينقسم»: هو العقد كلّه، فإن
+    مُنع من الانقسام حُشر في صفحة واحدة وضاع ما زاد.
+  */
+  .contract-sheet .contract-paper > tbody > tr,
+  .contract-sheet .contract-paper > tbody > tr > td {
+    break-inside: auto !important;
+    page-break-inside: auto !important;
+  }
+
+  /* ووعاءُ الورقة جدولٌ، فلا يرث نصُّ العقد مقاسَ خطّ الجداول */
+  .contract-sheet .contract-paper > tbody > tr > td {
+    font-size: 11pt;
+  }
+
+  /* وترويسته ليست ترويسة جدول فتُصبَغ بالبنّي */
+  .contract-sheet .contract-paper > thead > tr > td {
+    background: transparent !important;
+  }
+
   /* ترويسة الجدول بنّية لا رمادية */
-  .contract-sheet thead th {
+  .contract-sheet .works-table thead th {
     background: #847450 !important;
   }
 
