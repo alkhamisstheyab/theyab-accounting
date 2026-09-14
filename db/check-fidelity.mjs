@@ -39,11 +39,18 @@ for (const c of cs) {
 }
 
 console.log("العقد   تمهيد  التزامات  وصف المبنى  ملاحظات");
+/*
+  التمهيد يصف موضع العمل وأطرافه، وبدونه لا يُعرف العقد من مطبوعته.
+  أما الالتزامات فبعض العقود لا تفردها بنداً، بل تكتبها في ملاحظاتها —
+  فغيابها يُعرَض ولا يُعدّ خطأً. والمطلوب أن يبقى للعقد وصفٌ ما.
+*/
 for (const c of cs) {
   const pre = c.preamble.length;
   const obl = c.obligations.length;
-  const needs = c.counterpartyType !== "مورّد";
-  if (needs && (pre === 0 || (c.contractNumber !== "2002" && obl === 0))) bad++;
+  if (c.counterpartyType !== "مورّد" && pre === 0)
+    fail(`العقد ${c.contractNumber}: بلا تمهيد`);
+  if (pre === 0 && obl === 0 && c.notes.length === 0)
+    fail(`العقد ${c.contractNumber}: بلا تمهيد ولا التزامات ولا ملاحظات`);
   console.log(
     `${c.contractNumber}    ${String(pre).padStart(4)}   ${String(obl).padStart(5)}    ` +
       `${String(c.buildingDescription.length).padStart(6)}     ${String(c.notes.length).padStart(5)}`
