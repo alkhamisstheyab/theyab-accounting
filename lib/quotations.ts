@@ -383,20 +383,93 @@ export function exclusions(lines: QuotationLine[]): string[] {
  * كل مرحلة دفعة واحدة قيمتها مجموع بنودها المختارة، وشرط استحقاقها إنجاز
  * تلك المرحلة — وهذا شكل جدول «رابعاً» في عقود الشركة المبرمة.
  */
+/** السطران العريضان في العقد المبرم — وهما نقطتا توقّف النطاقات */
+const STAGE_BANNERS: Record<string, string> = {
+  "الهيكل الأسود": "الانتهاء من الهيكل الأسود",
+  "النصف تشطيب": "الانتهاء من أعمال النصف تشطيب",
+};
+
+/**
+ * بنود المرحلة مجموعةً بأقسامها: القسم بندٌ، وأسماء بنوده وصفُه.
+ *
+ * الكتالوج أربعة مستويات، وجدول العقد عمودان — فالقسم هو البند
+ * («التجهيز»، «الحفر»)، وما تحته وصفُه. وبغير هذا التجميع يخرج
+ * الجدول بأربعين صفاً للمرحلة الواحدة.
+ */
+function sectionRows(
+  lines: QuotationLine[],
+  stage: string
+): { item: string; description: string }[] {
+  const bySection = new Map<string, string[]>();
+  for (const line of lines) {
+    if (line.stage !== stage || !line.chosen) continue;
+    const key = line.section || line.name;
+    const label = [line.name, line.detail].filter(Boolean).join(" ");
+    const names = bySection.get(key) ?? [];
+    if (label && !names.includes(label)) names.push(label);
+    bySection.set(key, names);
+  }
+  return [...bySection].map(([item, names]) => ({
+    item,
+    description: names.join(" · "),
+  }));
+}
+
+/** دفعة عقدٍ مبنيّة من عرض سعر، ببنية جدول «رابعاً» */
+export type QuotationInstallment = {
+  number: number;
+  value: string;
+  condition: string;
+  no: number;
+  stage: string;
+  materials: string;
+  rows: { item: string; description: string }[];
+  banner?: string;
+};
+
 export function installmentsFromQuotation(
   quotation: Quotation
-): { number: number; value: string; condition: string }[] {
-  return stagesOfScope(quotation.scope)
+): QuotationInstallment[] {
+  /* «مصنعيات فقط» تعني أن المواد على المالك — وهو الطرف الثاني */
+  const materials =
+    quotation.pricingMode === "مصنعيات فقط" ? "الطرف الثاني" : "الطرف الأول";
+
+  const stages: QuotationInstallment[] = stagesOfScope(quotation.scope)
     .map((stage) => ({
       stage,
       total: stageTotals(quotation.lines, stage, quotation.pricingMode).price,
+      rows: sectionRows(quotation.lines, stage),
     }))
     .filter((row) => row.total > 0)
     .map((row, index) => ({
       number: index + 1,
+      no: index + 1,
       value: String(row.total),
+      stage: row.stage,
+      materials,
+      rows: row.rows,
       condition: `عند الانتهاء من مرحلة «${row.stage}»`,
+      banner: STAGE_BANNERS[row.stage],
     }));
+
+  /*
+   * صفّ التسليم كما في العقد المبرم: لا دفعة له، وإنما يوثّق نهاية
+   * العمل وتسليم المكتب الاستشاري. ولا يُكتب إلا في عقد التشطيب
+   * الكامل، فهو وحده الذي ينتهي بالتسليم.
+   */
+  if (quotation.scope === "تشطيب كامل" && stages.length > 0) {
+    stages.push({
+      number: stages.length + 1,
+      no: stages.length + 1,
+      value: "0",
+      stage: "التسليم",
+      materials: "تسليم المكتب الاستشاري",
+      rows: [{ item: "", description: "الانتهاء من أعمال التشطيب" }],
+      condition: "الانتهاء من أعمال التشطيب وتسليم المكتب الاستشاري",
+    });
+  }
+
+  return stages;
 }
 
 /** رقم العرض التالي: Q-2026-001 */

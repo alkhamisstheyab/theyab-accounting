@@ -1333,7 +1333,12 @@ export default function HomeV2() {
                   }),
                   clauses: [],
                   obligations: CLIENT_SECOND_PARTY_DUTIES,
-                  notes: DEFAULT_NOTES,
+                  /*
+                   * بلا ملاحظات: «ثانياً» يكتب قيمة العقد وحدها ما لم
+                   * تُنقل نقاطُ عقدٍ مبرم. وملاحظة النسختين بندٌ قائم
+                   * في «الثاني عشر: العقد» فلا تُكرَّر هنا.
+                   */
+                  notes: "",
                 };
 
                 setContractors((prev) => [...prev, contract]);
@@ -5652,8 +5657,14 @@ function ClientWorksTable({ installments }: { installments: Installment[] }) {
         : [{ item: "", description: i.condition }],
   }));
 
-  /** لكل دفعةٍ طولُ الدمج الرأسي إن كانت بداية مجموعة، وإلا صفر */
-  const merges = (key: (i: Installment) => string) => {
+  /**
+   * لكل دفعةٍ طولُ الدمج الرأسي إن كانت بداية مجموعة، وإلا صفر.
+   *
+   * المفتاح يأخذ الترتيب معه: العقود المسجّلة قبل جدول الأعمدة
+   * الستة بلا أرقام صفوف ولا مواد، ومفتاحٌ فارغ يجعلها كلها
+   * مجموعةً واحدة فتُدمج خلية «م» على العقد كلّه.
+   */
+  const merges = (key: (i: Installment, index: number) => string) => {
     const span = new Array(items.length).fill(0);
     let g = 0;
     while (g < items.length) {
@@ -5662,7 +5673,7 @@ function ClientWorksTable({ installments }: { installments: Installment[] }) {
       while (
         !items[end].inst.banner &&
         end + 1 < items.length &&
-        key(items[end + 1].inst) === key(items[g].inst)
+        key(items[end + 1].inst, end + 1) === key(items[g].inst, g)
       ) {
         end++;
         rows += items[end].rows.length;
@@ -5673,15 +5684,17 @@ function ClientWorksTable({ installments }: { installments: Installment[] }) {
     return span;
   };
 
-  const noSpan = merges((i) => String(i.no ?? ""));
-  const stageSpan = merges((i) => i.stage ?? "");
+  const noSpan = merges((i, index) => (i.no ? String(i.no) : "#" + index));
+  const stageSpan = merges((i, index) => i.stage || "#" + index);
   /*
     المواد تُدمج داخل صفّ «م» الواحد لا عبره: الدمج عبر الصفوف يصنع
     خليّةً بخمسةٍ وعشرين صفاً لا تنقسم بين صفحتين، فيدفعها المتصفّح
     إلى صفحة جديدة ويترك ما قبلها بياضاً. والعقد المبرم نفسه يعيد
     كتابتها في كل صفحة.
   */
-  const matSpan = merges((i) => (i.no ?? "") + "|" + (i.materials ?? ""));
+  const matSpan = merges(
+    (i, index) => (i.no ? String(i.no) : "#" + index) + "|" + (i.materials ?? "")
+  );
 
   const cell: React.CSSProperties = {
     border: "1px solid #000",
