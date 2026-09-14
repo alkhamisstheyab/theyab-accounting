@@ -4673,9 +4673,20 @@ function ContractorsPage({
   const [installments, setInstallments] = useState<Installment[]>([]);
   const [error, setError] = useState("");
   const [linkInstallment, setLinkInstallment] = useState("");
+  /*
+    النموذج يُفتح أعلى اللوحة وهو طويل، والجدول تحته. فمن ضغط
+    «تعديل» على صفٍّ بعيد لا يرى شيئاً يتغيّر أمامه — يبدو الزرّ
+    كأنه لا يعمل. فالمرساة تنقل النظر إليه.
+  */
+  const formRef = useRef<HTMLDivElement | null>(null);
 
   const selected = contractors.find((c) => c.id === selectedId) ?? null;
   const isAddendum = form.documentType === "ملحق عقد";
+
+  useEffect(() => {
+    if (!showForm) return;
+    formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [showForm, editingId]);
 
   const set = (key: keyof typeof BLANK_CONTRACT, value: string) =>
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -4726,9 +4737,13 @@ function ContractorsPage({
       notes: c.notes,
       contractValue: String(c.contractValue),
     });
-    setClauses(c.clauses.map((cl) => ({ ...cl })));
-    setObligations([...c.obligations]);
-    setInstallments(c.installments.map((i) => ({ ...i })));
+    /*
+      قائمةٌ ناقصة في عقدٍ قديم كانت ترمي استثناءً هنا، فلا يُفتح
+      النموذج ولا يظهر سبب — والزرّ يبدو معطّلاً.
+    */
+    setClauses((c.clauses ?? []).map((cl) => ({ ...cl })));
+    setObligations([...(c.obligations ?? [])]);
+    setInstallments((c.installments ?? []).map((i) => ({ ...i })));
     setError("");
     setShowForm(true);
   };
@@ -4823,7 +4838,8 @@ function ContractorsPage({
       contractType: form.contractType.trim(),
       workType: form.workType.trim(),
       contractValue,
-      installmentsCount: installments.length,
+      /* الصفّ التوثيقي ليس دفعة، فلا يُعدّ في عددها */
+      installmentsCount: installments.filter(isPayableInstallment).length,
       installments: installments.map((i) => ({ ...i })),
 
       // التحرير يحافظ على نوع الطرف، والجديد من هذه الشاشة عقد مقاول
@@ -4888,9 +4904,16 @@ function ContractorsPage({
         </button>
 
         {showForm && (
-          <div className="mb-6 space-y-5 rounded-xl border border-slate-200 p-5">
+          <div
+            ref={formRef}
+            className="mb-6 space-y-5 rounded-xl border-2 border-blue-300 p-5"
+          >
             <h4 className="font-bold">
-              {editingId ? "تعديل المستند" : "مستند جديد"}
+              {editingId
+                ? `تعديل ${form.documentType} ${form.contractNumber}${
+                    form.name ? " — " + form.name : ""
+                  }`
+                : "مستند جديد"}
             </h4>
 
             {/* بيانات أساسية */}
