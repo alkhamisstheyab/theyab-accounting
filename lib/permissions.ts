@@ -280,6 +280,7 @@ export const PAGE_PERMISSION: Record<string, Permission> = {
   التقارير: "reports.view",
   المشاريع: "projects.view",
   المقاولون: "contractors.view",
+  "ربط الحركات": "contractors.manage",
   "عروض الأسعار": "quotations.view",
   // يفتحها المهندس لتحديث التكلفة، والإدارة لتحرير كل شيء
   "بنود الأعمال": "quotations.pricing",

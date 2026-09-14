@@ -214,6 +214,14 @@ import {
   validUntil,
 } from "@/lib/quotations";
 import {
+  PayeeGroup,
+  groupCandidates,
+  linkSummary,
+  linkedByInstallment,
+  normalizeArabic,
+  planLinks,
+} from "@/lib/contract-links";
+import {
   Notice,
   NoticeTone,
   activitySince,
@@ -241,6 +249,7 @@ const PAGES = [
   "بنود الأعمال",
   "الفواتير",
   "المقاولون",
+  "ربط الحركات",
   "اعتماد الحركات",
   "اعتماد المراحل",
   "متابعة السلف",
@@ -1460,6 +1469,43 @@ export default function HomeV2() {
                   )
                 )
               }
+            />
+          )}
+
+          {page === "ربط الحركات" && (
+            <ContractLinksPage
+              movements={movements}
+              contractors={contractors}
+              projects={projects.map((p) => p.name)}
+              canManage={allow("contractors.manage")}
+              onApply={(links) => {
+                const map = new Map(links.map((l) => [l.movementId, l]));
+                setMovements((prev) =>
+                  prev.map((m) => {
+                    const link = map.get(m.id);
+                    return link
+                      ? {
+                          ...m,
+                          contractNumber: link.contractNumber,
+                          installmentNumber: link.installmentNumber || undefined,
+                        }
+                      : m;
+                  })
+                );
+                const total = round3(
+                  links.reduce((sum, l) => {
+                    const m = movements.find((x) => x.id === l.movementId);
+                    return sum + (Number(m?.amount) || 0);
+                  }, 0)
+                );
+                log(
+                  "تعديل",
+                  "عقد",
+                  `ربط ${links.length} حركة بقيمة ${fmt(total)} د.ك بالعقد ${
+                    links[0]?.contractNumber
+                  }`
+                );
+              }}
             />
           )}
 
@@ -8964,6 +9010,379 @@ function ContractTermsSheet({
         </div>
       </div>
     </div>
+  );
+}
+
+/* ================================================================== */
+/* الربط الجماعي: حركات أجور المقاولين بعقودها                         */
+/* ================================================================== */
+
+/**
+ * يربط حركات أجور المقاولين بعقودها ودفعاتها جملةً لا حركةً حركة.
+ *
+ * الحركات مكتوبة بالكنى («أبو أحمد النجار»، «حسين») والعقود بالأسماء
+ * الرسمية، فلا تُطابَق آلياً — والمطابقة الآلية بالاسم خطؤها صامت.
+ * فالشاشة تجمع الحركات بمن دُفع له، ويُسند صاحبُ القرار المجموعةَ
+ * إلى عقدها بضغطة. وله أن يجمع عدة مجموعات على عقدٍ واحد.
+ *
+ * ولا يُطبَّق شيء قبل معاينته: يُعرض ما سيُربط وبأي دفعة ولماذا،
+ * ثم يُعتمد. والصرف على العقد يبقى كما هو — الربط لا يغيّر قيداً،
+ * وإنما ينسب المصروف إلى التزامه.
+ */
+function ContractLinksPage({
+  movements,
+  contractors,
+  projects,
+  canManage,
+  onApply,
+}: {
+  movements: Movement[];
+  contractors: Contractor[];
+  projects: string[];
+  canManage: boolean;
+  onApply: (
+    links: { movementId: string; contractNumber: string; installmentNumber: number }[]
+  ) => void;
+}) {
+  const [project, setProject] = useState("الكل");
+  const [search, setSearch] = useState("");
+  /** مفاتيح المجموعات المحدَّدة — «المشروع|الكنية» */
+  const [picked, setPicked] = useState<string[]>([]);
+  const [contractNumber, setContractNumber] = useState("");
+  /** الحركات المستثناة يدوياً من التطبيق */
+  const [skipped, setSkipped] = useState<string[]>([]);
+  const [open, setOpen] = useState<string | null>(null);
+  const [message, setMessage] = useState("");
+
+  const summary = useMemo(() => linkSummary(movements), [movements]);
+  const groups = useMemo(
+    () => groupCandidates(movements, project === "الكل" ? undefined : project),
+    [movements, project]
+  );
+
+  const visible = useMemo(() => {
+    const q = normalizeArabic(search);
+    if (!q) return groups;
+    return groups.filter(
+      (g) =>
+        normalizeArabic(g.label).includes(q) ||
+        normalizeArabic(g.project).includes(q) ||
+        g.movements.some((m) => normalizeArabic(m.description).includes(q))
+    );
+  }, [groups, search]);
+
+  const idOf = (g: PayeeGroup) => g.project + "|" + g.key;
+  const contract = contractors.find((c) => c.contractNumber === contractNumber);
+
+  const chosen = useMemo(
+    () => groups.filter((g) => picked.includes(g.project + "|" + g.key)),
+    [groups, picked]
+  );
+
+  /* الحركات المختارة من كل المجموعات المحدَّدة، منقوصةً ما استُثني */
+  const rows = useMemo(
+    () =>
+      chosen.flatMap((g) => g.movements).filter((m) => !skipped.includes(m.id)),
+    [chosen, skipped]
+  );
+
+  /* الخطة تُحسب حيّة: ما سيُربط وبأي دفعة ولماذا */
+  const plan = useMemo(
+    () =>
+      contract
+        ? planLinks(rows, contract, linkedByInstallment(movements, contract.contractNumber))
+        : [],
+    [rows, contract, movements]
+  );
+
+  const planTotal = round3(plan.reduce((s, r) => s + (Number(r.movement.amount) || 0), 0));
+  const withInstallment = plan.filter((r) => r.installmentNumber > 0).length;
+  /* مشاريع الحركات المحدَّدة — تنبيهٌ إن خالفت مشروع العقد */
+  const otherProject = contract
+    ? chosen.filter((g) => g.project !== contract.project).map((g) => g.project)
+    : [];
+
+  const toggle = (list: string[], value: string) =>
+    list.includes(value) ? list.filter((x) => x !== value) : [...list, value];
+
+  return (
+    <>
+      <Panel
+        title="ربط الحركات بالعقود"
+        subtitle="حركات أجور المقاولين تُنسب إلى عقودها ودفعاتها — جملةً لا حركةً حركة"
+      >
+        <div className="mb-5 grid grid-cols-1 gap-3 md:grid-cols-3">
+          <div className="rounded-xl bg-amber-50 p-4">
+            <p className="text-sm text-amber-900">بانتظار الربط</p>
+            <p className="mt-1 text-2xl font-bold tabular-nums text-amber-900">
+              {summary.candidates}
+            </p>
+            <p className="text-sm text-amber-800">{fmt(summary.candidatesTotal)} د.ك</p>
+          </div>
+          <div className="rounded-xl bg-green-50 p-4">
+            <p className="text-sm text-green-900">مرتبطة بعقودها</p>
+            <p className="mt-1 text-2xl font-bold tabular-nums text-green-900">
+              {summary.linked}
+            </p>
+            <p className="text-sm text-green-800">{fmt(summary.linkedTotal)} د.ك</p>
+          </div>
+          <div className="rounded-xl bg-slate-100 p-4">
+            <p className="text-sm text-slate-600">مستبعدة — نقليات</p>
+            <p className="mt-1 text-2xl font-bold tabular-nums">{summary.excluded}</p>
+            <p className="text-sm text-slate-600">
+              {fmt(summary.excludedTotal)} د.ك — مقيّدة على حساب المقاولين وليست أجرَ عقد
+            </p>
+          </div>
+        </div>
+
+        <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+          <Field label="المشروع">
+            <select
+              value={project}
+              onChange={(e) => {
+                setProject(e.target.value);
+                setPicked([]);
+              }}
+              className={inputClass}
+            >
+              <option>الكل</option>
+              {projects.map((p) => (
+                <option key={p}>{p}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label="بحث" hint="اكتب الكنية كما تكتبها في الوصف — «أبو أحمد»">
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="أبو أحمد · صحي · حفر"
+              className={inputClass}
+            />
+          </Field>
+        </div>
+
+        {visible.length === 0 ? (
+          <p className="rounded-xl bg-green-50 p-4 font-bold text-green-800">
+            ✓ لا حركات تنتظر الربط في هذا النطاق.
+          </p>
+        ) : (
+          <>
+            <div className="mb-3 flex flex-wrap items-center gap-3 text-sm">
+              <button
+                onClick={() => setPicked(visible.map(idOf))}
+                className="rounded-lg bg-slate-100 px-4 py-2 font-bold"
+              >
+                حدّد كل الظاهر ({visible.length})
+              </button>
+              <button
+                onClick={() => {
+                  setPicked([]);
+                  setSkipped([]);
+                }}
+                className="rounded-lg bg-slate-100 px-4 py-2 font-bold"
+              >
+                إلغاء التحديد
+              </button>
+              <span className="text-slate-600">
+                {picked.length > 0
+                  ? `${picked.length} مجموعة · ${rows.length} حركة`
+                  : "اختر مجموعة أو أكثر، ثم العقد"}
+              </span>
+            </div>
+
+            <div className="space-y-2">
+              {visible.map((g) => {
+                const id = idOf(g);
+                const on = picked.includes(id);
+                return (
+                  <div
+                    key={id}
+                    className={`rounded-xl border p-3 ${
+                      on ? "border-blue-400 bg-blue-50" : "border-slate-200"
+                    }`}
+                  >
+                    <div className="flex flex-wrap items-center gap-3">
+                      <input
+                        type="checkbox"
+                        checked={on}
+                        onChange={() => setPicked((p) => toggle(p, id))}
+                      />
+                      <b className="min-w-48">{g.label}</b>
+                      <span className="text-sm text-slate-600">{g.project}</span>
+                      <span className="text-sm tabular-nums">
+                        {g.movements.length} حركة · <b>{fmt(g.total)}</b> د.ك
+                      </span>
+                      <span className="text-sm text-slate-500">
+                        {g.from} → {g.to}
+                      </span>
+                      <button
+                        onClick={() => setOpen(open === id ? null : id)}
+                        className="mr-auto rounded-lg bg-slate-100 px-3 py-1 text-sm"
+                      >
+                        {open === id ? "إخفاء" : "الحركات"}
+                      </button>
+                    </div>
+
+                    {open === id && (
+                      <table className="mt-3 w-full text-right text-sm">
+                        <thead className="bg-slate-50">
+                          <tr>
+                            <Th>القيد</Th>
+                            <Th>التاريخ</Th>
+                            <Th>الوصف</Th>
+                            <Th>المبلغ</Th>
+                            <Th>يُربط؟</Th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {g.movements.map((m) => (
+                            <tr key={m.id} className="border-b border-slate-100">
+                              <Td>{m.entryNo}</Td>
+                              <Td>{m.date}</Td>
+                              <Td>{m.description}</Td>
+                              <Td>
+                                <Money value={m.amount} />
+                              </Td>
+                              <Td>
+                                <input
+                                  type="checkbox"
+                                  checked={!skipped.includes(m.id)}
+                                  onChange={() => setSkipped((s) => toggle(s, m.id))}
+                                />
+                              </Td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
+      </Panel>
+
+      {/* المعاينة: لا يُطبَّق شيء قبل أن يُرى */}
+      {picked.length > 0 && (
+        <Panel title="معاينة الربط">
+          <Field
+            label="العقد"
+            hint="العقود مرتَّبة، ومشروع العقد يُقارَن بمشروع الحركات"
+          >
+            <select
+              value={contractNumber}
+              onChange={(e) => setContractNumber(e.target.value)}
+              className={inputClass}
+            >
+              <option value="">— اختر العقد —</option>
+              {[...contractors]
+                .sort((a, b) => a.contractNumber.localeCompare(b.contractNumber))
+                .map((c) => (
+                  <option key={c.id} value={c.contractNumber}>
+                    {c.contractNumber} — {c.name} · {c.project} · {fmt(c.contractValue)} د.ك
+                  </option>
+                ))}
+            </select>
+          </Field>
+
+          {otherProject.length > 0 && (
+            <p className="mt-3 rounded-lg bg-amber-50 p-3 text-sm font-bold text-amber-900">
+              تنبيه: حركاتٌ من {[...new Set(otherProject)].join("، ")} تُربط بعقدٍ على{" "}
+              {contract?.project}. راجعها قبل الاعتماد.
+            </p>
+          )}
+
+          {contract && plan.length > 0 && (
+            <>
+              <p className="mt-4 rounded-lg bg-blue-50 p-3 text-sm">
+                سيُربط <b>{plan.length}</b> حركة بقيمة{" "}
+                <b className="tabular-nums">{fmt(planTotal)}</b> د.ك بالعقد{" "}
+                <b>{contract.contractNumber}</b> — منها <b>{withInstallment}</b> على دفعةٍ
+                مقترحة و<b>{plan.length - withInstallment}</b> بلا دفعة محدّدة.
+              </p>
+
+              <table className="mt-3 w-full text-right text-sm">
+                <thead className="bg-slate-50">
+                  <tr>
+                    <Th>القيد</Th>
+                    <Th>التاريخ</Th>
+                    <Th>الوصف</Th>
+                    <Th>المبلغ</Th>
+                    <Th>الدفعة</Th>
+                    <Th>سبب الاقتراح</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {plan.map((r) => (
+                    <tr key={r.movement.id} className="border-b border-slate-100">
+                      <Td>{r.movement.entryNo}</Td>
+                      <Td>{r.movement.date}</Td>
+                      <Td>{r.movement.description}</Td>
+                      <Td>
+                        <Money value={r.movement.amount} />
+                      </Td>
+                      <Td>
+                        {r.installmentNumber > 0 ? (
+                          <b>الدفعة {r.installmentNumber}</b>
+                        ) : (
+                          <span className="text-slate-400">—</span>
+                        )}
+                      </Td>
+                      <Td className="text-slate-600">{r.reason}</Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              <div className="mt-4 flex flex-wrap gap-3">
+                <button
+                  disabled={!canManage}
+                  onClick={() => {
+                    if (
+                      !window.confirm(
+                        `ربط ${plan.length} حركة بقيمة ${fmt(planTotal)} د.ك بالعقد ${
+                          contract.contractNumber
+                        }؟\n\nالربط لا يغيّر قيداً — وإنما ينسب المصروف إلى التزامه.`
+                      )
+                    ) {
+                      return;
+                    }
+                    onApply(
+                      plan.map((r) => ({
+                        movementId: r.movement.id,
+                        contractNumber: contract.contractNumber,
+                        installmentNumber: r.installmentNumber,
+                      }))
+                    );
+                    setMessage(
+                      `تم ربط ${plan.length} حركة بقيمة ${fmt(planTotal)} د.ك بالعقد ${
+                        contract.contractNumber
+                      }`
+                    );
+                    setPicked([]);
+                    setSkipped([]);
+                    setContractNumber("");
+                  }}
+                  className="rounded-lg bg-blue-600 px-6 py-3 font-bold text-white disabled:bg-slate-300"
+                >
+                  اربط المحدَّد
+                </button>
+                {!canManage && (
+                  <span className="self-center text-sm text-slate-500">
+                    الربط يحتاج صلاحية «إدارة العقود والدفعات».
+                  </span>
+                )}
+              </div>
+            </>
+          )}
+
+          {message && (
+            <p className="mt-3 font-bold text-green-700">{message}</p>
+          )}
+        </Panel>
+      )}
+    </>
   );
 }
 
