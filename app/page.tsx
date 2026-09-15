@@ -214,6 +214,10 @@ import {
   validUntil,
 } from "@/lib/quotations";
 import {
+  allDurations,
+  SOON_DAYS,
+} from "@/lib/contract-dates";
+import {
   PayeeGroup,
   groupCandidates,
   linkSummary,
@@ -669,6 +673,7 @@ export default function HomeV2() {
         workItems,
         audit,
         backup: backupMeta,
+        today: todayISO(),
         lastSeenAt: sessionLastSeen,
         userName: currentUser?.name ?? "",
         backupEveryDays: company.backupEveryDays,
@@ -1459,6 +1464,7 @@ export default function HomeV2() {
               movements={yearMovements}
               company={company}
               setContractors={setContractors}
+              canManage={allow("contractors.manage")}
               onPrint={setContractFor}
               onLink={(movementId, contractNumber, installmentNumber) =>
                 setMovements((prev) =>
@@ -4695,6 +4701,7 @@ function ContractorsPage({
   movements,
   company,
   setContractors,
+  canManage,
   onLink,
   onPrint,
 }: {
@@ -4703,6 +4710,8 @@ function ContractorsPage({
   movements: Movement[];
   company: CompanyProfile;
   setContractors: Dispatch<SetStateAction<Contractor[]>>;
+  /** تحرير العقود ومددها */
+  canManage: boolean;
   onLink: (
     movementId: string,
     contractNumber: string,
@@ -4950,6 +4959,22 @@ function ContractorsPage({
 
   return (
     <>
+      {/* المدد أولاً: مدةٌ مضت أثرها خارج النظام لا فيه */}
+      <ContractDurationsPanel
+        contractors={contractors}
+        today={todayISO()}
+        canManage={canManage}
+        onSetEnd={(contractId, date) =>
+          setContractors((prev) =>
+            prev.map((c) =>
+              c.id === contractId
+                ? { ...c, expectedEndDate: date || undefined }
+                : c
+            )
+          )
+        }
+      />
+
       <Panel
         title="عقود المقاولين"
         subtitle={`${contractors.length} مستند — «المدفوع» محسوب من قيود الدفع المرتبطة`}
@@ -9029,6 +9054,199 @@ function ContractTermsSheet({
  * ثم يُعتمد. والصرف على العقد يبقى كما هو — الربط لا يغيّر قيداً،
  * وإنما ينسب المصروف إلى التزامه.
  */
+/**
+ * مدد العقود وانتهاءاتها — لوحة مراجعة لا حكم.
+ *
+ * تُظهر لكل عقدٍ تاريخ انتهائه ومن أين جاء، وأيام التأخّر، وتقدير
+ * الشرط الجزائي وعلى مَن هو. والتقدير تقويميّ والعقود بأيام عمل،
+ * فيُكتب ذلك في صدر اللوحة ولا يُترك للقارئ أن يستنتجه.
+ *
+ * ولمن يعرف الموقع أن يكتب تاريخ الانتهاء بيده، فيعلو على الحساب.
+ */
+function ContractDurationsPanel({
+  contractors,
+  today,
+  canManage,
+  onSetEnd,
+}: {
+  contractors: Contractor[];
+  today: string;
+  canManage: boolean;
+  onSetEnd: (contractId: string, date: string) => void;
+}) {
+  const [showAll, setShowAll] = useState(false);
+  const rows = useMemo(() => allDurations(contractors, today), [contractors, today]);
+
+  const ended = rows.filter((r) => r.status === "انتهت");
+  const soon = rows.filter((r) => r.status === "تقترب");
+  const unknown = rows.filter((r) => r.status === "غير معروفة");
+  const onUs = round3(
+    ended.filter((r) => r.penaltyAgainst === "الشركة").reduce((s, r) => s + r.penalty, 0)
+  );
+  const forUs = round3(
+    ended
+      .filter((r) => r.penaltyAgainst === "الطرف الآخر")
+      .reduce((s, r) => s + r.penalty, 0)
+  );
+
+  const shown = showAll ? rows : [...ended, ...soon];
+
+  const tone: Record<string, string> = {
+    انتهت: "bg-red-50 text-red-700",
+    تقترب: "bg-amber-50 text-amber-800",
+    جارية: "bg-green-50 text-green-800",
+    "لم تبدأ": "bg-slate-100 text-slate-600",
+    "غير معروفة": "bg-slate-100 text-slate-500",
+  };
+
+  return (
+    <Panel
+      title="المدد والانتهاءات"
+      subtitle="مدة كل عقد وتاريخ انتهائه — وما مضى منها"
+    >
+      <div className="mb-5 grid grid-cols-1 gap-3 md:grid-cols-4">
+        <div className="rounded-xl bg-red-50 p-4">
+          <p className="text-sm text-red-800">مضت مدتها</p>
+          <p className="mt-1 text-2xl font-bold tabular-nums text-red-800">
+            {ended.length}
+          </p>
+        </div>
+        <div className="rounded-xl bg-amber-50 p-4">
+          <p className="text-sm text-amber-900">تقترب خلال {SOON_DAYS} يوماً</p>
+          <p className="mt-1 text-2xl font-bold tabular-nums text-amber-900">
+            {soon.length}
+          </p>
+        </div>
+        <div className="rounded-xl bg-slate-100 p-4">
+          <p className="text-sm text-slate-600">بلا مدة منصوصة</p>
+          <p className="mt-1 text-2xl font-bold tabular-nums">{unknown.length}</p>
+        </div>
+        <div className="rounded-xl bg-slate-100 p-4">
+          <p className="text-sm text-slate-600">تقدير الشرط الجزائي</p>
+          <p className="mt-1 text-sm font-bold">
+            <span className="text-red-700">{fmt(onUs)}</span> على الشركة
+            <br />
+            <span className="text-green-800">{fmt(forUs)}</span> لها
+          </p>
+        </div>
+      </div>
+
+      <Banner tone="warn">
+        الحساب تقويمي، والعقود تقول «يوم عمل ولا تحتسب العطل والراحة والإجازات
+        الرسمية وأي ظروف قاهرة» — فما يظهر هنا <b>أقصر من الحقيقة لا أطول</b>،
+        وهو قائمة تُراجَع لا حكم يُبنى عليه. ومن يعرف الموقع يكتب تاريخ الانتهاء
+        بيده فيعلو على الحساب.
+      </Banner>
+
+      <div className="mb-3 mt-4 flex flex-wrap gap-3">
+        <button
+          onClick={() => setShowAll(!showAll)}
+          className="rounded-lg bg-slate-100 px-4 py-2 text-sm font-bold"
+        >
+          {showAll ? `اعرض ما يحتاج انتباهاً (${ended.length + soon.length})` : `اعرض الكل (${rows.length})`}
+        </button>
+      </div>
+
+      {shown.length === 0 ? (
+        <p className="rounded-xl bg-green-50 p-4 font-bold text-green-800">
+          ✓ لا عقد مضت مدته ولا يقترب انتهاؤه.
+        </p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-right text-sm">
+            <thead className="bg-slate-50">
+              <tr>
+                <Th>العقد</Th>
+                <Th>الطرف</Th>
+                <Th>المشروع</Th>
+                <Th>الحال</Th>
+                <Th>المدة</Th>
+                <Th>الانتهاء</Th>
+                <Th>التأخّر</Th>
+                <Th>الشرط الجزائي</Th>
+                <Th>تاريخ محرَّر</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {shown.map((r) => (
+                <tr key={r.contract.id} className="border-b border-slate-100">
+                  <Td>{r.contract.contractNumber}</Td>
+                  <Td>{r.contract.name}</Td>
+                  <Td className="text-slate-600">{r.contract.project}</Td>
+                  <Td>
+                    <span
+                      className={`rounded px-2 py-1 text-xs font-bold ${tone[r.status]}`}
+                    >
+                      {r.status}
+                    </span>
+                  </Td>
+                  <Td className="tabular-nums">
+                    {r.end.days > 0 ? `${r.end.days} يوم` : "—"}
+                    {r.end.extraDays > 0 && (
+                      <span className="text-xs text-slate-500">
+                        {" "}
+                        (+{r.end.extraDays} من الملاحق)
+                      </span>
+                    )}
+                  </Td>
+                  <Td className="tabular-nums">
+                    {r.end.date || "—"}
+                    {r.end.source === "محرَّر" && (
+                      <span className="text-xs text-blue-700"> ✎</span>
+                    )}
+                  </Td>
+                  <Td className="tabular-nums">
+                    {r.lateDays > 0 ? (
+                      <b className="text-red-700">{r.lateDays} يوم</b>
+                    ) : r.daysLeft > 0 && r.status === "تقترب" ? (
+                      <span className="text-amber-800">بقي {r.daysLeft}</span>
+                    ) : (
+                      "—"
+                    )}
+                  </Td>
+                  <Td>
+                    {r.penalty > 0 ? (
+                      <span
+                        className={
+                          r.penaltyAgainst === "الشركة"
+                            ? "font-bold text-red-700"
+                            : "font-bold text-green-800"
+                        }
+                      >
+                        {fmt(r.penalty)} على {r.penaltyAgainst}
+                      </span>
+                    ) : r.status === "انتهت" ? (
+                      <span className="text-slate-400">لا شرط في العقد</span>
+                    ) : (
+                      "—"
+                    )}
+                  </Td>
+                  <Td>
+                    <input
+                      type="date"
+                      value={r.contract.expectedEndDate ?? ""}
+                      disabled={!canManage}
+                      onChange={(e) => onSetEnd(r.contract.id, e.target.value)}
+                      className="rounded border border-slate-300 px-2 py-1 text-sm"
+                    />
+                  </Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {unknown.length > 0 && !showAll && (
+        <p className="mt-4 text-sm text-slate-600">
+          و<b>{unknown.length}</b> عقداً لا يذكر مستنده مدةً، فلا يُحسب له انتهاء.
+          اضغط «اعرض الكل» واكتب تاريخ انتهائه بيدك إن عرفته.
+        </p>
+      )}
+    </Panel>
+  );
+}
+
 function ContractLinksPage({
   movements,
   contractors,

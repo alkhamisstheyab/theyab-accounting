@@ -213,6 +213,13 @@ export type Contractor = {
 
   /* الشروط الرقمية */
   durationDays: number;
+  /**
+   * تاريخ الانتهاء المتوقَّع — يُكتب بيد من يعرف الموقع.
+   *
+   * العقود تحسب مدتها بأيام العمل وتستثني العطل والظروف القاهرة،
+   * والنظام لا يعرفها فيحسب بالتقويم. فهذا الحقل يعلو على حسابه.
+   */
+  expectedEndDate?: string;
   delayPenaltyPerDay: number;
   maxPenaltyPercent: number;
   terminationAfterDays: number;
@@ -960,6 +967,7 @@ function migrateContractor(raw: unknown): Contractor {
 
     // العقود القديمة بلا شروط رقمية — تُملأ من القالب لا بأصفار مضلّلة
     durationDays: Number(c.durationDays) || CONTRACT_DEFAULTS.durationDays,
+    expectedEndDate: str(c.expectedEndDate) || undefined,
     delayPenaltyPerDay:
       Number(c.delayPenaltyPerDay) || CONTRACT_DEFAULTS.delayPenaltyPerDay,
     maxPenaltyPercent:

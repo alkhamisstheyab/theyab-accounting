@@ -20,6 +20,7 @@ import {
   daysSince,
 } from "./file-backup";
 import { Contractor, Installment, isInstallmentDue } from "./storage";
+import { allDurations } from "./contract-dates";
 
 export type NoticeTone = "action" | "warn" | "info";
 
@@ -47,6 +48,8 @@ export type NoticeInput = {
   lastSeenAt: string;
   /** اسم المستخدم الحالي، فلا يُنبَّه إلى فعل نفسه */
   userName: string;
+  /** تاريخ اليوم — يُمرَّر ليكون الحساب قابلاً للفحص */
+  today: string;
   /** كل كم يوم تُؤخذ نسخة احتياطية — سياسة المجلس عشرة أيام */
   backupEveryDays: number;
 };
@@ -181,6 +184,47 @@ export function buildNotices(input: NoticeInput): Notice[] {
       page: "عروض الأسعار",
       count: staleQuotes.length,
       needs: "quotations.view",
+    });
+  }
+
+  /* ---- المدد والانتهاءات ---- */
+
+  const durations = allDurations(input.contractors, input.today);
+
+  const ended = durations.filter((d) => d.status === "انتهت");
+  if (ended.length > 0) {
+    const onUs = round3(
+      ended.filter((d) => d.penaltyAgainst === "الشركة").reduce((s, d) => s + d.penalty, 0)
+    );
+    const worst = ended[0];
+    notices.push({
+      id: "ended-durations",
+      tone: "warn",
+      title: `${ended.length} عقداً مضت مدته المنصوص عليها`,
+      detail:
+        `أطولها ${worst.contract.contractNumber} — ${worst.contract.name} بـ ${worst.lateDays} يوماً.` +
+        (onUs > 0
+          ? ` وتقدير الشرط الجزائي على الشركة ${fmt3(onUs)} د.ك.`
+          : "") +
+        " والحساب تقويمي والعقود بأيام عمل، فهي قائمة تُراجَع لا حكم.",
+      page: "المقاولون",
+      count: ended.length,
+      needs: "contractors.view",
+    });
+  }
+
+  const soon = durations.filter((d) => d.status === "تقترب");
+  if (soon.length > 0) {
+    notices.push({
+      id: "ending-durations",
+      tone: "info",
+      title: `${soon.length} عقداً تقترب مدته من الانتهاء`,
+      detail: soon
+        .map((d) => `${d.contract.contractNumber} بعد ${d.daysLeft} يوماً`)
+        .join(" · "),
+      page: "المقاولون",
+      count: soon.length,
+      needs: "contractors.view",
     });
   }
 
