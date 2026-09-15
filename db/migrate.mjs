@@ -15,6 +15,9 @@ import { fileURLToPath } from "url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
+/** أنواع الأطراف الثلاثة — والرابع غير موجود، فما خرج عنها مقاول */
+const COUNTERPARTY_TYPES = ["عميل", "مقاول", "مورّد"];
+
 const BACKUP = process.argv[2];
 
 /** الرابط من سطر الأوامر، وإلا من .env.local — فلا يُكتب سرّ في أمر */
@@ -264,11 +267,13 @@ async function main() {
     await insertMany(
       db,
       "contracts",
-      ["id", "contract_number", "counterparty_type", "document_type", "parent_contract_number", "name", "specialty", "phone", "project", "contract_type", "work_type", "contract_value", "contract_date", "civil_id", "passport_number", "nationality", "address", "plot", "block", "area", "license_number", "building_description", "duration_days", "delay_penalty_per_day", "max_penalty_percent", "termination_after_days", "warranty_years", "preamble", "notes", "clauses", "obligations", "installments"],
+      ["id", "contract_number", "counterparty_type", "document_type", "parent_contract_number", "name", "specialty", "phone", "project", "contract_type", "work_type", "contract_value", "contract_date", "civil_id", "passport_number", "nationality", "address", "plot", "block", "area", "license_number", "building_description", "duration_days", "expected_end_date", "delay_penalty_per_day", "max_penalty_percent", "termination_after_days", "warranty_years", "preamble", "notes", "clauses", "obligations", "installments"],
       (d.contractors ?? []).map((x) => [
         uuidFor(x.id),
         str(x.contractNumber),
-        x.counterpartyType === "عميل" ? "عميل" : "مقاول",
+        COUNTERPARTY_TYPES.includes(x.counterpartyType)
+          ? x.counterpartyType
+          : "مقاول",
         str(x.documentType) || "عقد",
         str(x.parentContractNumber),
         str(x.name),
@@ -289,6 +294,7 @@ async function main() {
         str(x.licenseNumber),
         str(x.buildingDescription),
         Number(x.durationDays) || 0,
+        date(x.expectedEndDate),
         num(x.delayPenaltyPerDay),
         num(x.maxPenaltyPercent),
         Number(x.terminationAfterDays) || 0,

@@ -129,6 +129,8 @@ CREATE TABLE contracts (
   license_number         text NOT NULL DEFAULT '',
   building_description   text NOT NULL DEFAULT '',
   duration_days          integer NOT NULL DEFAULT 0,
+  -- تاريخ الانتهاء المتوقَّع، يُكتب بيد من يعرف الموقع ويعلو على الحساب
+  expected_end_date      date,
   delay_penalty_per_day  numeric(14,3) NOT NULL DEFAULT 0,
   max_penalty_percent    numeric(6,2) NOT NULL DEFAULT 0,
   termination_after_days integer NOT NULL DEFAULT 0,
