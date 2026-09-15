@@ -297,6 +297,8 @@ export const PAGE_PERMISSION: Record<string, Permission> = {
   الموظفون: "employees.view",
   "الحضور والانصراف": "attendance.manage",
   "مسيّر الرواتب": "payroll.run",
+  // شاشة النقل إلى الخادم: يفتحها من يملك الإعدادات، لا كل من يُدخل حركة
+  "مطابقة الخادم": "settings.manage",
 };
 
 /* ------------------------------------------------------------------ */

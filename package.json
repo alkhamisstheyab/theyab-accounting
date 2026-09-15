@@ -10,7 +10,8 @@
     "check:state": "node db/check-state-roundtrip.mjs",
     "check:writes": "node db/check-writes.mjs",
     "check:api": "node db/check-api.mjs",
-    "check:parallel": "node db/check-parallel.mjs"
+    "check:parallel": "node db/check-parallel.mjs",
+    "check:sync": "node db/check-sync.mjs"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

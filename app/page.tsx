@@ -176,6 +176,17 @@ import {
   saveState,
 } from "@/lib/storage";
 import {
+  fetchServerState,
+  record as recordForSync,
+  setSyncEnabled,
+  startSync,
+  subscribe as subscribeSync,
+  syncEnabled,
+  type SyncStatus,
+} from "@/lib/sync";
+import { compareStates, type FieldComparison } from "@/lib/changes";
+import type { AppState } from "@/lib/storage";
+import {
   COST_STALE_DAYS,
   ESSENTIAL_DRAFT,
   QUOTATION_DEFAULTS,
@@ -266,6 +277,7 @@ const PAGES = [
   "الأرصدة الافتتاحية",
   "المستخدمون",
   "سجل التدقيق",
+  "مطابقة الخادم",
   "الإعدادات",
 ];
 
@@ -365,6 +377,8 @@ export default function HomeV2() {
     setBackupMeta(readBackupMeta());
     linkedFileName().then(setLinkedFile);
     setLoaded(true);
+    /* المزامنة مطفأة حتى تُشعَل من الإعدادات — وهذه توقظها إن كانت مشعلة */
+    startSync();
   }, []);
 
   // الشاشات تتبدّل داخل الصفحة نفسها، فيبقى موضع التمرير من الشاشة السابقة.
@@ -375,31 +389,37 @@ export default function HomeV2() {
 
   useEffect(() => {
     if (!loaded) return;
-    setSaveError(
-      saveState({
-        movements,
-        projects,
-        contractors,
-        openingBalances,
-        materials,
-        materialReceipts,
-        company,
-        users,
-        audit,
-        yearLocks,
-        chart,
-        items,
-        payments,
-        people,
-        employees,
-        attendance,
-        payrollRuns,
-        payrollSettings,
-        workItems,
-        quotations,
-        invoices,
-      })
-    );
+    const state = {
+      movements,
+      projects,
+      contractors,
+      openingBalances,
+      materials,
+      materialReceipts,
+      company,
+      users,
+      audit,
+      yearLocks,
+      chart,
+      items,
+      payments,
+      people,
+      employees,
+      attendance,
+      payrollRuns,
+      payrollSettings,
+      workItems,
+      quotations,
+      invoices,
+    };
+    setSaveError(saveState(state));
+    /*
+      ثم يُبلَّغ الخادم — بعد الحفظ المحلّي لا قبله.
+
+      فالمتصفّح هو المرجع في هذه المرحلة: إن سقط الخادم أو انقطع الخطّ
+      لم يضع شيء، والحفظ تمّ قبل أن تُحاوَل المزامنة أصلاً.
+    */
+    recordForSync(state);
   }, [
     movements,
     projects,
@@ -1598,6 +1618,10 @@ export default function HomeV2() {
 
           {page === "سجل التدقيق" && (
             <AuditPage audit={audit} onExport={exportTable} />
+          )}
+
+          {page === "مطابقة الخادم" && (
+            <ServerMatchPage local={fullState} />
           )}
 
           {page === "الموظفون" && (
@@ -12900,6 +12924,194 @@ const AUDIT_TONE: Record<string, string> = {
   خروج: "bg-slate-100 text-slate-600",
 };
 
+/* ================================================================== */
+/* مطابقة الخادم                                                       */
+/* ================================================================== */
+
+/**
+ * شاشة المرحلة الرابعة.
+ *
+ * النظام يحفظ في الجهاز كما كان، ثم يرسل إلى الخادم ما تغيّر وحده.
+ * وهذه الشاشة تُريك الفرق بين النسختين حقلاً حقلاً — فلا يُنتقل إلى
+ * الخادم بالثقة بل بالبرهان: ما دام في الجدول سطرٌ أحمر فالجهاز هو
+ * المرجع ولا يُنقل شيء.
+ */
+function ServerMatchPage({ local }: { local: AppState }) {
+  const [status, setStatus] = useState<SyncStatus | null>(null);
+  const [fields, setFields] = useState<FieldComparison[] | null>(null);
+  const [comparing, setComparing] = useState(false);
+  const [problem, setProblem] = useState("");
+  const [comparedAt, setComparedAt] = useState("");
+
+  useEffect(() => subscribeSync(setStatus), []);
+
+  const compare = async () => {
+    setComparing(true);
+    setProblem("");
+    try {
+      const server = await fetchServerState();
+      setFields(compareStates(local, server).fields);
+      setComparedAt(new Date().toISOString());
+    } catch (error) {
+      setFields(null);
+      setProblem(error instanceof Error ? error.message : "تعذّرت المقارنة");
+    } finally {
+      setComparing(false);
+    }
+  };
+
+  const on = status?.enabled ?? false;
+  const agree = fields ? fields.every((f) => f.agree) : null;
+
+  const tone =
+    status?.phase === "متزامنة"
+      ? "ok"
+      : status?.phase === "منقطعة"
+        ? "error"
+        : "warn";
+
+  return (
+    <>
+      <Panel
+        title="مطابقة الخادم"
+        subtitle="الجهاز هو المرجع، والخادم يُكتب إليه ما تغيّر وحده — والمقارنة هي التي تقرّر متى يصير الخادم هو المرجع"
+      >
+        <Banner tone={on ? tone : "warn"}>
+          {on ? (
+            <>
+              المزامنة مشتغلة · الحال: {status?.phase}
+              {status?.pending ? ` · ${status.pending} صفّاً لم يصل بعد` : ""}
+              {status?.lastSyncAt
+                ? ` · آخر إرسال ${new Date(status.lastSyncAt).toLocaleTimeString("ar-KW")}`
+                : ""}
+              {status?.lastError ? ` · ${status.lastError}` : ""}
+            </>
+          ) : (
+            <>
+              المزامنة مطفأة. النظام يعمل من جهازك وحده كما كان، ولا يُرسل
+              شيء. وإشعالها لا يغيّر مصدر البيانات: يبقى الجهاز هو المرجع.
+            </>
+          )}
+        </Banner>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setSyncEnabled(!on)}
+            className={`rounded-lg px-6 py-3 font-bold text-white ${
+              on ? "bg-slate-500" : "bg-slate-900"
+            }`}
+          >
+            {on ? "إطفاء المزامنة" : "إشعال المزامنة"}
+          </button>
+
+          <button
+            type="button"
+            onClick={compare}
+            disabled={comparing}
+            className="rounded-lg bg-blue-600 px-6 py-3 font-bold text-white disabled:cursor-not-allowed disabled:bg-slate-300"
+          >
+            {comparing ? "يقارن…" : "قارن الآن"}
+          </button>
+
+          {status?.rev ? (
+            <span className="text-sm text-slate-500">
+              رقم التغيير عند الخادم: {status.rev}
+            </span>
+          ) : null}
+        </div>
+
+        {problem ? (
+          <div className="mt-4">
+            <Banner tone="error">{problem}</Banner>
+          </div>
+        ) : null}
+      </Panel>
+
+      {fields ? (
+        <Panel
+          title="تقرير المقارنة"
+          subtitle={`قُورن في ${new Date(comparedAt).toLocaleString("ar-KW")}`}
+        >
+          <Banner tone={agree ? "ok" : "error"}>
+            {agree
+              ? "النسختان متطابقتان في الحقول كلها — لا فرق في صفّ واحد."
+              : "بين النسختين فرق. لا يُنقل شيء إلى الخادم حتى يزول، والجهاز هو المرجع."}
+          </Banner>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-right text-sm">
+              <thead className="bg-slate-100">
+                <tr>
+                  <Th>الحقل</Th>
+                  <Th>في جهازك</Th>
+                  <Th>في الخادم</Th>
+                  <Th>ناقص</Th>
+                  <Th>زائد</Th>
+                  <Th>مختلف</Th>
+                  <Th>الحال</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {fields.map((f) => (
+                  <tr
+                    key={f.field}
+                    className={`border-t border-slate-100 ${
+                      f.agree ? "" : "bg-red-50"
+                    }`}
+                  >
+                    <Td className="font-medium">{FIELD_LABELS[f.field] ?? f.field}</Td>
+                    <Td className="tabular-nums">{f.local}</Td>
+                    <Td className="tabular-nums">{f.server}</Td>
+                    <Td className="tabular-nums">{f.missing.length || ""}</Td>
+                    <Td className="tabular-nums">{f.extra.length || ""}</Td>
+                    <Td className="tabular-nums">{f.different.length || ""}</Td>
+                    <Td className={f.agree ? "text-green-700" : "text-red-700"}>
+                      {f.agree ? "مطابق" : "مختلف"}
+                    </Td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {agree ? null : (
+            <p className="mt-4 text-sm text-slate-500">
+              «ناقص» صفوفٌ في جهازك لم تصل الخادم · «زائد» صفوفٌ عنده وليست
+              عندك — وقد تكون من جهازٍ آخر · «مختلف» صفٌّ في الجانبين
+              ومحتواه غير واحد.
+            </p>
+          )}
+        </Panel>
+      ) : null}
+    </>
+  );
+}
+
+/** أسماء الحقول كما تُعرف في النظام لا كما تُسمّى في الشيفرة */
+const FIELD_LABELS: Record<string, string> = {
+  movements: "الحركات",
+  projects: "المشاريع",
+  contractors: "العقود",
+  materials: "المواد",
+  materialReceipts: "استلام المواد",
+  users: "المستخدمون",
+  employees: "الموظفون",
+  attendance: "الحضور",
+  payrollRuns: "مسيّرات الرواتب",
+  workItems: "بنود الأعمال",
+  quotations: "عروض الأسعار",
+  invoices: "الفواتير",
+  audit: "سجل التدقيق",
+  chart: "دليل الحسابات",
+  items: "البنود",
+  payments: "طرق الدفع",
+  people: "الأشخاص",
+  company: "بيانات الشركة",
+  payrollSettings: "إعدادات الرواتب",
+  openingBalances: "الأرصدة الافتتاحية",
+  yearLocks: "إقفال السنوات",
+};
 function AuditPage({
   audit,
   onExport,

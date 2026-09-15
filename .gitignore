@@ -47,4 +47,7 @@ next-env.d.ts
 # قواعد الفحص المؤقّتة ومجلّد بنائه — تُنشأ وتُحذف مع كل فحص
 /.roundtrip-writes/
 /.api-check/
+/.sync-check/
+/.parallel-check/
+/.next-verify/
 /.next-check/
