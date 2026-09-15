@@ -480,7 +480,15 @@ function migrateAttendance(raw: unknown): AttendanceDay[] {
     .map((item) => {
       const a = (item ?? {}) as Record<string, unknown>;
       return {
-        id: str(a.id) || newId(),
+        /*
+          مشتقٌّ من الموظف واليوم لا مولَّدٌ عشوائياً.
+
+          كان newId()، فيتغيّر معرّف اليوم الواحد في كل فتحةٍ للنظام.
+          وذلك يفسد المقارنة مع الخادم — لا يستقرّ صفٌّ على حال — ولا
+          يفيد أحداً: النظام كله يعرف يوم الموظف بالموظف واليوم لا
+          بمعرّف، فاليوم الواحد لا يتكرّر.
+        */
+        id: str(a.id) || str(a.employeeId) + "|" + str(a.date),
         employeeId: str(a.employeeId),
         date: str(a.date),
         status: (ATTENDANCE_STATUSES.includes(

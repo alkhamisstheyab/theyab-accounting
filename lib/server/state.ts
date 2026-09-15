@@ -82,7 +82,7 @@ export async function readState(db: Queryable): Promise<AppState> {
 
   /* ---- البيانات الأساسية: أعمدتها هي النوع نفسه ---- */
   state.chart = (
-    await db.query("SELECT * FROM accounts ORDER BY code")
+    await db.query("SELECT * FROM accounts ORDER BY sort_order, code")
   ).rows.map((r) => ({
     code: str(r.code),
     name: str(r.name),
@@ -95,16 +95,16 @@ export async function readState(db: Queryable): Promise<AppState> {
     postable: r.postable !== false,
   }));
 
-  state.items = (await db.query("SELECT * FROM items ORDER BY code")).rows.map(
+  state.items = (await db.query("SELECT * FROM items ORDER BY sort_order, code")).rows.map(
     (r) => ({ code: str(r.code), name: str(r.name), account: str(r.account) })
   );
 
   state.payments = (
-    await db.query("SELECT * FROM payment_methods ORDER BY label")
+    await db.query("SELECT * FROM payment_methods ORDER BY sort_order, label")
   ).rows.map((r) => ({ label: str(r.label), account: str(r.account) }));
 
   state.people = (
-    await db.query("SELECT name FROM people ORDER BY name")
+    await db.query("SELECT name FROM people ORDER BY sort_order, name")
   ).rows.map((r) => str(r.name));
 
   /* ---- صفٌّ واحد ---- */

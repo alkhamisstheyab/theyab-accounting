@@ -132,6 +132,37 @@ for (const c of COLLECTIONS) {
     check(`${c.field} — والحذف يزيله`, after[0].n === rows.length);
   }
 }
+
+/*
+  والأعمدة المشتقّة تُفحص لا يُوثق بها.
+
+  فالصفّ كلّه محفوظ في data، والأعمدة نسخةٌ منه للاستعلام والفهرسة —
+  ونسخةٌ خاطئة لا يُشكى منها أحد: القراءة تعمل والتقارير تكذب. وقد وقع
+  ذلك فعلاً: حرفٌ ضاع من تعبير التاريخ فصارت أعمدة التواريخ كلها فارغة،
+  ولم يسقط شيء إلا حيث مُنع الفراغ.
+*/
+const DATED = [
+  ["movements", "entry_date", "date"],
+  ["contracts", "contract_date", "contractDate"],
+  ["projects", "start_date", "startDate"],
+  ["quotations", "quote_date", "date"],
+  ["invoices", "invoice_date", "date"],
+];
+for (const [table, column, field] of DATED) {
+  const collection = COLLECTIONS.find((c) => c.table === table);
+  const rows = before[collection.field] ?? [];
+  const withDate = rows.filter((r) => /^\d{4}-\d{2}-\d{2}/.test(String(r[field] ?? "")));
+  if (withDate.length === 0) continue;
+  const { rows: empty } = await db.query(
+    `SELECT count(*)::int AS n FROM ${table} WHERE ${column} IS NULL`
+  );
+  check(
+    `${table}.${column} ليس فارغاً`,
+    empty[0].n === rows.length - withDate.length,
+    `${empty[0].n} فارغاً من ${rows.length}`
+  );
+}
+
 console.log("");
 /* ---- 1. إضافة ---- */
 const fresh = {

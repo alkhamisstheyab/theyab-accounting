@@ -133,10 +133,11 @@ async function writeWhole(
   switch (field) {
     case "chart": {
       await db.query("DELETE FROM accounts");
+      let order = 0;
       for (const a of (value ?? []) as Row[]) {
         await db.query(
-          `INSERT INTO accounts (code,name,parent,type,nature,level,statement,active,postable)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+          `INSERT INTO accounts (code,name,parent,type,nature,level,statement,active,postable,sort_order)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
           [
             String(a.code ?? ""),
             String(a.name ?? ""),
@@ -147,6 +148,7 @@ async function writeWhole(
             String(a.statement ?? ""),
             a.active !== false,
             a.postable !== false,
+            order++,
           ]
         );
       }
@@ -154,29 +156,34 @@ async function writeWhole(
     }
     case "items": {
       await db.query("DELETE FROM items");
+      let order = 0;
       for (const i of (value ?? []) as Row[]) {
-        await db.query(`INSERT INTO items (code,name,account) VALUES ($1,$2,$3)`, [
+        await db.query(`INSERT INTO items (code,name,account,sort_order) VALUES ($1,$2,$3,$4)`, [
           String(i.code ?? ""),
           String(i.name ?? ""),
           String(i.account ?? ""),
+          order++,
         ]);
       }
       return 1;
     }
     case "payments": {
       await db.query("DELETE FROM payment_methods");
+      let order = 0;
       for (const p of (value ?? []) as Row[]) {
-        await db.query(`INSERT INTO payment_methods (label,account) VALUES ($1,$2)`, [
+        await db.query(`INSERT INTO payment_methods (label,account,sort_order) VALUES ($1,$2,$3)`, [
           String(p.label ?? ""),
           String(p.account ?? ""),
+          order++,
         ]);
       }
       return 1;
     }
     case "people": {
       await db.query("DELETE FROM people");
+      let order = 0;
       for (const name of (value ?? []) as string[]) {
-        await db.query(`INSERT INTO people (name) VALUES ($1)`, [String(name)]);
+        await db.query(`INSERT INTO people (name,sort_order) VALUES ($1,$2)`, [String(name), order++]);
       }
       return 1;
     }

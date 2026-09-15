@@ -9,7 +9,8 @@
     "lint": "eslint",
     "check:state": "node db/check-state-roundtrip.mjs",
     "check:writes": "node db/check-writes.mjs",
-    "check:api": "node db/check-api.mjs"
+    "check:api": "node db/check-api.mjs",
+    "check:parallel": "node db/check-parallel.mjs"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

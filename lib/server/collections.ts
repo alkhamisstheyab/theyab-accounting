@@ -1,26 +1,28 @@
 /**
- * وصف مجموعات الحالة: أين يُكتب كلٌّ منها، وبأي أعمدة.
+ * أعمدة الجداول: أين تُكتب كل مجموعة، وبأي أعمدة.
  *
- * موضع واحد يعرف أن «العقود» تُكتب في contracts، وأن مفتاحها
- * contractNumber فريد، وأن عمود counterparty_type نسخةٌ من
- * counterpartyType. فإن تغيّر شيء من ذلك تغيّر هنا وحده.
+ * وهُويّة المجموعات — أيّها صفوف وبأي مفتاح تُعرف — في lib/collections.ts
+ * يعرفها الطرفان. وهنا ما لا يعني إلا الخادم: اسم الجدول وأعمدته.
  *
  * والأعمدة نسخةٌ من الكائن لا مصدرٌ له: الصفّ كلّه محفوظ في data،
  * وهذه الأعمدة للاستعلام والفهرسة والقيود. فلا يلزم أن تغطّي كل
  * حقل — يلزم أن تغطّي ما يُستعلم عنه.
  */
 
-import type { AppState } from "../storage";
+import {
+  COUNTERPARTY_TYPES,
+  ROW_COLLECTIONS,
+  WHOLE_FIELDS,
+  type RowCollection,
+} from "../collections";
 import { uuidFor } from "../ids";
+
+export { COUNTERPARTY_TYPES, WHOLE_FIELDS };
 
 type Row = Record<string, unknown>;
 
-export type Collection = {
-  /** مفتاح المجموعة في AppState */
-  field: keyof AppState;
+export type Collection = RowCollection & {
   table: string;
-  /** يستخرج معرّف الصفّ من الكائن — نصٌّ يُحوَّل إلى uuid عند الكتابة */
-  keyOf: (o: Row) => string;
   /** الأعمدة المشتقّة من الكائن، عدا id و data و rev */
   columns: (o: Row) => Row;
 };
@@ -36,14 +38,10 @@ const day = (v: unknown): string | null =>
   /^\d{4}-\d{2}-\d{2}/.test(str(v)) ? str(v).slice(0, 10) : null;
 const when = (v: unknown): string | null => (str(v) ? str(v) : null);
 
-/** أنواع الأطراف الثلاثة — والرابع غير موجود، فما خرج عنها مقاول */
-export const COUNTERPARTY_TYPES = ["عميل", "مقاول", "مورّد"];
-
-export const COLLECTIONS: Collection[] = [
-  {
-    field: "movements",
+/** الجدول والأعمدة لكل مجموعة — والمفتاح يأتي من التعريف المشترك */
+const TABLES: Record<string, { table: string; columns: (o: Row) => Row }> = {
+  movements: {
     table: "movements",
-    keyOf: (m) => str(m.id),
     columns: (m) => ({
       entry_no: int(m.entryNo),
       fiscal_year: int(m.fiscalYear),
@@ -68,10 +66,8 @@ export const COLLECTIONS: Collection[] = [
       approval_note: str(m.approvalNote),
     }),
   },
-  {
-    field: "projects",
+  projects: {
     table: "projects",
-    keyOf: (p) => str(p.id),
     columns: (p) => ({
       name: str(p.name),
       budget: num(p.budget),
@@ -79,10 +75,8 @@ export const COLLECTIONS: Collection[] = [
       status: str(p.status) || "نشط",
     }),
   },
-  {
-    field: "contractors",
+  contractors: {
     table: "contracts",
-    keyOf: (c) => str(c.id),
     columns: (c) => ({
       contract_number: str(c.contractNumber),
       counterparty_type: COUNTERPARTY_TYPES.includes(str(c.counterpartyType))
@@ -120,19 +114,15 @@ export const COLLECTIONS: Collection[] = [
       installments: JSON.stringify(c.installments ?? []),
     }),
   },
-  {
-    field: "materials",
+  materials: {
     table: "materials",
-    keyOf: (m) => str(m.id),
     columns: (m) => ({
       name: str(m.name),
       indicative_price: m.unitPrice == null ? 0 : num(m.unitPrice),
     }),
   },
-  {
-    field: "materialReceipts",
+  materialReceipts: {
     table: "material_receipts",
-    keyOf: (r) => str(r.id),
     columns: (r) => ({
       receipt_date: day(r.date),
       project: str(r.project),
@@ -143,10 +133,8 @@ export const COLLECTIONS: Collection[] = [
       notes: str(r.note),
     }),
   },
-  {
-    field: "users",
+  users: {
     table: "users",
-    keyOf: (u) => str(u.id),
     columns: (u) => ({
       name: str(u.name),
       job_title: str(u.jobTitle),
@@ -158,17 +146,12 @@ export const COLLECTIONS: Collection[] = [
       last_seen_at: when(u.lastSeenAt),
     }),
   },
-  {
-    field: "employees",
+  employees: {
     table: "employees",
-    keyOf: (e) => str(e.id),
     columns: (e) => ({ name: str(e.name), active: e.active !== false }),
   },
-  {
-    field: "attendance",
+  attendance: {
     table: "attendance",
-    /* مفتاحه الموظف واليوم، لا معرّفه — فاليوم الواحد لا يتكرّر */
-    keyOf: (a) => str(a.employeeId) + "|" + str(a.date),
     columns: (a) => ({
       /* عمودٌ من نوع uuid يشير إلى موظف، ومعرّف التطبيق نصّ مثل emp-008 */
       employee_id: uuidFor(str(a.employeeId)),
@@ -179,10 +162,8 @@ export const COLLECTIONS: Collection[] = [
       note: str(a.note),
     }),
   },
-  {
-    field: "payrollRuns",
+  payrollRuns: {
     table: "payroll_runs",
-    keyOf: (r) => str(r.id),
     columns: (r) => ({
       month: str(r.month),
       fiscal_year: int(r.fiscalYear),
@@ -196,10 +177,8 @@ export const COLLECTIONS: Collection[] = [
       note: str(r.note),
     }),
   },
-  {
-    field: "workItems",
+  workItems: {
     table: "work_items",
-    keyOf: (w) => str(w.id),
     columns: (w) => ({
       stage: str(w.stage),
       section: str(w.section),
@@ -219,10 +198,8 @@ export const COLLECTIONS: Collection[] = [
       notes: str(w.notes),
     }),
   },
-  {
-    field: "quotations",
+  quotations: {
     table: "quotations",
-    keyOf: (q) => str(q.id),
     columns: (q) => ({
       number: str(q.number),
       quote_date: day(q.date),
@@ -250,10 +227,8 @@ export const COLLECTIONS: Collection[] = [
       edited_at: when(q.updatedAt),
     }),
   },
-  {
-    field: "invoices",
+  invoices: {
     table: "invoices",
-    keyOf: (i) => str(i.id),
     columns: (i) => ({
       number: str(i.number),
       invoice_date: day(i.date),
@@ -273,10 +248,8 @@ export const COLLECTIONS: Collection[] = [
       created_at: when(i.createdAt),
     }),
   },
-  {
-    field: "audit",
+  audit: {
     table: "audit_log",
-    keyOf: (a) => str(a.id),
     columns: (a) => ({
       at: when(a.at),
       actor: str(a.user),
@@ -287,25 +260,13 @@ export const COLLECTIONS: Collection[] = [
       after_val: a.after == null ? null : str(a.after),
     }),
   },
-];
+};
+
+/** الوصف الكامل: هُويّةٌ مشتركة + جدولٌ وأعمدة */
+export const COLLECTIONS: Collection[] = ROW_COLLECTIONS.map((c) => ({
+  ...c,
+  ...TABLES[c.field],
+}));
 
 export const collectionOf = (field: string): Collection | undefined =>
   COLLECTIONS.find((c) => c.field === field);
-
-/**
- * المجموعات التي تُكتب كاملةً لا صفّاً صفّاً.
- *
- * هي صغيرة ونادرة التغيير ويحرّرها واحد: دليل الحسابات والبنود وطرق
- * الدفع والأشخاص وبيانات الشركة وإعدادات الرواتب والأرصدة الافتتاحية
- * وإقفال السنوات. فالكتابة الكاملة فيها لا تصطدم بأحد.
- */
-export const WHOLE_FIELDS = [
-  "chart",
-  "items",
-  "payments",
-  "people",
-  "company",
-  "payrollSettings",
-  "openingBalances",
-  "yearLocks",
-] as const;

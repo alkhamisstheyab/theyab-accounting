@@ -108,22 +108,34 @@ CREATE TABLE accounts (
   level      smallint NOT NULL DEFAULT 3,
   statement  text NOT NULL DEFAULT '',
   active     boolean NOT NULL DEFAULT true,
-  postable   boolean NOT NULL DEFAULT true
+  postable   boolean NOT NULL DEFAULT true,
+  -- ترتيبها كما أدخله المستخدم. والترتيب بيانات: من رتّب طرق الدفع
+  -- بالأكثر استعمالاً أولاً لا يُقبل أن تعود إليه مرتّبةً بالحروف.
+  sort_order smallint NOT NULL DEFAULT 0
 );
 
 CREATE TABLE items (
   code     text PRIMARY KEY,
   name     text NOT NULL,
-  account  text NOT NULL DEFAULT ''
+  account  text NOT NULL DEFAULT '',
+  -- ترتيبها كما أدخله المستخدم. والترتيب بيانات: من رتّب طرق الدفع
+  -- بالأكثر استعمالاً أولاً لا يُقبل أن تعود إليه مرتّبةً بالحروف.
+  sort_order smallint NOT NULL DEFAULT 0
 );
 
 CREATE TABLE payment_methods (
   label    text PRIMARY KEY,
-  account  text NOT NULL DEFAULT ''
+  account  text NOT NULL DEFAULT '',
+  -- ترتيبها كما أدخله المستخدم. والترتيب بيانات: من رتّب طرق الدفع
+  -- بالأكثر استعمالاً أولاً لا يُقبل أن تعود إليه مرتّبةً بالحروف.
+  sort_order smallint NOT NULL DEFAULT 0
 );
 
 CREATE TABLE people (
-  name text PRIMARY KEY
+  name text PRIMARY KEY,
+  -- ترتيبها كما أدخله المستخدم. والترتيب بيانات: من رتّب طرق الدفع
+  -- بالأكثر استعمالاً أولاً لا يُقبل أن تعود إليه مرتّبةً بالحروف.
+  sort_order smallint NOT NULL DEFAULT 0
 );
 
 -- ---------- المشاريع ----------

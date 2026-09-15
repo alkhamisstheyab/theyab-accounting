@@ -204,8 +204,8 @@ async function main() {
     await insertMany(
       db,
       "accounts",
-      ["code", "name", "parent", "type", "nature", "level", "statement", "active", "postable"],
-      (d.chart ?? []).map((a) => [
+      ["code", "name", "parent", "type", "nature", "level", "statement", "active", "postable", "sort_order"],
+      (d.chart ?? []).map((a, order) => [
         str(a.code),
         str(a.name),
         str(a.parent),
@@ -215,6 +215,7 @@ async function main() {
         str(a.statement),
         a.active !== false,
         a.postable !== false,
+        order,
       ])
     )
   );
@@ -224,8 +225,8 @@ async function main() {
     await insertMany(
       db,
       "items",
-      ["code", "name", "account"],
-      (d.items ?? []).map((i) => [str(i.code), str(i.name), str(i.account)])
+      ["code", "name", "account", "sort_order"],
+      (d.items ?? []).map((i, order) => [str(i.code), str(i.name), str(i.account), order])
     )
   );
 
@@ -234,8 +235,8 @@ async function main() {
     await insertMany(
       db,
       "payment_methods",
-      ["label", "account"],
-      (d.payments ?? []).map((p) => [str(p.label), str(p.account)])
+      ["label", "account", "sort_order"],
+      (d.payments ?? []).map((p, order) => [str(p.label), str(p.account), order])
     )
   );
 
@@ -244,8 +245,8 @@ async function main() {
     await insertMany(
       db,
       "people",
-      ["name"],
-      [...new Set((d.people ?? []).map(str).filter(Boolean))].map((n) => [n])
+      ["name", "sort_order"],
+      [...new Set((d.people ?? []).map(str).filter(Boolean))].map((n, order) => [n, order])
     )
   );
 
