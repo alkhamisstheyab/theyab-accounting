@@ -178,6 +178,7 @@ import {
 import {
   fetchServerState,
   record as recordForSync,
+  rememberLoaded,
   setSyncEnabled,
   startSync,
   subscribe as subscribeSync,
@@ -223,6 +224,10 @@ import {
   quotationTotals,
   stagesOfScope,
   validUntil,
+  daysLeft,
+  isBindingQuotation,
+  isExpired,
+  partitionExpired,
 } from "@/lib/quotations";
 import {
   allDurations,
@@ -300,6 +305,8 @@ export default function HomeV2() {
   const [sessionLastSeen, setSessionLastSeen] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [loadErrors, setLoadErrors] = useState<string[]>([]);
+  /** ما مُحي من العروض عند هذه الفتحة — يُعرض مرةً ثم يُخفى */
+  const [expiredQuotes, setExpiredQuotes] = useState<string[]>([]);
   const [saveError, setSaveError] = useState<string | null>(null);
 
   const [movements, setMovements] = useState<Movement[]>([]);
@@ -351,6 +358,8 @@ export default function HomeV2() {
 
   useEffect(() => {
     const { state, errors } = loadState();
+    /* ما قُرئ من التخزين يُعلَم به المزامنة قبل أن يمسّه النظام */
+    rememberLoaded(state);
     setMovements(state.movements);
     setProjects(state.projects);
     setContractors(state.contractors);
@@ -370,7 +379,32 @@ export default function HomeV2() {
     setPayrollRuns(state.payrollRuns);
     setPayrollSettings(state.payrollSettings);
     setWorkItems(state.workItems);
-    setQuotations(state.quotations);
+    /*
+      العروض التي انقضت مدّتها تُمحى عند الفتح.
+
+      والمقبول منها لا يُمسّ وإن انقضى: هو أصل العقد وسندُه. والمسودة
+      لا مدّة لها أصلاً — المدة تبدأ يوم يخرج العرض إلى العميل.
+
+      ولا يقع ذلك صامتاً: يُذكر في سجل التدقيق، ويُعرض على الشاشة عند
+      الفتح بأرقام ما مُحي. فالمحو الصامت أسوأ من بقاء الورق.
+    */
+    const quotes = partitionExpired(state.quotations, todayISO());
+    setQuotations(quotes.kept);
+    if (quotes.expired.length > 0) {
+      const numbers = quotes.expired.map((q) => q.number).join("، ");
+      setExpiredQuotes(quotes.expired.map((q) => `${q.number} — ${q.clientName || "بلا عميل"}`));
+      setAudit((prev) =>
+        appendEntry(
+          prev,
+          makeEntry(
+            "النظام",
+            "حذف",
+            "بيانات النظام",
+            `مُحيت ${quotes.expired.length} من عروض الأسعار لانقضاء صلاحيتها: ${numbers}`
+          )
+        )
+      );
+    }
     setInvoices(state.invoices);
     setLoadErrors(errors);
     setYear(availableYears(state.movements, state.openingBalances)[0]);
@@ -1094,6 +1128,20 @@ export default function HomeV2() {
               {error}
             </Banner>
           ))}
+
+          {expiredQuotes.length > 0 && (
+            <Banner tone="warn">
+              مُحيت <b>{expiredQuotes.length}</b> من عروض الأسعار لانقضاء
+              صلاحيتها: {expiredQuotes.join(" · ")}. والمقبول منها لا يُمحى.
+              <button
+                type="button"
+                onClick={() => setExpiredQuotes([])}
+                className="mr-3 underline"
+              >
+                إخفاء
+              </button>
+            </Banner>
+          )}
           {saveError && <Banner tone="error">{saveError}</Banner>}
 
           {yearClosed && (
@@ -1285,6 +1333,22 @@ export default function HomeV2() {
                 if (!allow("contractors.manage")) {
                   window.alert("إنشاء العقد يحتاج صلاحية «إدارة العقود والدفعات».");
                   return null;
+                }
+                /*
+                  العرض المنقضي لا يصير عقداً بضغطة.
+                  أسعاره سعرُ شهرٍ مضى، والحديد والأسمنت لا ينتظران.
+                */
+                if (isExpired(quotation, todayISO())) {
+                  const until = validUntil(quotation);
+                  if (
+                    !window.confirm(
+                      `انقضت صلاحية العرض ${quotation.number} في ${until}.\n\n` +
+                        "أسعاره سعر ذلك الوقت. راجعها قبل الإبرام.\n\n" +
+                        "أتريد إبرام العقد على هذه الأسعار؟"
+                    )
+                  ) {
+                    return null;
+                  }
                 }
                 const totals = quotationTotals(quotation.lines, quotation.pricingMode);
                 const rows = installmentsFromQuotation(quotation, terms);
@@ -9676,6 +9740,46 @@ function ContractLinksPage({
   );
 }
 
+/**
+ * حال صلاحية العرض في سطرٍ واحد.
+ *
+ * والغرض أن يُرى قبل انقضائه لا بعده: العرض الذي انقضت مدّته يُمحى
+ * عند الفتحة التالية، فمن رأى «بقي يومان» لحق أن يجدّده أو يقدّمه.
+ */
+function QuotationValidity({ quotation }: { quotation: Quotation }) {
+  const until = validUntil(quotation);
+  const left = daysLeft(quotation, todayISO());
+
+  if (!until) {
+    return (
+      <span className="text-slate-400">
+        {quotation.status === "مسودة" ? "لم يُقدَّم بعد" : "—"}
+      </span>
+    );
+  }
+
+  /* المقبول سندُ عقدٍ قائم، فمدّته لا تعنيه */
+  if (isBindingQuotation(quotation)) {
+    return <span className="text-slate-500">لا تنقضي — سند عقد</span>;
+  }
+
+  if (left === null) return <span className="text-slate-400">—</span>;
+
+  if (left < 0) {
+    return (
+      <span className="font-bold text-red-700">
+        انقضت — يُمحى عند الفتحة القادمة
+      </span>
+    );
+  }
+
+  return (
+    <span className={left <= 7 ? "font-bold text-amber-700" : "text-slate-600"}>
+      {left === 0 ? "ينقضي اليوم" : `بقي ${left} يوماً`}
+      <span className="block text-slate-400">حتى {until}</span>
+    </span>
+  );
+}
 function QuotationsPage({
   quotations,
   workItems,
@@ -9725,11 +9829,19 @@ function QuotationsPage({
   // كل تغيير يختم وقته، فيُعرف عمر المسودة بلا حفظ يدوي
   const patch = (id: string, change: Partial<Quotation>) =>
     setQuotations((prev) =>
-      prev.map((q) =>
-        q.id === id
-          ? { ...q, ...change, updatedAt: new Date().toISOString() }
-          : q
-      )
+      prev.map((q) => {
+        if (q.id !== id) return q;
+        const next = { ...q, ...change, updatedAt: new Date().toISOString() };
+        /*
+          يوم التقديم يُختم مرةً واحدة حين يخرج العرض إلى العميل، ومنه
+          تبدأ مدة الصلاحية. ولا يُعاد ختمه بعدها: من يرجع العرض إلى
+          مسودة ليصحّح حرفاً ثم يقدّمه، لا يبدأ شهراً جديداً بذلك.
+        */
+        if (next.status !== "مسودة" && !next.submittedAt) {
+          next.submittedAt = todayISO();
+        }
+        return next;
+      })
     );
 
   /** نسخة من عرض قائم — لعرض بديل لنفس العميل بنطاق آخر */
@@ -9834,6 +9946,7 @@ function QuotationsPage({
                   <Th>القيمة</Th>
                   {canSeeCost && <Th>الهامش</Th>}
                   <Th>الحالة</Th>
+                  <Th>الصلاحية</Th>
                   <Th>آخر تعديل</Th>
                   <Th>{""}</Th>
                 </tr>
@@ -9865,6 +9978,9 @@ function QuotationsPage({
                         </Td>
                       )}
                       <Td>{q.status}</Td>
+                      <Td className="whitespace-nowrap text-xs">
+                        <QuotationValidity quotation={q} />
+                      </Td>
                       <Td className="whitespace-nowrap text-xs text-slate-500">
                         {(q.updatedAt || q.createdAt).slice(0, 10)}
                         <div
@@ -10905,8 +11021,8 @@ function QuotationSheet({
             <h3 className="mt-8 text-lg font-bold">شروط العرض</h3>
             <ul className="mt-2 list-inside list-disc space-y-1 text-sm">
               <li>
-                هذا العرض صالح لمدة {quotation.validityDays} يوماً من تاريخه
-                {until ? ` — أي حتى ${until}` : ""}.
+                هذا العرض صالح لمدة {quotation.validityDays} يوماً من تاريخ
+                تقديمه{until ? ` — أي حتى ${until}` : ""}.
               </li>
               <li>
                 مدة التنفيذ {quotation.durationDays} يوماً، ولا تُحتسب أيام العطل

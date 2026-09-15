@@ -123,8 +123,15 @@ export type Quotation = {
    */
   marginPercent: number;
   durationDays: number;
-  /** صلاحية العرض بالأيام من تاريخه */
+  /** صلاحية العرض بالأيام — تُحسب من يوم تقديمه للعميل لا من يوم إنشائه */
   validityDays: number;
+  /**
+   * يوم تقديمه للعميل — يُختم حين تصير حالته «مقدَّم».
+   *
+   * ومنه تبدأ المدة لا من تاريخ العرض: المسودة قد تُعدّ على مهل أسابيع،
+   * ولو حُسبت المدة من إنشائها لانتهت في يد معدّها قبل أن يراها عميل.
+   */
+  submittedAt?: string;
 
   lines: QuotationLine[];
   notes: string;
@@ -596,13 +603,66 @@ export function nextQuotationNumber(
   return `${prefix}${String(top + 1).padStart(3, "0")}`;
 }
 
-/** تاريخ انتهاء صلاحية العرض */
+/* ------------------------------------------------------------------ */
+/* الصلاحية                                                            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * تاريخ انتهاء صلاحية العرض.
+ *
+ * من يوم تقديمه للعميل، فما لم يُقدَّم بعدُ فلا انتهاء له. والمسودة
+ * تبقى ما بقيت مسودة: من يُعدّ عرضاً على مهل لا يُفاجأ باختفائه.
+ */
 export function validUntil(quotation: Quotation): string {
-  if (!quotation.date || quotation.validityDays <= 0) return "";
-  const d = new Date(quotation.date);
+  const from = quotation.submittedAt || "";
+  if (!from || quotation.validityDays <= 0) return "";
+  const d = new Date(from);
   if (Number.isNaN(d.getTime())) return "";
   d.setDate(d.getDate() + quotation.validityDays);
   return d.toISOString().slice(0, 10);
+}
+
+/**
+ * العرض المقبول لا ينتهي ولا يُمحى.
+ *
+ * هو أصل العقد وسنده: البنود المتّفق عليها وأسعارها وما استُثني منها.
+ * فإن نُوزع في العقد يوماً رُجع إليه. وكذلك كل عرضٍ تحوّل إلى عقد ولو
+ * لم تتغيّر حالته.
+ */
+export const isBindingQuotation = (quotation: Quotation): boolean =>
+  quotation.status === "مقبول" || Boolean(quotation.contractNumber);
+
+/** كم بقي من صلاحيته — سالبٌ يعني انقضاءها، وnull يعني أنه لم يُقدَّم */
+export function daysLeft(quotation: Quotation, today: string): number | null {
+  const until = validUntil(quotation);
+  if (!until) return null;
+  const end = new Date(until).getTime();
+  const now = new Date(today).getTime();
+  if (Number.isNaN(end) || Number.isNaN(now)) return null;
+  return Math.round((end - now) / 86_400_000);
+}
+
+export function isExpired(quotation: Quotation, today: string): boolean {
+  const left = daysLeft(quotation, today);
+  return left !== null && left < 0;
+}
+
+/**
+ * يفصل ما انقضت مدّته عمّا بقي.
+ *
+ * والمقبول يُستثنى فيبقى وإن انقضت مدّته — يُعلَّم «منتهٍ» ولا يُمحى.
+ */
+export function partitionExpired(
+  quotations: Quotation[],
+  today: string
+): { kept: Quotation[]; expired: Quotation[] } {
+  const kept: Quotation[] = [];
+  const expired: Quotation[] = [];
+  for (const q of quotations) {
+    if (isExpired(q, today) && !isBindingQuotation(q)) expired.push(q);
+    else kept.push(q);
+  }
+  return { kept, expired };
 }
 
 export const QUOTATION_DEFAULTS = {

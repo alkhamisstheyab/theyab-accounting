@@ -198,6 +198,15 @@ export function record(state: AppState): void {
   schedule(QUIET_MS);
 }
 
+/**
+ * يسجّل ما حُمّل من التخزين قبل أن يمسّه النظام.
+ *
+ * يُنادى عند الفتح بالحالة كما قُرئت. وبه يُعرف أن ما يمحوه النظام
+ * بنفسه — عرضُ سعرٍ انقضت مدّته مثلاً — محوٌ مقصود يُبلَّغ به الخادم،
+ * لا صفٌّ غريبٌ لم يره هذا الجهاز قطّ فيُترك في مكانه.
+ */
+export const rememberLoaded = (state: AppState): void => remember(state);
+
 /** يسجّل مفاتيح ما في الجهاز الآن، فيُعرف لاحقاً ما زال عنه */
 function remember(state: AppState): void {
   for (const collection of ROW_COLLECTIONS) {

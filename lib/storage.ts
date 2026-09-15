@@ -641,6 +641,13 @@ function migrateQuotations(raw: unknown): Quotation[] {
           : QUOTATION_DEFAULTS.marginPercent,
         durationDays: days("durationDays", QUOTATION_DEFAULTS.durationDays),
         validityDays: days("validityDays", QUOTATION_DEFAULTS.validityDays),
+        /*
+          يوم التقديم للعميل. وما سبق هذا الحقل من العروض: المسودة لا
+          تقديم لها، وما خرج عن المسودة فأقربُ ما يُعرف به تاريخُه.
+        */
+        submittedAt:
+          str(q.submittedAt) ||
+          (str(q.status) && str(q.status) !== "مسودة" ? str(q.date) : ""),
         lines: Array.isArray(q.lines)
           ? q.lines.map(migrateQuotationLine)
           : [],
