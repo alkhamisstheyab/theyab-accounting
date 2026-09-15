@@ -12,7 +12,8 @@
     "check:api": "node db/check-api.mjs",
     "check:parallel": "node db/check-parallel.mjs",
     "check:sync": "node db/check-sync.mjs",
-    "check:quotations": "node db/check-quotation-validity.mjs"
+    "check:quotations": "node db/check-quotation-validity.mjs",
+    "check:match": "node db/check-match-log.mjs"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

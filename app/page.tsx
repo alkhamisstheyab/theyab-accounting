@@ -174,6 +174,8 @@ import {
   parseBackup,
   receiptCost,
   saveState,
+  COUNTERPARTY_TYPES,
+  type CounterpartyType,
 } from "@/lib/storage";
 import {
   fetchServerState,
@@ -186,6 +188,14 @@ import {
   type SyncStatus,
 } from "@/lib/sync";
 import { compareStates, type FieldComparison } from "@/lib/changes";
+import {
+  REQUIRED_STREAK,
+  comparedToday,
+  matchRuns,
+  recordMatch,
+  verdict,
+  type MatchRun,
+} from "@/lib/match-log";
 import type { AppState } from "@/lib/storage";
 import {
   COST_STALE_DAYS,
@@ -4751,6 +4761,8 @@ const INSTALLMENT_STATUSES = ["غير مستحقة", "مستحقة", "مدفوع
 
 const BLANK_CONTRACT = {
   documentType: "عقد",
+  /* أكثر ما يُبرَم من هذه الشاشة عقود مقاولين، فهو المبدئي */
+  counterpartyType: "مقاول" as CounterpartyType,
   parentContractNumber: "",
   contractDate: "",
   contractNumber: "",
@@ -4865,6 +4877,7 @@ function ContractorsPage({
     setEditingId(c.id);
     setForm({
       documentType: c.documentType,
+      counterpartyType: c.counterpartyType,
       parentContractNumber: c.parentContractNumber,
       contractDate: c.contractDate,
       contractNumber: c.contractNumber,
@@ -4997,9 +5010,15 @@ function ContractorsPage({
       installmentsCount: installments.filter(isPayableInstallment).length,
       installments: installments.map((i) => ({ ...i })),
 
-      // التحرير يحافظ على نوع الطرف، والجديد من هذه الشاشة عقد مقاول
-      counterpartyType:
-        contractors.find((c) => c.id === editingId)?.counterpartyType ?? "مقاول",
+      /*
+        نوع الطرف يُختار لا يُخمَّن.
+
+        كان كل عقدٍ يُنشأ من هنا «مقاولاً»، وعقود المورّدين تُدخَل من
+        خارج الشاشة. وهي أحد عشر عقداً: الألمنيوم والخرسانة والطابوق
+        والتأمين. ومن سمّى مورّداً مقاولاً اختلّ عليه تقريرُ من له
+        على الشركة.
+      */
+      counterpartyType: form.counterpartyType,
       documentType: form.documentType,
       parentContractNumber: form.parentContractNumber.trim(),
       contractDate: form.contractDate,
@@ -5098,6 +5117,20 @@ function ContractorsPage({
                     className={inputClass}
                   >
                     {DOCUMENT_TYPES.map((t) => (
+                      <option key={t}>{t}</option>
+                    ))}
+                  </select>
+                </Field>
+
+                <Field label="نوع الطرف الثاني">
+                  <select
+                    value={form.counterpartyType}
+                    onChange={(e) =>
+                      set("counterpartyType", e.target.value as CounterpartyType)
+                    }
+                    className={inputClass}
+                  >
+                    {COUNTERPARTY_TYPES.map((t) => (
                       <option key={t}>{t}</option>
                     ))}
                   </select>
@@ -13058,6 +13091,8 @@ function ServerMatchPage({ local }: { local: AppState }) {
   const [comparing, setComparing] = useState(false);
   const [problem, setProblem] = useState("");
   const [comparedAt, setComparedAt] = useState("");
+  /* السجلّ يُقرأ مرةً عند بناء الحالة — والشاشة لا تُعرض إلا بعد اختيارها */
+  const [runs, setRuns] = useState<MatchRun[]>(matchRuns);
 
   useEffect(() => subscribeSync(setStatus), []);
 
@@ -13066,8 +13101,25 @@ function ServerMatchPage({ local }: { local: AppState }) {
     setProblem("");
     try {
       const server = await fetchServerState();
-      setFields(compareStates(local, server).fields);
-      setComparedAt(new Date().toISOString());
+      const report = compareStates(local, server);
+      const at = new Date().toISOString();
+      setFields(report.fields);
+      setComparedAt(at);
+      /*
+        تُسجَّل النتيجة قبل أن تُعرض. فالعدّ هو الحجّة يوم النقل، ولا
+        يصحّ أن يضيع بإغلاق الصفحة أو بمقارنةٍ تالية تمحو ما قبلها.
+      */
+      setRuns(
+        recordMatch({
+          at,
+          agree: report.agree,
+          off: report.fields.filter((f) => !f.agree).map((f) => f.field),
+          rows: report.fields.reduce(
+            (n, f) => n + f.missing.length + f.extra.length + f.different.length,
+            0
+          ),
+        })
+      );
     } catch (error) {
       setFields(null);
       setProblem(error instanceof Error ? error.message : "تعذّرت المقارنة");
@@ -13075,6 +13127,10 @@ function ServerMatchPage({ local }: { local: AppState }) {
       setComparing(false);
     }
   };
+
+  const judgement = verdict(runs);
+  const today = todayISO();
+  const doneToday = comparedToday(today, runs);
 
   const on = status?.enabled ?? false;
   const agree = fields ? fields.every((f) => f.agree) : null;
@@ -13142,6 +13198,70 @@ function ServerMatchPage({ local }: { local: AppState }) {
             <Banner tone="error">{problem}</Banner>
           </div>
         ) : null}
+      </Panel>
+
+      <Panel
+        title="سجلّ المطابقة"
+        subtitle={`لا يُنتقل إلى الخادم حتى تتطابق النسختان ${REQUIRED_STREAK} أيام متتالية`}
+      >
+        <Banner tone={judgement.ready ? "ok" : runs.length === 0 ? "warn" : "warn"}>
+          {judgement.text}
+          {!doneToday && on ? " · لم تُقارن اليوم بعد" : ""}
+        </Banner>
+
+        {/* شريط الأيام: يومٌ لكل مربّع، آخرها اليوم */}
+        {runs.length > 0 && (
+          <div className="mb-4 flex flex-wrap gap-1">
+            {runs.slice(-30).map((r) => (
+              <span
+                key={r.day}
+                title={`${r.day} — ${r.agree ? "متطابقتان" : r.off.join("، ")}`}
+                className={`h-7 w-7 rounded text-center text-xs leading-7 ${
+                  r.agree ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"
+                }`}
+              >
+                {r.day.slice(8)}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {runs.length === 0 ? (
+          <Empty>
+            لا مقارنات بعد — اضغط «قارن الآن» مرةً كل يوم عمل
+          </Empty>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-right text-sm">
+              <thead className="bg-slate-100">
+                <tr>
+                  <Th>اليوم</Th>
+                  <Th>الساعة</Th>
+                  <Th>النتيجة</Th>
+                  <Th>الصفوف المختلفة</Th>
+                  <Th>أين</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {[...runs].reverse().map((r) => (
+                  <tr key={r.day} className="border-t border-slate-100">
+                    <Td className="font-medium">{r.day}</Td>
+                    <Td className="text-slate-500">
+                      {new Date(r.at).toLocaleTimeString("ar-KW")}
+                    </Td>
+                    <Td className={r.agree ? "text-green-700" : "font-bold text-red-700"}>
+                      {r.agree ? "متطابقتان" : "مختلفتان"}
+                    </Td>
+                    <Td className="tabular-nums">{r.rows || ""}</Td>
+                    <Td className="text-slate-600">
+                      {r.off.map((f) => FIELD_LABELS[f] ?? f).join("، ") || "—"}
+                    </Td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </Panel>
 
       {fields ? (
