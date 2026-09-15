@@ -2,6 +2,8 @@ import "server-only";
 
 import { Pool, type QueryResultRow } from "pg";
 
+import type { Queryable } from "./state";
+
 /**
  * الاتصال بقاعدة البيانات.
  *
@@ -82,4 +84,35 @@ export async function transaction<T>(
   } finally {
     client.release();
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* واجهة واحدة للقراءة والكتابة                                        */
+/* ------------------------------------------------------------------ */
+
+/*
+  دوالّ القراءة والكتابة (state.ts و writes.ts) تعمل على واجهة Queryable
+  المجرّدة، فتقبل pg على الخادم و PGlite في الفحص. وهنا يُوصَل الطرفان.
+*/
+
+/** للقراءة: كل استعلام يأخذ اتصالاً من المجمّع ويعيده */
+export const readable: Queryable = {
+  query: async (text, values = []) => ({ rows: await query(text, values) }),
+};
+
+/**
+  معاملة بواجهة Queryable.
+
+  ولا غنى عنها للكتابة: المجمّع يعطي لكل استعلام اتصالاً قد يختلف، فلو
+  كُتبت المعاملة عليه لوقع BEGIN على اتصال والإدراج على آخر — فلا تُلغى
+  الكتابة عند الخطأ ولا تُحفظ الحركة وقيدُها معاً.
+ */
+export function inTransaction<T>(
+  work: (db: Queryable) => Promise<T>
+): Promise<T> {
+  return transaction((run) =>
+    work({
+      query: async (text, values = []) => ({ rows: await run(text, values) }),
+    })
+  );
 }

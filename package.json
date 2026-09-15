@@ -6,7 +6,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "check:state": "node db/check-state-roundtrip.mjs",
+    "check:writes": "node db/check-writes.mjs",
+    "check:api": "node db/check-api.mjs"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
@@ -18,6 +21,7 @@
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.8",
+    "@electric-sql/pglite-socket": "^0.2.11",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/pg": "^8.23.1",

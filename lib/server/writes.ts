@@ -251,40 +251,60 @@ async function writeWhole(
 }
 
 /**
- * يطبّق مجموعة تغييرات في معاملة واحدة.
+ * يطبّق مجموعة تغييرات على اتصالٍ داخل معاملةٍ فتحها غيره.
  *
- * إمّا أن تُكتب كلها أو لا يُكتب منها شيء: حركةٌ تُحفظ وقيدُها لا
- * يُحفظ أسوأ من ألا يُحفظ شيء.
+ * هذه هي التي يستدعيها الخادم: المعاملة تُفتح على اتصالٍ واحد من
+ * المجمّع (inTransaction في db.ts) ثم يُعمل داخلها.
+ */
+export async function applyChangesIn(
+  db: Queryable,
+  changes: ChangeSet,
+  actor: string
+): Promise<{ written: number; deleted: number }> {
+  let written = 0;
+  let deleted = 0;
+
+  for (const [field, rows] of Object.entries(changes.upserts ?? {})) {
+    written += await upsert(db, field, rows, actor);
+  }
+  for (const [field, ids] of Object.entries(changes.deletes ?? {})) {
+    deleted += await remove(db, field, ids, actor);
+  }
+  for (const [field, value] of Object.entries(changes.whole ?? {})) {
+    if (!(WHOLE_FIELDS as readonly string[]).includes(field)) continue;
+    written += await writeWhole(db, field, value);
+  }
+
+  return { written, deleted };
+}
+
+/**
+ * يطبّق مجموعة تغييرات ويفتح المعاملة بنفسه.
+ *
+ * لاتصالٍ واحد لا مجمّع: PGlite في الفحوص وسطر الأوامر. وعلى الخادم
+ * تُستعمل applyChangesIn داخل inTransaction، وإلا وقع BEGIN على اتصال
+ * والإدراج على آخر.
+ *
+ * وفي الحالين: إمّا أن تُكتب كلها أو لا يُكتب منها شيء — حركةٌ تُحفظ
+ * وقيدُها لا يُحفظ أسوأ من ألا يُحفظ شيء.
  */
 export async function applyChanges(
   db: Queryable,
   changes: ChangeSet,
   actor: string
 ): Promise<ApplyResult> {
-  let written = 0;
-  let deleted = 0;
-
   await db.query("BEGIN");
+  let counts: { written: number; deleted: number };
   try {
-    for (const [field, rows] of Object.entries(changes.upserts ?? {})) {
-      written += await upsert(db, field, rows, actor);
-    }
-    for (const [field, ids] of Object.entries(changes.deletes ?? {})) {
-      deleted += await remove(db, field, ids, actor);
-    }
-    for (const [field, value] of Object.entries(changes.whole ?? {})) {
-      if (!(WHOLE_FIELDS as readonly string[]).includes(field)) continue;
-      written += await writeWhole(db, field, value);
-    }
+    counts = await applyChangesIn(db, changes, actor);
     await db.query("COMMIT");
   } catch (error) {
     await db.query("ROLLBACK");
     throw error;
   }
 
-  return { rev: await currentRev(db), written, deleted };
+  return { rev: await currentRev(db), ...counts };
 }
-
 /**
  * ما استجدّ بعد رقمٍ ما — صفوفٌ كُتبت ومعرّفاتٌ حُذفت.
  *

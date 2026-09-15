@@ -43,3 +43,8 @@ next-env.d.ts
 # بيانات الشركة الحقيقية — لا تُرفع إلى أي مستودع
 /data/
 .roundtrip/
+
+# قواعد الفحص المؤقّتة ومجلّد بنائه — تُنشأ وتُحذف مع كل فحص
+/.roundtrip-writes/
+/.api-check/
+/.next-check/
