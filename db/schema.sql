@@ -14,6 +14,33 @@
 -- المبالغ NUMERIC(14,3): الدينار الكويتي ثلاث خانات، والعائم يخطئ.
 -- ===================================================================
 
+-- ---------- تتبّع التغيير ----------
+
+/*
+  تسلسلٌ واحد لكل الجداول: كل كتابة تأخذ رقماً أكبر مما قبله. فيسأل
+  المتصفّح «ما تغيّر بعد الرقم كذا؟» فيصله ما كتبه غيره وحده — لا
+  الحالة كلها في كل مرة، ولا شيء يفوته.
+
+  ولو كان لكل جدول تسلسله لما أمكن ترتيب تغييرين من جدولين، ولظهر
+  اعتماد دفعةٍ قبل الحركة التي اعتُمدت عليها.
+*/
+CREATE SEQUENCE change_seq;
+
+/*
+  الصفّ المحذوف لا يُستعلم عنه، فيبقى له شاهد. وبغيره لا يعرف
+  المتصفّح أن حركةً حُذفت، فتبقى على شاشته بعد أن زالت من القاعدة.
+*/
+CREATE TABLE deletions (
+  collection text   NOT NULL,
+  row_id     text   NOT NULL,
+  rev        bigint NOT NULL DEFAULT nextval('change_seq'),
+  at         timestamptz NOT NULL DEFAULT now(),
+  actor      text   NOT NULL DEFAULT '',
+  PRIMARY KEY (collection, row_id)
+);
+
+CREATE INDEX deletions_rev_idx ON deletions (rev);
+
 -- ---------- الشركة والإعدادات ----------
 
 CREATE TABLE company (
@@ -48,8 +75,14 @@ CREATE TABLE users (
   locked_until    timestamptz,
   created_at      timestamptz NOT NULL DEFAULT now(),
   -- كائن التطبيق كاملاً؛ الأعمدة أعلاه نسخة منه للاستعلام والقيود
-  data jsonb NOT NULL DEFAULT '{}'
+  data jsonb NOT NULL DEFAULT '{}',
+  -- رقم التغيير ومَن كتبه: بهما يُعرف ما استجدّ وعلى يد من
+  rev        bigint NOT NULL DEFAULT nextval('change_seq'),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  updated_by text NOT NULL DEFAULT ''
 );
+
+CREATE INDEX users_rev_idx ON users (rev);
 
 CREATE UNIQUE INDEX users_name_key ON users (name);
 
@@ -102,8 +135,14 @@ CREATE TABLE projects (
   start_date  date,
   status      text NOT NULL DEFAULT 'نشط',
   -- كائن التطبيق كاملاً؛ الأعمدة أعلاه نسخة منه للاستعلام والقيود
-  data jsonb NOT NULL DEFAULT '{}'
+  data jsonb NOT NULL DEFAULT '{}',
+  -- رقم التغيير ومَن كتبه: بهما يُعرف ما استجدّ وعلى يد من
+  rev        bigint NOT NULL DEFAULT nextval('change_seq'),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  updated_by text NOT NULL DEFAULT ''
 );
+
+CREATE INDEX projects_rev_idx ON projects (rev);
 
 CREATE UNIQUE INDEX projects_name_key ON projects (name);
 
@@ -146,8 +185,14 @@ CREATE TABLE contracts (
   obligations            jsonb NOT NULL DEFAULT '[]',
   installments           jsonb NOT NULL DEFAULT '[]',
   -- كائن التطبيق كاملاً؛ الأعمدة أعلاه نسخة منه للاستعلام والقيود
-  data jsonb NOT NULL DEFAULT '{}'
+  data jsonb NOT NULL DEFAULT '{}',
+  -- رقم التغيير ومَن كتبه: بهما يُعرف ما استجدّ وعلى يد من
+  rev        bigint NOT NULL DEFAULT nextval('change_seq'),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  updated_by text NOT NULL DEFAULT ''
 );
+
+CREATE INDEX contracts_rev_idx ON contracts (rev);
 
 CREATE UNIQUE INDEX contracts_number_key ON contracts (contract_number);
 CREATE INDEX contracts_project_idx ON contracts (project);
@@ -182,8 +227,14 @@ CREATE TABLE movements (
   CONSTRAINT movements_approval_check
     CHECK (approval IN ('بانتظار الاعتماد', 'معتمدة', 'مرفوضة')),
   -- كائن التطبيق كاملاً؛ الأعمدة أعلاه نسخة منه للاستعلام والقيود
-  data jsonb NOT NULL DEFAULT '{}'
+  data jsonb NOT NULL DEFAULT '{}',
+  -- رقم التغيير ومَن كتبه: بهما يُعرف ما استجدّ وعلى يد من
+  rev        bigint NOT NULL DEFAULT nextval('change_seq'),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  updated_by text NOT NULL DEFAULT ''
 );
+
+CREATE INDEX movements_rev_idx ON movements (rev);
 
 -- رقم القيد فريد داخل سنته لا في الجدول كله
 CREATE UNIQUE INDEX movements_entry_key ON movements (fiscal_year, entry_no);
@@ -223,8 +274,14 @@ CREATE TABLE materials (
   indicative_price numeric(14,3) NOT NULL DEFAULT 0,
   notes           text NOT NULL DEFAULT '',
   -- كائن التطبيق كاملاً؛ الأعمدة أعلاه نسخة منه للاستعلام والقيود
-  data jsonb NOT NULL DEFAULT '{}'
+  data jsonb NOT NULL DEFAULT '{}',
+  -- رقم التغيير ومَن كتبه: بهما يُعرف ما استجدّ وعلى يد من
+  rev        bigint NOT NULL DEFAULT nextval('change_seq'),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  updated_by text NOT NULL DEFAULT ''
 );
+
+CREATE INDEX materials_rev_idx ON materials (rev);
 
 CREATE TABLE material_receipts (
   id           uuid PRIMARY KEY,
@@ -239,8 +296,14 @@ CREATE TABLE material_receipts (
   received_by  text NOT NULL DEFAULT '',
   notes        text NOT NULL DEFAULT '',
   -- كائن التطبيق كاملاً؛ الأعمدة أعلاه نسخة منه للاستعلام والقيود
-  data jsonb NOT NULL DEFAULT '{}'
+  data jsonb NOT NULL DEFAULT '{}',
+  -- رقم التغيير ومَن كتبه: بهما يُعرف ما استجدّ وعلى يد من
+  rev        bigint NOT NULL DEFAULT nextval('change_seq'),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  updated_by text NOT NULL DEFAULT ''
 );
+
+CREATE INDEX material_receipts_rev_idx ON material_receipts (rev);
 
 CREATE INDEX material_receipts_project_idx ON material_receipts (project);
 
@@ -251,20 +314,36 @@ CREATE TABLE employees (
   name    text NOT NULL,
   -- بقية الحقول كثيرة ومتغيّرة مع القانون، وتُقرأ مع الموظف دائماً
   data    jsonb NOT NULL DEFAULT '{}',
-  active  boolean NOT NULL DEFAULT true
+  active  boolean NOT NULL DEFAULT true,
+  -- رقم التغيير ومَن كتبه: بهما يُعرف ما استجدّ وعلى يد من
+  rev        bigint NOT NULL DEFAULT nextval('change_seq'),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  updated_by text NOT NULL DEFAULT ''
 );
 
+CREATE INDEX employees_rev_idx ON employees (rev);
+
 CREATE TABLE attendance (
+  -- مفتاحه مشتقٌّ من الموظف واليوم، فيبقى الجدول كبقيّته: معرّفٌ واحد
+  -- تُكتب عليه الصفوف وتُحذف، واليومُ الواحد لا يتكرّر للموظف الواحد
+  id          uuid PRIMARY KEY,
   employee_id uuid NOT NULL,
   day         date NOT NULL,
   status      text NOT NULL DEFAULT '',
   hours       numeric(6,2) NOT NULL DEFAULT 0,
   overtime    numeric(6,2) NOT NULL DEFAULT 0,
   note        text NOT NULL DEFAULT '',
-  PRIMARY KEY (employee_id, day),
   -- كائن التطبيق كاملاً؛ الأعمدة أعلاه نسخة منه للاستعلام والقيود
-  data jsonb NOT NULL DEFAULT '{}'
+  data jsonb NOT NULL DEFAULT '{}',
+  -- رقم التغيير ومَن كتبه: بهما يُعرف ما استجدّ وعلى يد من
+  rev        bigint NOT NULL DEFAULT nextval('change_seq'),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  updated_by text NOT NULL DEFAULT ''
 );
+
+CREATE INDEX attendance_rev_idx ON attendance (rev);
+
+CREATE UNIQUE INDEX attendance_day_key ON attendance (employee_id, day);
 
 CREATE TABLE payroll_runs (
   id           uuid PRIMARY KEY,
@@ -280,8 +359,14 @@ CREATE TABLE payroll_runs (
   deductions   jsonb NOT NULL DEFAULT '{}',
   note         text NOT NULL DEFAULT '',
   -- كائن التطبيق كاملاً؛ الأعمدة أعلاه نسخة منه للاستعلام والقيود
-  data jsonb NOT NULL DEFAULT '{}'
+  data jsonb NOT NULL DEFAULT '{}',
+  -- رقم التغيير ومَن كتبه: بهما يُعرف ما استجدّ وعلى يد من
+  rev        bigint NOT NULL DEFAULT nextval('change_seq'),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  updated_by text NOT NULL DEFAULT ''
 );
+
+CREATE INDEX payroll_runs_rev_idx ON payroll_runs (rev);
 
 CREATE UNIQUE INDEX payroll_runs_month_key ON payroll_runs (month);
 
@@ -311,8 +396,14 @@ CREATE TABLE work_items (
   active          boolean NOT NULL DEFAULT true,
   notes           text NOT NULL DEFAULT '',
   -- كائن التطبيق كاملاً؛ الأعمدة أعلاه نسخة منه للاستعلام والقيود
-  data jsonb NOT NULL DEFAULT '{}'
+  data jsonb NOT NULL DEFAULT '{}',
+  -- رقم التغيير ومَن كتبه: بهما يُعرف ما استجدّ وعلى يد من
+  rev        bigint NOT NULL DEFAULT nextval('change_seq'),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  updated_by text NOT NULL DEFAULT ''
 );
+
+CREATE INDEX work_items_rev_idx ON work_items (rev);
 
 CREATE INDEX work_items_stage_idx ON work_items (stage);
 
@@ -342,10 +433,18 @@ CREATE TABLE quotations (
   lines                jsonb NOT NULL DEFAULT '[]',
   created_by           text NOT NULL DEFAULT '',
   created_at           timestamptz,
-  updated_at           timestamptz,
+  -- متى عُدّل العرض في التطبيق. وهو غير updated_at أدناه: ذاك متى
+  -- كُتب الصفّ في القاعدة، وقد يُكتب بلا تعديلٍ في العرض نفسه.
+  edited_at            timestamptz,
   -- كائن التطبيق كاملاً؛ الأعمدة أعلاه نسخة منه للاستعلام والقيود
-  data jsonb NOT NULL DEFAULT '{}'
+  data jsonb NOT NULL DEFAULT '{}',
+  -- رقم التغيير ومَن كتبه: بهما يُعرف ما استجدّ وعلى يد من
+  rev        bigint NOT NULL DEFAULT nextval('change_seq'),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  updated_by text NOT NULL DEFAULT ''
 );
+
+CREATE INDEX quotations_rev_idx ON quotations (rev);
 
 CREATE UNIQUE INDEX quotations_number_key ON quotations (number);
 
@@ -370,8 +469,14 @@ CREATE TABLE invoices (
   created_by         text NOT NULL DEFAULT '',
   created_at         timestamptz,
   -- كائن التطبيق كاملاً؛ الأعمدة أعلاه نسخة منه للاستعلام والقيود
-  data jsonb NOT NULL DEFAULT '{}'
+  data jsonb NOT NULL DEFAULT '{}',
+  -- رقم التغيير ومَن كتبه: بهما يُعرف ما استجدّ وعلى يد من
+  rev        bigint NOT NULL DEFAULT nextval('change_seq'),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  updated_by text NOT NULL DEFAULT ''
 );
+
+CREATE INDEX invoices_rev_idx ON invoices (rev);
 
 CREATE UNIQUE INDEX invoices_number_key ON invoices (number);
 
@@ -387,7 +492,13 @@ CREATE TABLE audit_log (
   before_val text,
   after_val  text,
   -- كائن التطبيق كاملاً؛ الأعمدة أعلاه نسخة منه للاستعلام والقيود
-  data jsonb NOT NULL DEFAULT '{}'
+  data jsonb NOT NULL DEFAULT '{}',
+  -- رقم التغيير ومَن كتبه: بهما يُعرف ما استجدّ وعلى يد من
+  rev        bigint NOT NULL DEFAULT nextval('change_seq'),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  updated_by text NOT NULL DEFAULT ''
 );
+
+CREATE INDEX audit_log_rev_idx ON audit_log (rev);
 
 CREATE INDEX audit_at_idx ON audit_log (at DESC);

@@ -426,7 +426,7 @@ async function main() {
     await insertMany(
       db,
       "attendance",
-      ["employee_id", "day", "status", "hours", "overtime", "note"],
+      ["id", "employee_id", "day", "status", "hours", "overtime", "note"],
       (d.attendance ?? [])
         .filter((a) => {
           const key = `${a.employeeId}|${a.date}`;
@@ -434,7 +434,7 @@ async function main() {
           seenDay.add(key);
           return true;
         })
-        .map((a) => [uuidFor(a.employeeId), date(a.date), str(a.status), num(a.hours), num(a.overtime), str(a.note)])
+        .map((a) => [uuidFor(a.employeeId + "|" + a.date), uuidFor(a.employeeId), date(a.date), str(a.status), num(a.hours), num(a.overtime), str(a.note)])
     )
   );
 
@@ -500,7 +500,7 @@ async function main() {
     await insertMany(
       db,
       "quotations",
-      ["id", "number", "quote_date", "status", "client_name", "client_phone", "client_civil_id", "client_address", "area", "block", "plot", "license_number", "building_description", "built_area", "scope", "pricing_mode", "margin_percent", "duration_days", "validity_days", "notes", "contract_number", "lines", "created_by", "created_at", "updated_at"],
+      ["id", "number", "quote_date", "status", "client_name", "client_phone", "client_civil_id", "client_address", "area", "block", "plot", "license_number", "building_description", "built_area", "scope", "pricing_mode", "margin_percent", "duration_days", "validity_days", "notes", "contract_number", "lines", "created_by", "created_at", "edited_at"],
       (d.quotations ?? []).map((q) => [
         uuidFor(q.id),
         str(q.number),
@@ -608,8 +608,8 @@ async function main() {
   for (const a of d.attendance ?? []) {
     if (!a?.employeeId || !date(a.date)) continue;
     await db.query(
-      `UPDATE attendance SET data = $1::jsonb WHERE employee_id = $2::uuid AND day = $3`,
-      [JSON.stringify(a), uuidFor(a.employeeId), date(a.date)]
+      `UPDATE attendance SET data = $1::jsonb WHERE id = $2::uuid`,
+      [JSON.stringify(a), uuidFor(a.employeeId + "|" + a.date)]
     );
   }
   console.log("\nالتحقق من سلامة النقل:");
