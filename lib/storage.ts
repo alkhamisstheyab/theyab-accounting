@@ -1326,13 +1326,16 @@ export function backupFileName(): string {
   )}-${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}.json`;
 }
 
-export function parseBackup(text: string): AppState {
-  const parsed = JSON.parse(text) as Record<string, unknown>;
-  const data = (parsed.data ?? parsed) as Record<string, unknown>;
-  if (!data || typeof data !== "object") {
-    throw new Error("الملف لا يحتوي على بيانات صالحة");
-  }
-
+/**
+ * يسوّي بياناتٍ خاماً إلى حالة النظام.
+ *
+ * مصدر البيانات لا يغيّر شكلها: ملفُ نسخةٍ احتياطية، أو صفوفٌ من
+ * قاعدة البيانات، أو تخزينُ المتصفّح — كلّها تمرّ من هنا. فما يقرؤه
+ * الخادم هو نفسه ما يقرؤه المتصفّح حرفاً بحرف، ولا يظهر فرقٌ بينهما
+ * لأن أحدهما سوّى والآخر لم يسوِّ.
+ */
+export function normalizeState(raw: unknown): AppState {
+  const data = (raw ?? {}) as Record<string, unknown>;
   const state = emptyState();
   if (Array.isArray(data.movements))
     state.movements = data.movements.map(migrateMovement);
@@ -1363,4 +1366,14 @@ export function parseBackup(text: string): AppState {
   state.invoices = migrateInvoices(data.invoices);
 
   return state;
+}
+
+/** نسخة احتياطية من ملف — تُسوّى بنفس المسوّي */
+export function parseBackup(text: string): AppState {
+  const parsed = JSON.parse(text) as Record<string, unknown>;
+  const data = parsed.data ?? parsed;
+  if (!data || typeof data !== "object") {
+    throw new Error("الملف لا يحتوي على بيانات صالحة");
+  }
+  return normalizeState(data);
 }

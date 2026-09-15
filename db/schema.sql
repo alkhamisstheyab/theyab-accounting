@@ -46,7 +46,9 @@ CREATE TABLE users (
   -- إيقاف مؤقت بعد محاولات خاطئة: النظام على الإنترنت يُجرَّب عليه آلياً
   failed_attempts smallint NOT NULL DEFAULT 0,
   locked_until    timestamptz,
-  created_at      timestamptz NOT NULL DEFAULT now()
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  -- كائن التطبيق كاملاً؛ الأعمدة أعلاه نسخة منه للاستعلام والقيود
+  data jsonb NOT NULL DEFAULT '{}'
 );
 
 CREATE UNIQUE INDEX users_name_key ON users (name);
@@ -98,7 +100,9 @@ CREATE TABLE projects (
   name        text NOT NULL,
   budget      numeric(14,3) NOT NULL DEFAULT 0,
   start_date  date,
-  status      text NOT NULL DEFAULT 'نشط'
+  status      text NOT NULL DEFAULT 'نشط',
+  -- كائن التطبيق كاملاً؛ الأعمدة أعلاه نسخة منه للاستعلام والقيود
+  data jsonb NOT NULL DEFAULT '{}'
 );
 
 CREATE UNIQUE INDEX projects_name_key ON projects (name);
@@ -140,7 +144,9 @@ CREATE TABLE contracts (
   -- تُقرأ وتُكتب مع العقد دائماً، ولا يُستعلم عنها وحدها
   clauses                jsonb NOT NULL DEFAULT '[]',
   obligations            jsonb NOT NULL DEFAULT '[]',
-  installments           jsonb NOT NULL DEFAULT '[]'
+  installments           jsonb NOT NULL DEFAULT '[]',
+  -- كائن التطبيق كاملاً؛ الأعمدة أعلاه نسخة منه للاستعلام والقيود
+  data jsonb NOT NULL DEFAULT '{}'
 );
 
 CREATE UNIQUE INDEX contracts_number_key ON contracts (contract_number);
@@ -174,7 +180,9 @@ CREATE TABLE movements (
   approval_note      text NOT NULL DEFAULT '',
   created_at         timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT movements_approval_check
-    CHECK (approval IN ('بانتظار الاعتماد', 'معتمدة', 'مرفوضة'))
+    CHECK (approval IN ('بانتظار الاعتماد', 'معتمدة', 'مرفوضة')),
+  -- كائن التطبيق كاملاً؛ الأعمدة أعلاه نسخة منه للاستعلام والقيود
+  data jsonb NOT NULL DEFAULT '{}'
 );
 
 -- رقم القيد فريد داخل سنته لا في الجدول كله
@@ -213,7 +221,9 @@ CREATE TABLE materials (
   name            text NOT NULL,
   unit            text NOT NULL DEFAULT '',
   indicative_price numeric(14,3) NOT NULL DEFAULT 0,
-  notes           text NOT NULL DEFAULT ''
+  notes           text NOT NULL DEFAULT '',
+  -- كائن التطبيق كاملاً؛ الأعمدة أعلاه نسخة منه للاستعلام والقيود
+  data jsonb NOT NULL DEFAULT '{}'
 );
 
 CREATE TABLE material_receipts (
@@ -227,7 +237,9 @@ CREATE TABLE material_receipts (
   unit_price   numeric(14,3),
   supplier     text NOT NULL DEFAULT '',
   received_by  text NOT NULL DEFAULT '',
-  notes        text NOT NULL DEFAULT ''
+  notes        text NOT NULL DEFAULT '',
+  -- كائن التطبيق كاملاً؛ الأعمدة أعلاه نسخة منه للاستعلام والقيود
+  data jsonb NOT NULL DEFAULT '{}'
 );
 
 CREATE INDEX material_receipts_project_idx ON material_receipts (project);
@@ -249,7 +261,9 @@ CREATE TABLE attendance (
   hours       numeric(6,2) NOT NULL DEFAULT 0,
   overtime    numeric(6,2) NOT NULL DEFAULT 0,
   note        text NOT NULL DEFAULT '',
-  PRIMARY KEY (employee_id, day)
+  PRIMARY KEY (employee_id, day),
+  -- كائن التطبيق كاملاً؛ الأعمدة أعلاه نسخة منه للاستعلام والقيود
+  data jsonb NOT NULL DEFAULT '{}'
 );
 
 CREATE TABLE payroll_runs (
@@ -264,7 +278,9 @@ CREATE TABLE payroll_runs (
   posted_movement_ids uuid[] NOT NULL DEFAULT '{}',
   lines        jsonb NOT NULL DEFAULT '[]',
   deductions   jsonb NOT NULL DEFAULT '{}',
-  note         text NOT NULL DEFAULT ''
+  note         text NOT NULL DEFAULT '',
+  -- كائن التطبيق كاملاً؛ الأعمدة أعلاه نسخة منه للاستعلام والقيود
+  data jsonb NOT NULL DEFAULT '{}'
 );
 
 CREATE UNIQUE INDEX payroll_runs_month_key ON payroll_runs (month);
@@ -293,7 +309,9 @@ CREATE TABLE work_items (
   material_price  numeric(14,3) NOT NULL DEFAULT 0,
   essential       boolean NOT NULL DEFAULT false,
   active          boolean NOT NULL DEFAULT true,
-  notes           text NOT NULL DEFAULT ''
+  notes           text NOT NULL DEFAULT '',
+  -- كائن التطبيق كاملاً؛ الأعمدة أعلاه نسخة منه للاستعلام والقيود
+  data jsonb NOT NULL DEFAULT '{}'
 );
 
 CREATE INDEX work_items_stage_idx ON work_items (stage);
@@ -324,7 +342,9 @@ CREATE TABLE quotations (
   lines                jsonb NOT NULL DEFAULT '[]',
   created_by           text NOT NULL DEFAULT '',
   created_at           timestamptz,
-  updated_at           timestamptz
+  updated_at           timestamptz,
+  -- كائن التطبيق كاملاً؛ الأعمدة أعلاه نسخة منه للاستعلام والقيود
+  data jsonb NOT NULL DEFAULT '{}'
 );
 
 CREATE UNIQUE INDEX quotations_number_key ON quotations (number);
@@ -348,7 +368,9 @@ CREATE TABLE invoices (
   lines              jsonb NOT NULL DEFAULT '[]',
   notes              text NOT NULL DEFAULT '',
   created_by         text NOT NULL DEFAULT '',
-  created_at         timestamptz
+  created_at         timestamptz,
+  -- كائن التطبيق كاملاً؛ الأعمدة أعلاه نسخة منه للاستعلام والقيود
+  data jsonb NOT NULL DEFAULT '{}'
 );
 
 CREATE UNIQUE INDEX invoices_number_key ON invoices (number);
@@ -363,7 +385,9 @@ CREATE TABLE audit_log (
   entity     text NOT NULL DEFAULT '',
   summary    text NOT NULL DEFAULT '',
   before_val text,
-  after_val  text
+  after_val  text,
+  -- كائن التطبيق كاملاً؛ الأعمدة أعلاه نسخة منه للاستعلام والقيود
+  data jsonb NOT NULL DEFAULT '{}'
 );
 
 CREATE INDEX audit_at_idx ON audit_log (at DESC);

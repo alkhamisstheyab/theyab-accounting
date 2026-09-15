@@ -10,6 +10,7 @@
  */
 
 import fs from "fs";
+import { uuidFor } from "./ids.mjs";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -59,7 +60,12 @@ async function connect() {
     };
   }
   const { PGlite } = await import("@electric-sql/pglite");
-  const db = await PGlite.create();
+  /*
+    بلا مجلّد تبقى القاعدة في الذاكرة وتزول بانتهاء الأمر. والمجلّد
+    يلزم لفحص دورة الحالة: تُنقل هنا ثم تُقرأ من عملية أخرى.
+  */
+  const dataDir = process.argv[5] || undefined;
+  const db = dataDir ? new PGlite(dataDir) : await PGlite.create();
   return {
     kind: "pglite",
     query: (sql, params) => db.query(sql, params),
@@ -81,34 +87,35 @@ const num = (v) => {
 const date = (v) => (/^\d{4}-\d{2}-\d{2}/.test(str(v)) ? str(v).slice(0, 10) : null);
 const stamp = (v) => (str(v) ? str(v) : null);
 
-let uuidFallback = 0;
 /** المعرّفات القديمة نصوص مثل «xl-00001»، والقاعدة تريد UUID */
-const uuidFor = (raw) => {
-  const s = str(raw);
-  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)) {
-    return s;
-  }
-  // اشتقاق ثابت من النص، فيبقى المعرّف نفسه في كل تشغيل
-  let h1 = 0x811c9dc5;
-  let h2 = 0x01000193;
-  for (let i = 0; i < s.length; i++) {
-    h1 = Math.imul(h1 ^ s.charCodeAt(i), 0x01000193) >>> 0;
-    h2 = Math.imul(h2 + s.charCodeAt(i), 0x85ebca6b) >>> 0;
-  }
-  const seed = s || `auto-${uuidFallback++}`;
-  let h3 = 0;
-  for (let i = 0; i < seed.length; i++) h3 = (h3 * 31 + seed.charCodeAt(i)) >>> 0;
-  const hex = (n) => n.toString(16).padStart(8, "0");
-  const raw32 = hex(h1) + hex(h2) + hex(h3) + hex((h1 ^ h2 ^ h3) >>> 0);
-  return [
-    raw32.slice(0, 8),
-    raw32.slice(8, 12),
-    "4" + raw32.slice(13, 16),
-    "8" + raw32.slice(17, 20),
-    raw32.slice(20, 32),
-  ].join("-");
-};
+/* uuidFor مشتركة مع فحص دورة الحالة — انظر db/ids.mjs */
 
+/**
+ * يملأ عمود data بكائن التطبيق كاملاً بعد إدراج الأعمدة المسمّاة.
+ *
+ * الأعمدة تخدم الاستعلام والفهرسة والقيود، وdata يحفظ ما لا عمود له
+ * — فحقلٌ يُضاف إلى النوع في التطبيق ينتقل بلا تعديل مخطّط. وبغيره
+ * يضيع الحقل صامتاً، ولا يُكتشف إلا بعد شهور.
+ */
+async function fillData(db, table, objects, key = 'id') {
+  const rows = objects.filter((o) => o && o[key] != null);
+  for (let i = 0; i < rows.length; i += 200) {
+    const chunk = rows.slice(i, i + 200);
+    const values = [];
+    const params = [];
+    chunk.forEach((o, n) => {
+      params.push(uuidFor(o[key]), JSON.stringify(o));
+      values.push("($" + (n * 2 + 1) + "::uuid, $" + (n * 2 + 2) + "::jsonb)");
+    });
+    try { await db.query(
+      `UPDATE ${table} AS t SET data = v.d::jsonb
+         FROM (VALUES ${values.join(',')}) AS v(id, d)
+        WHERE t.id = v.id::uuid`,
+      params
+    ); } catch (e) { throw new Error(table + ": " + e.message); }
+  }
+  return rows.length;
+}
 async function insertMany(db, table, columns, rows) {
   if (rows.length === 0) return 0;
   const CHUNK = 200;
@@ -581,6 +588,30 @@ async function main() {
 
   /* ---------------- التحقق ---------------- */
 
+
+  /*
+    كائن التطبيق كاملاً في data — الأعمدة المسمّاة فوقه للاستعلام.
+    الحضور مفتاحه مركّب فيُملأ باستعلامه، والموظفون يُكتب كائنهم
+    كاملاً أصلاً.
+  */
+  await fillData(db, "users", d.users ?? []);
+  await fillData(db, "projects", d.projects ?? []);
+  await fillData(db, "contracts", d.contractors ?? []);
+  await fillData(db, "movements", d.movements ?? []);
+  await fillData(db, "materials", d.materials ?? []);
+  await fillData(db, "material_receipts", d.materialReceipts ?? []);
+  await fillData(db, "work_items", d.workItems ?? []);
+  await fillData(db, "quotations", d.quotations ?? []);
+  await fillData(db, "invoices", d.invoices ?? []);
+  await fillData(db, "payroll_runs", d.payrollRuns ?? []);
+  await fillData(db, "audit_log", d.audit ?? []);
+  for (const a of d.attendance ?? []) {
+    if (!a?.employeeId || !date(a.date)) continue;
+    await db.query(
+      `UPDATE attendance SET data = $1::jsonb WHERE employee_id = $2::uuid AND day = $3`,
+      [JSON.stringify(a), uuidFor(a.employeeId), date(a.date)]
+    );
+  }
   console.log("\nالتحقق من سلامة النقل:");
 
   const source = d.movements ?? [];
