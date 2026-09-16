@@ -189,6 +189,13 @@ import {
 } from "@/lib/sync";
 import { compareStates, type FieldComparison } from "@/lib/changes";
 import {
+  changePassword,
+  signIn as serverSignIn,
+  signOut as serverSignOut,
+  whoAmI,
+  type ServerUser,
+} from "@/lib/server-session";
+import {
   REQUIRED_STREAK,
   comparedToday,
   matchRuns,
@@ -13112,6 +13119,196 @@ const AUDIT_TONE: Record<string, string> = {
  * الخادم بالثقة بل بالبرهان: ما دام في الجدول سطرٌ أحمر فالجهاز هو
  * المرجع ولا يُنقل شيء.
  */
+/**
+ * دخول الخادم — وهو غير دخول النظام.
+ *
+ * دخولك إلى الشاشات يفتح ما في جهازك. وهذا يأذن بالقراءة من قاعدة
+ * الشركة والكتابة فيها، ولا تعمل المزامنة بغيره. وسيصيران واحداً حين
+ * تُبدَّل المصادر، فيُحذف هذا المكوّن حينها.
+ */
+function ServerSignIn({
+  user,
+  onChange,
+}: {
+  user: ServerUser | null;
+  onChange: (user: ServerUser | null) => void;
+}) {
+  const [name, setName] = useState("");
+  const [password, setPassword] = useState("");
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [again, setAgain] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState("");
+
+  const enter = async () => {
+    setBusy(true);
+    setProblem("");
+    const outcome = await serverSignIn(name.trim(), password);
+    setBusy(false);
+    if (!outcome.ok) {
+      setProblem(outcome.error);
+      return;
+    }
+    /* كلمة المرور لا تبقى في الذاكرة بعد استعمالها */
+    setCurrent(password);
+    setPassword("");
+    onChange(outcome.user);
+  };
+
+  const setNewPassword = async () => {
+    if (next !== again) {
+      setProblem("الكلمتان غير متطابقتين");
+      return;
+    }
+    setBusy(true);
+    setProblem("");
+    const outcome = await changePassword(current, next);
+    setBusy(false);
+    if (!outcome.ok) {
+      setProblem(outcome.error ?? "تعذّر التغيير");
+      return;
+    }
+    setCurrent("");
+    setNext("");
+    setAgain("");
+    onChange(await whoAmI());
+  };
+
+  const leave = async () => {
+    await serverSignOut();
+    onChange(null);
+  };
+
+  /* ---- لم يدخل بعد ---- */
+  if (!user) {
+    return (
+      <Panel
+        title="دخول الخادم"
+        subtitle="غير دخولك إلى الشاشات — هذا يأذن بالقراءة من قاعدة الشركة والكتابة فيها"
+      >
+        {problem ? <Banner tone="error">{problem}</Banner> : null}
+
+        <div className="grid max-w-xl grid-cols-1 gap-3 md:grid-cols-2">
+          <Field label="الاسم كما هو مسجَّل">
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className={inputClass}
+              autoComplete="username"
+            />
+          </Field>
+          <Field label="كلمة المرور">
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void enter();
+              }}
+              className={inputClass}
+              autoComplete="current-password"
+            />
+          </Field>
+        </div>
+
+        <button
+          type="button"
+          onClick={enter}
+          disabled={busy || !name.trim() || !password}
+          className="mt-4 rounded-lg bg-slate-900 px-6 py-3 font-bold text-white disabled:cursor-not-allowed disabled:bg-slate-300"
+        >
+          {busy ? "يتحقّق…" : "دخول"}
+        </button>
+
+        <p className="mt-3 text-sm text-slate-500">
+          في أول مرة: ادخل برقمك السرّي القديم نفسه، ثم يُطلب منك وضع كلمة
+          مرورٍ حقيقية.
+        </p>
+      </Panel>
+    );
+  }
+
+  /* ---- دخل، ولمّا يضع كلمةً حقيقية ---- */
+  if (user.mustChangePassword) {
+    return (
+      <Panel
+        title="ضع كلمة مرورٍ حقيقية"
+        subtitle={`أهلاً ${user.name} — ولن تمضي حتى تضعها`}
+      >
+        <Banner tone="warn">
+          أربعة أرقام تكفي على جهازٍ في المكتب، ولا تكفي على الإنترنت: عشرة
+          آلاف احتمالٍ تُجرَّب في ثوانٍ. ثمانية محارف فأكثر، وليست أرقاماً
+          كلها.
+        </Banner>
+
+        {problem ? <Banner tone="error">{problem}</Banner> : null}
+
+        <div className="grid max-w-xl grid-cols-1 gap-3">
+          {current ? null : (
+            <Field label="كلمة المرور الحالية">
+              <input
+                type="password"
+                value={current}
+                onChange={(e) => setCurrent(e.target.value)}
+                className={inputClass}
+                autoComplete="current-password"
+              />
+            </Field>
+          )}
+          <Field label="كلمة المرور الجديدة">
+            <input
+              type="password"
+              value={next}
+              onChange={(e) => setNext(e.target.value)}
+              className={inputClass}
+              autoComplete="new-password"
+            />
+          </Field>
+          <Field label="أعِدها">
+            <input
+              type="password"
+              value={again}
+              onChange={(e) => setAgain(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void setNewPassword();
+              }}
+              className={inputClass}
+              autoComplete="new-password"
+            />
+          </Field>
+        </div>
+
+        <button
+          type="button"
+          onClick={setNewPassword}
+          disabled={busy || !current || next.length < 8}
+          className="mt-4 rounded-lg bg-slate-900 px-6 py-3 font-bold text-white disabled:cursor-not-allowed disabled:bg-slate-300"
+        >
+          {busy ? "يحفظ…" : "احفظ كلمة المرور"}
+        </button>
+      </Panel>
+    );
+  }
+
+  /* ---- داخل وجاهز ---- */
+  return (
+    <Panel title="دخول الخادم">
+      <Banner tone="ok">
+        داخلٌ في الخادم باسم <b>{user.name}</b>
+        {user.jobTitle ? ` — ${user.jobTitle}` : ""}
+      </Banner>
+      <button
+        type="button"
+        onClick={leave}
+        className="rounded-lg bg-slate-200 px-5 py-2 font-medium"
+      >
+        خروج من الخادم
+      </button>
+    </Panel>
+  );
+}
 function ServerMatchPage({ local }: { local: AppState }) {
   const [status, setStatus] = useState<SyncStatus | null>(null);
   const [fields, setFields] = useState<FieldComparison[] | null>(null);
@@ -13120,6 +13317,11 @@ function ServerMatchPage({ local }: { local: AppState }) {
   const [comparedAt, setComparedAt] = useState("");
   /* السجلّ يُقرأ مرةً عند بناء الحالة — والشاشة لا تُعرض إلا بعد اختيارها */
   const [runs, setRuns] = useState<MatchRun[]>(matchRuns);
+  const [account, setAccount] = useState<ServerUser | null>(null);
+  /* تُقرأ الجلسة مرةً عند فتح الشاشة — الكعكة عند المتصفّح لا عندنا */
+  useEffect(() => {
+    void whoAmI().then(setAccount);
+  }, []);
 
   useEffect(() => subscribeSync(setStatus), []);
 
@@ -13169,8 +13371,18 @@ function ServerMatchPage({ local }: { local: AppState }) {
         ? "error"
         : "warn";
 
+  /*
+    لا تُعرض المزامنة قبل الدخول: زرٌّ يُشعل شيئاً لا يستطيع أن يعمل
+    يُتعب صاحبه ويُوهمه أن في النظام عطلاً.
+  */
+  if (!account || account.mustChangePassword) {
+    return <ServerSignIn user={account} onChange={setAccount} />;
+  }
+
   return (
     <>
+      <ServerSignIn user={account} onChange={setAccount} />
+
       <Panel
         title="مطابقة الخادم"
         subtitle="الجهاز هو المرجع، والخادم يُكتب إليه ما تغيّر وحده — والمقارنة هي التي تقرّر متى يصير الخادم هو المرجع"
