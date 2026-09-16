@@ -13550,6 +13550,50 @@ function ServerMatchPage({ local }: { local: AppState }) {
             </table>
           </div>
 
+          {/* تفصيل ما اختلف — الحقل والقيمتان، لا معرّفاً وحده */}
+          {fields
+            .filter((f) => f.samples.length > 0)
+            .map((f) => (
+              <div
+                key={f.field}
+                className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4"
+              >
+                <p className="mb-3 font-bold text-red-800">
+                  {FIELD_LABELS[f.field] ?? f.field} — أوّل {f.samples.length}
+                  {" من "}
+                  {f.different.length} صفّاً مختلفاً
+                </p>
+                {f.samples.map((sample) => (
+                  <div key={sample.key} className="mb-4 last:mb-0">
+                    <p className="text-xs text-slate-500">{sample.key}</p>
+                    {sample.changes.length === 0 ? (
+                      <p className="text-sm text-slate-600">
+                        لا فرق ظاهر في الحقول
+                      </p>
+                    ) : (
+                      <table className="w-full text-right text-sm">
+                        <tbody>
+                          {sample.changes.map((c) => (
+                            <tr key={c.field} className="border-t border-red-100">
+                              <Td className="font-medium">{c.field}</Td>
+                              <Td>
+                                <span className="text-slate-500">جهازك: </span>
+                                {c.local}
+                              </Td>
+                              <Td>
+                                <span className="text-slate-500">الخادم: </span>
+                                {c.server}
+                              </Td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ))}
+
           {agree ? null : (
             <p className="mt-4 text-sm text-slate-500">
               «ناقص» صفوفٌ في جهازك لم تصل الخادم · «زائد» صفوفٌ عنده وليست

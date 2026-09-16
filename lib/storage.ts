@@ -800,7 +800,14 @@ function migrateAudit(raw: unknown): AuditEntry[] {
     .map((item) => {
       const e = (item ?? {}) as Record<string, unknown>;
       return {
-        id: str(e.id) || newId(),
+        /*
+          مشتقٌّ من القيد نفسه لا مولَّدٌ عشوائياً.
+
+          كان newId()، فقيدٌ بلا معرّف يأخذ معرّفاً جديداً في كل فتحةٍ
+          للنظام — فلا يستقرّ على حال، ويظهر في المقارنة مع الخادم
+          مختلفاً أبداً. وهو عين ما وقع في سجلّ الحضور.
+        */
+        id: str(e.id) || `${str(e.at)}|${str(e.user)}|${str(e.action)}`,
         at: str(e.at),
         user: str(e.user),
         action: str(e.action) as AuditEntry["action"],

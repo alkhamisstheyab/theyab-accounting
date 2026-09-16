@@ -148,6 +148,17 @@ export function countChanges(changes: ChangeSet): number {
 /* المقارنة                                                            */
 /* ------------------------------------------------------------------ */
 
+/**
+ * عيّنةٌ من صفٍّ مختلف: أي الحقول اختلفت وما القيمتان.
+ *
+ * التقرير الذي يقول «مختلف» ويعطي معرّفاً لا ينفع قارئه: لا يعرف ما
+ * اختلف ولا أيّهما الصواب. وهذا يُريه الحقل والقيمتين، فيحكم بنفسه.
+ */
+export type DiffSample = {
+  key: string;
+  changes: { field: string; local: string; server: string }[];
+};
+
 export type FieldComparison = {
   field: string;
   /** عدد الصفوف في كل جانب */
@@ -159,11 +170,35 @@ export type FieldComparison = {
   extra: string[];
   /** صفوف موجودة في الجانبين ومحتواها مختلف */
   different: string[];
+  /** تفصيل أول الصفوف المختلفة — لا كلها، فالتقرير يُقرأ لا يُكدّس */
+  samples: DiffSample[];
   agree: boolean;
 };
 
-/**
- * تقرير المقارنة اليومية.
+/** يوازن كائنين ويعيد ما اختلف من حقولهما */
+function fieldsThatDiffer(
+  local: Row,
+  server: Row,
+  owned?: string[]
+): DiffSample["changes"] {
+  const skip = new Set(owned ?? []);
+  const keys = new Set([...Object.keys(local), ...Object.keys(server)]);
+  const out: DiffSample["changes"] = [];
+  const show = (v: unknown): string => {
+    if (v === undefined) return "(لا يوجد)";
+    const text = typeof v === "string" ? v : JSON.stringify(v);
+    return text.length > 80 ? text.slice(0, 80) + "…" : text;
+  };
+  for (const key of keys) {
+    if (skip.has(key)) continue;
+    if (same(local[key], server[key])) continue;
+    out.push({ field: key, local: show(local[key]), server: show(server[key]) });
+    if (out.length >= 5) break;
+  }
+  return out;
+}
+
+/** * تقرير المقارنة اليومية.
  *
  * في التشغيل المتوازي لا يُنتقل إلى الخادم بالثقة بل بالبرهان: تُقارَن
  * النسختان كل يوم، فإن تطابقتا أياماً متتالية نُقل. وما دام في التقرير
@@ -183,12 +218,16 @@ export function compareStates(
 
     const missing: string[] = [];
     const different: string[] = [];
+    const samples: DiffSample[] = [];
     for (const [key, row] of here) {
       const other = there.get(key);
       const owned = collection.serverOwned;
       if (!other) missing.push(key);
       else if (!same(comparable(row, owned), comparable(other, owned))) {
         different.push(key);
+        if (samples.length < 3) {
+          samples.push({ key, changes: fieldsThatDiffer(row, other, owned) });
+        }
       }
     }
 
@@ -202,6 +241,7 @@ export function compareStates(
       missing,
       extra,
       different,
+      samples,
       agree: missing.length === 0 && extra.length === 0 && different.length === 0,
     });
   }
@@ -215,6 +255,7 @@ export function compareStates(
       missing: [],
       extra: [],
       different: agree ? [] : ["—"],
+      samples: [],
       agree,
     });
   }
