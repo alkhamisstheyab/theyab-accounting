@@ -369,6 +369,29 @@ try {
   sync.record(local);
   await sleep(4500);
   check("الإطفاء يُسكتها", posts === after, `${posts - after} طلباً`);
+
+  /* ---- 11. الإشعال بعد عملٍ مطفأ يُرسل بلا حفظٍ جديد ---- */
+  /*
+    هذا ما وقع فعلاً: مُسحت بيانات المتصفّح فانطفأت المزامنة، وعمل صاحبها
+    وهي مطفأة، ثم أشعلها وقارن مباشرةً بلا أن يغيّر شيئاً. فلم يُرسل شيء،
+    لأن الحالة كانت تُرمى وهي مطفأة، والإشعال وحده لا يستدعي حفظاً.
+
+    فالحركة 99304 أعلاه أُدخلت والمزامنة مطفأة، ولا يُنادى record بعد
+    الإشعال هنا. والمطلوب أن تصل.
+  */
+  const silentId = local.movements[local.movements.length - 1].id;
+  sync.setSyncEnabled(true);
+  const flushed = await until((s) => s.phase === "متزامنة" && s.pending === 0, 30000);
+
+  const { rows: arrived } = await live.query(
+    "SELECT count(*)::int AS n FROM movements WHERE id = $1::uuid",
+    [silentId]
+  );
+  check(
+    "الإشعال بعد عملٍ مطفأ يُرسل ما عُمل — بلا حفظٍ جديد",
+    flushed && arrived[0].n === 1,
+    `${arrived[0].n} من 1 · ${sync.syncStatus().phase}`
+  );
 } catch (error) {
   bad++;
   console.error("\n" + String(error?.stack ?? error));

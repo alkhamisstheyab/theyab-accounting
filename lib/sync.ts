@@ -111,8 +111,11 @@ export function setSyncEnabled(on: boolean): void {
   } else {
     if (timer) clearTimeout(timer);
     timer = null;
+    /*
+      الصورة تُمسح لأنها قد تقدُم وهي مطفأة. أمّا آخر حالة فتبقى، فلو
+      مُسحت لوقع العيب نفسه: أُطفئت ثم أُشعلت، فلا يُرسل شيء.
+    */
     snapshot = null;
-    latest = null;
     publish({ enabled: false, phase: "مطفأة", pending: 0, lastError: "" });
   }
 }
@@ -189,9 +192,17 @@ export async function fetchServerState(): Promise<AppState> {
  * ينتظر أن تهدأ اليد. وما تراكم في الأثناء يذهب في طلبٍ واحد.
  */
 export function record(state: AppState): void {
-  if (!status.enabled) return;
+  /*
+    آخر حالة تُحفظ وإن كانت المزامنة مطفأة، ولا يُرسل منها شيء.
+
+    كان فحص الإشعال قبل هذين السطرين، فكل ما يُعمل والمزامنة مطفأة يُرمى.
+    فإذا أشعلها صاحبها لم تجد ما ترسله، ولم ترسل شيئاً حتى يغيّر حرفاً.
+    وإشعالها وحده لا يغيّر شيئاً، فبقيت مشتعلة صامتة والمقارنة حمراء.
+    وقع ذلك فعلاً بعد مسح بيانات المتصفّح.
+  */
   latest = state;
   remember(state);
+  if (!status.enabled) return;
   if (snapshot) {
     publish({ pending: countChanges(sendable(snapshot, state)) });
   }
