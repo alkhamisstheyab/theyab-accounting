@@ -41,6 +41,20 @@ function canonical(value: unknown): string {
 
 export const same = (a: unknown, b: unknown): boolean => canonical(a) === canonical(b);
 
+/**
+ * الصفّ كما يُقارَن — بلا ما يملكه الخادم.
+ *
+ * تجزئة كلمة المرور تبقى في المتصفّح كما كانت يوم استُنسخ المستخدم،
+ * ويغيّرها صاحبها على الخادم. فلو دخلت المقارنة لبقي سطر المستخدمين
+ * مختلفاً أبداً — وهو ليس اختلافاً في البيانات بل في ملكيّة الحقل.
+ */
+const comparable = (row: Row, owned?: string[]): Row => {
+  if (!owned || owned.length === 0) return row;
+  const copy: Row = { ...row };
+  for (const key of owned) delete copy[key];
+  return copy;
+};
+
 /** خريطة المفتاح إلى الصفّ — وآخر المتكرّرين يغلب، كما في القاعدة */
 function byKey(rows: unknown[], keyOf: (r: Row) => string): Map<string, Row> {
   const map = new Map<string, Row>();
@@ -92,7 +106,10 @@ export function diffStates(before: AppState, rawAfter: AppState): ChangeSet {
     const changed: Row[] = [];
     for (const [key, row] of now) {
       const previous = old.get(key);
-      if (!previous || !same(previous, row)) changed.push(row);
+      const owned = collection.serverOwned;
+      if (!previous || !same(comparable(previous, owned), comparable(row, owned))) {
+        changed.push(row);
+      }
     }
     if (changed.length) upserts[field] = changed;
 
@@ -168,8 +185,11 @@ export function compareStates(
     const different: string[] = [];
     for (const [key, row] of here) {
       const other = there.get(key);
+      const owned = collection.serverOwned;
       if (!other) missing.push(key);
-      else if (!same(row, other)) different.push(key);
+      else if (!same(comparable(row, owned), comparable(other, owned))) {
+        different.push(key);
+      }
     }
 
     const extra: string[] = [];

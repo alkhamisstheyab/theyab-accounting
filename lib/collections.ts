@@ -17,6 +17,17 @@ export type RowCollection = {
   field: keyof AppState;
   /** مفتاح الصفّ — نصٌّ يميّزه عن إخوته ولا يتغيّر بتعديله */
   keyOf: (row: Row) => string;
+  /**
+   * حقولٌ يملكها الخادم، فلا تدخل المقارنة.
+   *
+   * تجزئة كلمة المرور منها. فالمتصفّح يحمل ما كان يوم استُنسخ المستخدم،
+   * ويغيّرها صاحبها على الخادم فتختلف النسختان إلى الأبد. ولو حُسب ذلك
+   * فرقاً لبقي سطر المستخدمين أحمر ولما اخضرّ يوم واحد.
+   *
+   * وهي تُرسَل مع الصفّ ولا تُقارَن: الخادم يكتبها عند الإنشاء وحده،
+   * فحسابٌ جديد يُنشأ من الشاشة تصل كلمته، ولا يُمَسّ القائم.
+   */
+  serverOwned?: string[];
 };
 
 const str = (v: unknown): string => (v == null ? "" : String(v));
@@ -33,7 +44,11 @@ export const ROW_COLLECTIONS: RowCollection[] = [
   { field: "contractors", keyOf: (c) => str(c.id) },
   { field: "materials", keyOf: (m) => str(m.id) },
   { field: "materialReceipts", keyOf: (r) => str(r.id) },
-  { field: "users", keyOf: (u) => str(u.id) },
+  {
+    field: "users",
+    keyOf: (u) => str(u.id),
+    serverOwned: ["pinHash", "mustChangePin"],
+  },
   { field: "employees", keyOf: (e) => str(e.id) },
   { field: "attendance", keyOf: (a) => str(a.employeeId) + "|" + str(a.date) },
   { field: "payrollRuns", keyOf: (r) => str(r.id) },

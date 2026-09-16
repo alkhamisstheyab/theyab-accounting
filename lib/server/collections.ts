@@ -25,6 +25,17 @@ export type Collection = RowCollection & {
   table: string;
   /** الأعمدة المشتقّة من الكائن، عدا id و data و rev */
   columns: (o: Row) => Row;
+  /**
+   * أعمدةٌ يملكها الخادم ولا يكتبها المتصفّح.
+   *
+   * كلمة المرور منها. فالمتصفّح يحمل نسخةً من المستخدم فيها التجزئة
+   * كما كانت يوم استُنسخت، ولو أرسلها لكتبها فوق ما غيّره صاحبها على
+   * الخادم — فيعود الرقم القديم يفتح وصاحبه يحسبه أُغلق.
+   *
+   * فتُكتب عند الإنشاء وحده، ثم لا تُمَسّ. وتُعاد إلى data من الصفّ
+   * القائم، فلا يختلف العمود عن الكائن.
+   */
+  guarded?: { column: string; key: string }[];
 };
 
 const str = (v: unknown): string => (v == null ? "" : String(v));
@@ -39,7 +50,10 @@ const day = (v: unknown): string | null =>
 const when = (v: unknown): string | null => (str(v) ? str(v) : null);
 
 /** الجدول والأعمدة لكل مجموعة — والمفتاح يأتي من التعريف المشترك */
-const TABLES: Record<string, { table: string; columns: (o: Row) => Row }> = {
+const TABLES: Record<
+  string,
+  { table: string; columns: (o: Row) => Row; guarded?: Collection["guarded"] }
+> = {
   movements: {
     table: "movements",
     columns: (m) => ({
@@ -135,6 +149,10 @@ const TABLES: Record<string, { table: string; columns: (o: Row) => Row }> = {
   },
   users: {
     table: "users",
+    guarded: [
+      { column: "password_hash", key: "pinHash" },
+      { column: "must_change_pin", key: "mustChangePin" },
+    ],
     columns: (u) => ({
       name: str(u.name),
       job_title: str(u.jobTitle),

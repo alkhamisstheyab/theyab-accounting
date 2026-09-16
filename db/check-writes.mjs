@@ -299,6 +299,77 @@ check(
   JSON.stringify(afterDelete.deletes.movements ?? [])
 );
 
+/* ---- 5.5 كلمة المرور يملكها الخادم ---- */
+/*
+  المتصفّح يحمل نسخةً من المستخدم فيها تجزئة كلمة المرور كما كانت يوم
+  استُنسخت. فمن غيّر كلمته على الخادم ثم زامن جهازه، كانت نسخته القديمة
+  تُكتب فوق الجديدة — فيعود ما قبلها يفتح وصاحبه يحسبه أُغلق.
+
+  وهذا يُحاكى هنا حرفاً بحرف: صفّ مستخدمٍ يحمل تجزئةً قديمة يُرسَل إلى
+  الخادم بعد أن غُيّرت كلمته فيه.
+*/
+{
+  const person = before.users[0];
+  const SERVER_HASH = "$2b$12$serverOwnedHashValueForTheCheckXXXXXXXXXXXXXXXXXXXXXX";
+
+  await db.query(
+    "UPDATE users SET password_hash = $2, must_change_pin = false WHERE id = $1::uuid",
+    [uuidFor(person.id), SERVER_HASH]
+  );
+
+  /* المتصفّح يرسل الصفّ ومعه تجزئته القديمة وشيءٌ تغيّر فعلاً */
+  await applyChanges(
+    db,
+    {
+      upserts: {
+        users: [
+          {
+            ...person,
+            pinHash: "0".repeat(64),
+            mustChangePin: true,
+            jobTitle: (person.jobTitle ?? "") + " — عُدّل",
+          },
+        ],
+      },
+    },
+    "المتصفّح"
+  );
+
+  const { rows: kept } = await db.query(
+    "SELECT password_hash, must_change_pin, job_title, data->>'pinHash' AS in_data FROM users WHERE id = $1::uuid",
+    [uuidFor(person.id)]
+  );
+
+  check(
+    "كلمة المرور على الخادم لا يكتبها المتصفّح",
+    kept[0]?.password_hash === SERVER_HASH,
+    String(kept[0]?.password_hash).slice(0, 12)
+  );
+  check(
+    "ولا الإلزام بتغييرها",
+    kept[0]?.must_change_pin === false,
+    String(kept[0]?.must_change_pin)
+  );
+  check(
+    "وبقية الصفّ تُكتب كالمعتاد",
+    String(kept[0]?.job_title).endsWith("عُدّل"),
+    String(kept[0]?.job_title)
+  );
+  check(
+    "و data تحمل تجزئة الخادم لا القديمة — فلا يبقى فرقٌ في المقارنة",
+    kept[0]?.in_data === SERVER_HASH,
+    String(kept[0]?.in_data).slice(0, 12)
+  );
+
+  const state = await readState(db);
+  const read = state.users.find((u) => u.id === person.id);
+  check(
+    "والحالة المقروءة تحمل تجزئة الخادم",
+    read?.pinHash === SERVER_HASH,
+    String(read?.pinHash).slice(0, 12)
+  );
+}
+
 /* ---- 6. الكتابة الكاملة للمجموعات الصغيرة ---- */
 const renamed = { ...before.company, name: before.company.name + " (فحص)" };
 await applyChanges(db, { whole: { company: renamed } }, "فاحص");

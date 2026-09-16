@@ -81,15 +81,30 @@ async function upsert(
     const placeholders = values.map((_, i) => `$${i + 1}`);
     placeholders.push("now()", "nextval('change_seq')");
 
+    /*
+      الأعمدة المحروسة يملكها الخادم: تُكتب عند الإنشاء ثم لا يمسّها
+      المتصفّح. وأهمّها كلمة المرور — ولولا هذا لكتب المتصفّح تجزئةً
+      قديمة يحملها فوق كلمةٍ غيّرها صاحبها على الخادم.
+
+      وتُعاد إلى data من الصفّ القائم، فلا يختلف العمود عن الكائن —
+      ولو اختلفا لأظهرت المقارنة اليومية فرقاً لا يزول أبداً.
+    */
+    const guarded = collection.guarded ?? [];
+    const guardedColumns = new Set(guarded.map((g) => g.column));
+
     const updates = names
-      .filter((n) => n !== "id")
-      .map((n) =>
-        n === "updated_at"
-          ? "updated_at = now()"
-          : n === "rev"
-            ? "rev = nextval('change_seq')"
-            : `${n} = EXCLUDED.${n}`
-      );
+      .filter((n) => n !== "id" && !guardedColumns.has(n))
+      .map((n) => {
+        if (n === "updated_at") return "updated_at = now()";
+        if (n === "rev") return "rev = nextval('change_seq')";
+        if (n === "data" && guarded.length > 0) {
+          const keep = guarded
+            .map((g) => `'${g.key}', ${collection.table}.${g.column}`)
+            .join(", ");
+          return `data = EXCLUDED.data || jsonb_build_object(${keep})`;
+        }
+        return `${n} = EXCLUDED.${n}`;
+      });
 
     await db.query(
       `INSERT INTO ${collection.table} (${names.join(",")})
