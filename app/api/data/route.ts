@@ -9,6 +9,7 @@
 import { NextResponse } from "next/server";
 
 import { AuthError, requireUser } from "@/lib/server/auth";
+import { FROZEN_ADDRESS_REASON, isFrozenAddress } from "@/lib/server/frozen-address";
 import { inTransaction, readable } from "@/lib/server/db";
 import { refusalReason, type ChangeShape } from "@/lib/server/permits";
 import { readState } from "@/lib/server/state";
@@ -47,6 +48,14 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
+    /*
+      العنوان المجمَّد يُردّ قبل كل شيء — قبل الجلسة والصلاحيات. فشيفرته
+      قديمة، ولا يُسأل عمّن يكتب بها بل يُمنع أن يكتب.
+    */
+    if (isFrozenAddress(request)) {
+      return NextResponse.json({ error: FROZEN_ADDRESS_REASON }, { status: 409 });
+    }
+
     const user = await requireUser();
     const changes = (await request.json()) as ChangeSet & ChangeShape;
 

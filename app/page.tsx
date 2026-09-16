@@ -1148,6 +1148,21 @@ export default function HomeV2() {
             </Banner>
           )}
 
+          {/*
+            العنوان المجمَّد: لكل نشرٍ عنوانٌ فيه بصمته، يبقى على نسخته أبداً.
+            والخادم يردّ كتابته، وهذا يقول لصاحبه لماذا قبل أن يعمل ساعةً
+            فلا يصل شيءٌ منها. وعلى الجهاز لا يظهر.
+          */}
+          {typeof window !== "undefined" &&
+          process.env.NEXT_PUBLIC_VERCEL_URL &&
+          window.location.hostname === process.env.NEXT_PUBLIC_VERCEL_URL ? (
+            <Banner tone="error">
+              <b>هذا عنوانٌ مجمَّد.</b> يحمل نسخةً قديمة من النظام، ولا يكتب شيئاً في
+              دفاتر الشركة — فما تعمله هنا لا يصل. أغلق هذا التبويب، وافتح النظام من
+              العنوان الرئيسي المحفوظ في المفضّلة.
+            </Banner>
+          ) : null}
+
           {loadErrors.map((error) => (
             <Banner key={error} tone="error">
               {error}
