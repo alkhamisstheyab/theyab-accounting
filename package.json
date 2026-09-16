@@ -18,7 +18,8 @@
     "check:login": "node db/check-login.mjs",
     "verify:live": "node db/verify-live.mjs",
     "check:import": "node db/check-import.mjs",
-    "check:merge-audit": "node db/check-merge-audit.mjs"
+    "check:merge-audit": "node db/check-merge-audit.mjs",
+    "check:closed": "node db/check-closed-payments.mjs"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

@@ -190,6 +190,10 @@ import {
 } from "@/lib/sync";
 import { compareStates, type FieldComparison } from "@/lib/changes";
 import {
+  CLOSED_PAYMENT_REASON,
+  isClosedContractorPayment,
+} from "@/lib/closed-payments";
+import {
   changePassword,
   signIn as serverSignIn,
   signOut as serverSignOut,
@@ -702,7 +706,10 @@ export default function HomeV2() {
    * الحركة قابلة للتغيير؟ يُمنع التغيير في سنة مقفلة مهما كانت الصلاحية —
    * القفل قرار محاسبي فوق الصلاحيات، وفتحه إجراء صريح مسجَّل.
    */
-  const movementEditable = (m: Movement) => !isYearClosed(yearLocks, m.fiscalYear);
+  const movementEditable = (m: Movement) =>
+    !isYearClosed(yearLocks, m.fiscalYear) &&
+    /* دفعات المقاولين لسنة ٢٠٢٥ أُقفلت بقرار صاحب الشركة — lib/closed-payments.ts */
+    !isClosedContractorPayment(m);
 
   /**
    * يختم الحركة بحالة اعتمادها.
@@ -1221,6 +1228,14 @@ export default function HomeV2() {
               lockedYears={yearLocks}
               onSave={(movement) => {
                 if (isYearClosed(yearLocks, movement.fiscalYear)) return;
+                /*
+                  دفعة مقاولٍ جديدة على ٢٠٢٥ تُضاف إلى ما أُقفل — فتُرفض،
+                  ويُقال لصاحبها لماذا بدل أن يضغط «حفظ» فلا يحدث شيء.
+                */
+                if (isClosedContractorPayment(movement)) {
+                  window.alert(CLOSED_PAYMENT_REASON);
+                  return;
+                }
                 const stamped = stampApproval(movement);
                 setMovements((prev) => [...prev, stamped]);
                 log(
@@ -1231,6 +1246,17 @@ export default function HomeV2() {
               }}
               onUpdate={(movement) => {
                 const old = movements.find((m) => m.id === movement.id);
+                /*
+                  يُفحص الطرفان: الحركة قبل التعديل وبعده. فلا تُعدَّل دفعة
+                  مقفلة، ولا تُحوَّل حركةٌ من سنةٍ أخرى إلى دفعةٍ مقفلة.
+                */
+                if (
+                  (old && isClosedContractorPayment(old)) ||
+                  isClosedContractorPayment(movement)
+                ) {
+                  window.alert(CLOSED_PAYMENT_REASON);
+                  return;
+                }
                 if (
                   isYearClosed(yearLocks, movement.fiscalYear) ||
                   (old && !movementEditable(old))
@@ -3427,7 +3453,13 @@ function MovementsTable({
                         <button
                           onClick={() => onEdit(m)}
                           disabled={!editable(m)}
-                          title={editable(m) ? "" : "السنة مقفلة"}
+                          title={
+                            editable(m)
+                              ? ""
+                              : isClosedContractorPayment(m)
+                                ? CLOSED_PAYMENT_REASON
+                                : "السنة مقفلة"
+                          }
                           className="rounded-lg bg-blue-50 px-3 py-2 text-blue-700 disabled:bg-slate-100 disabled:text-slate-400"
                         >
                           تعديل
@@ -3443,7 +3475,13 @@ function MovementsTable({
                             }
                           }}
                           disabled={!editable(m)}
-                          title={editable(m) ? "" : "السنة مقفلة"}
+                          title={
+                            editable(m)
+                              ? ""
+                              : isClosedContractorPayment(m)
+                                ? CLOSED_PAYMENT_REASON
+                                : "السنة مقفلة"
+                          }
                           className="rounded-lg bg-red-50 px-3 py-2 text-red-700 disabled:bg-slate-100 disabled:text-slate-400"
                         >
                           حذف

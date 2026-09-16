@@ -19,6 +19,7 @@ import { CONTRACTOR_EXPENSE, round3 } from "./accounting";
 import type { Movement } from "./accounting";
 import type { Contractor, Installment } from "./storage";
 import { isPayableInstallment } from "./storage";
+import { isClosedContractorPayment } from "./closed-payments";
 
 /** ألف بأشكالها وياء وتاء مربوطة — حتى تتطابق «أبو» و«ابو» */
 export const normalizeArabic = (text: string): string =>
@@ -91,7 +92,9 @@ export function isLinkCandidate(movement: Movement): boolean {
   return (
     movement.debitCode === CONTRACTOR_EXPENSE &&
     !movement.contractNumber &&
-    !NOT_A_CONTRACT_ITEM.has(movement.itemName)
+    !NOT_A_CONTRACT_ITEM.has(movement.itemName) &&
+    /* دفعات ٢٠٢٥ المُقفلة لا تُربط بعقدٍ ولا مشروع — lib/closed-payments.ts */
+    !isClosedContractorPayment(movement)
   );
 }
 
