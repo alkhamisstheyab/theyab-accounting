@@ -21,6 +21,15 @@ const COUNTERPARTY_TYPES = ["عميل", "مقاول", "مورّد"];
 
 const BACKUP = process.argv[2];
 
+/*
+  إفراغ القاعدة قبل النقل.
+
+  المخطّط ينشئ جداوله ولا يعدّل قائماً، فالنقل إلى قاعدةٍ فيها جداول
+  يسقط عند أول CREATE TABLE. والإفراغ لا يقع إلا بهذا العلم صراحةً:
+  أمرٌ يُكتب باليد، لا شيءٌ يقع لأن النقل احتاجه.
+*/
+const FRESH = process.argv.includes("--fresh");
+
 /** الرابط من سطر الأوامر، وإلا من .env.local — فلا يُكتب سرّ في أمر */
 function urlFromEnvFile() {
   try {
@@ -38,7 +47,10 @@ const DB_URL =
   process.argv[3] === "--local" ? "" : process.argv[3] || urlFromEnvFile();
 
 if (!BACKUP) {
-  console.error("الاستعمال: node db/migrate.mjs <ملف النسخة> [رابط القاعدة]");
+  console.error(
+    "الاستعمال: node db/migrate.mjs <ملف النسخة> [رابط القاعدة] [--fresh]\n" +
+      "  --fresh يُفرغ القاعدة قبل النقل — ولا يقع بغيره"
+  );
   process.exit(1);
 }
 
@@ -149,6 +161,24 @@ async function main() {
 
   const db = await connect();
   console.log(`القاعدة: ${db.kind === "pglite" ? "مضمّنة في Node (اختبار)" : DB_URL.replace(/:[^:@/]+@/, ":***@")}`);
+
+  if (FRESH) {
+    /* ما فيها الآن يُعرض قبل محوه — فلا يُمحى شيء في الظلام */
+    const { rows: had } = await db.query(
+      `SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename`
+    );
+    if (had.length > 0) {
+      console.log(`تُفرَغ القاعدة من ${had.length} جدولاً قائماً:`);
+      for (const { tablename } of had) {
+        const { rows: n } = await db.query(
+          `SELECT count(*)::int AS n FROM "${tablename}"`
+        );
+        console.log(`  ${tablename} — ${n[0].n} صفّاً`);
+      }
+      await db.exec("DROP SCHEMA public CASCADE; CREATE SCHEMA public;");
+      console.log("أُفرغت ✓\n");
+    }
+  }
 
   const schema = fs.readFileSync(path.join(HERE, "schema.sql"), "utf8");
   await db.exec(schema);
