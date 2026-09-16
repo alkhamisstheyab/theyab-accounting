@@ -43,8 +43,16 @@ function urlFromEnvFile() {
   }
 }
 
-const DB_URL =
-  process.argv[3] === "--local" ? "" : process.argv[3] || urlFromEnvFile();
+/*
+  الرابط أوّلُ ما ليس علماً.
+
+  وكان يُؤخذ من موضعه في السطر، فلمّا أُضيف --fresh حُسب رابطاً وحاول
+  الاتصال بمضيفٍ اسمه «fresh». سقط عند الاتصال قبل أن يمسّ صفّاً —
+  ولو سقط بعده لكان الأمر غير هذا.
+*/
+const DB_URL = process.argv.includes("--local")
+  ? ""
+  : process.argv.slice(3).find((a) => !a.startsWith("--")) || urlFromEnvFile();
 
 if (!BACKUP) {
   console.error(
