@@ -1,6 +1,6 @@
 import "server-only";
 
-import { randomBytes, timingSafeEqual } from "crypto";
+import { createHash, randomBytes, timingSafeEqual } from "crypto";
 import { cookies } from "next/headers";
 import bcrypt from "bcryptjs";
 
@@ -51,15 +51,42 @@ export const hashPassword = (plain: string): Promise<string> =>
  */
 const DUMMY_HASH = "$2a$12$C6UzMDM.H6dfI/f/IKcEe.7VmQbLPvJl8p3B0uY0Yt5zK3Qw1ZaLq";
 
+/**
+ * الأرقام السرّية القديمة — من زمن المتصفّح.
+ *
+ * كانت تُجزّأ في المتصفّح بـ SHA-256، وهي أربعة أرقام. وذلك مقبول على
+ * جهازٍ في المكتب، وغيرُ مقبول على الإنترنت: عشرة آلاف احتمالٍ تُجرَّب
+ * في ثوانٍ لولا إيقاف الحساب بعد خمس محاولات.
+ *
+ * ولو رُفضت هذه التجزئات عند النقل لما دخل أحدٌ الخادم أصلاً — ولقيل
+ * له «كلمة المرور خاطئة» فظنّها نسياناً لا عطلاً. فتُقبل مرةً واحدة،
+ * ويُلزَم صاحبها بكلمة مرورٍ حقيقية قبل أن يرى شيئاً.
+ */
+const isLegacyHash = (hash: string): boolean => /^[0-9a-f]{64}$/.test(hash);
+
+const legacyDigest = (plain: string): string =>
+  createHash("sha256").update(`theyab:${plain}`).digest("hex");
+
 export async function verifyPassword(
   plain: string,
   hash: string | null
 ): Promise<boolean> {
+  if (hash && isLegacyHash(hash)) {
+    /* المقارنة في زمنٍ ثابت — ولو كان الهاش قديماً */
+    const digest = Buffer.from(legacyDigest(plain), "hex");
+    const stored = Buffer.from(hash, "hex");
+    return digest.length === stored.length && timingSafeEqual(digest, stored);
+  }
+
   // تُشغَّل المقارنة دائماً ثم يُحكم — وإلا اختصر الشرط وفضح زمنُ الردّ
   // أن الحساب بلا كلمة مرور
   const matched = await bcrypt.compare(plain, hash || DUMMY_HASH);
   return Boolean(hash) && matched;
 }
+
+/** أعلى تجزئةٍ قديمة تُلزم صاحبها بتغيير كلمته */
+export const needsRealPassword = (hash: string | null): boolean =>
+  Boolean(hash) && isLegacyHash(hash as string);
 
 export function passwordProblem(plain: string): string | null {
   if (plain.length < MIN_PASSWORD_LENGTH) {
@@ -125,8 +152,10 @@ export async function currentUser(): Promise<SessionUser | null> {
     role: string;
     permissions: string[];
     must_change_pin: boolean;
+    password_hash: string;
   }>(
-    `SELECT u.id, u.name, u.job_title, u.role, u.permissions, u.must_change_pin
+    `SELECT u.id, u.name, u.job_title, u.role, u.permissions, u.must_change_pin,
+            u.password_hash
      FROM sessions s
      JOIN users u ON u.id = s.user_id
      WHERE s.token = $1 AND s.expires_at > now() AND u.active`,
@@ -141,7 +170,9 @@ export async function currentUser(): Promise<SessionUser | null> {
     jobTitle: row.job_title,
     role: row.role,
     permissions: row.permissions as Permission[],
-    mustChangePassword: row.must_change_pin,
+    /* يُفحص في كل طلب لا عند الدخول وحده، وإلا تُخطّى بإعادة تحميل الصفحة */
+    mustChangePassword:
+      row.must_change_pin || needsRealPassword(row.password_hash),
   };
 }
 
@@ -260,7 +291,12 @@ export async function login(
       jobTitle: row.job_title,
       role: row.role,
       permissions: row.permissions as Permission[],
-      mustChangePassword: row.must_change_pin,
+      /*
+        من دخل برقمه السرّي القديم لا يمضي حتى يضع كلمة مرورٍ حقيقية:
+        أربعة أرقام تكفي في المكتب ولا تكفي على الإنترنت.
+      */
+      mustChangePassword:
+        row.must_change_pin || needsRealPassword(row.password_hash),
     },
   };
 }
