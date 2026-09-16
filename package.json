@@ -13,7 +13,8 @@
     "check:parallel": "node db/check-parallel.mjs",
     "check:sync": "node db/check-sync.mjs",
     "check:quotations": "node db/check-quotation-validity.mjs",
-    "check:match": "node db/check-match-log.mjs"
+    "check:match": "node db/check-match-log.mjs",
+    "check:print": "node db/check-print-shape.mjs"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
