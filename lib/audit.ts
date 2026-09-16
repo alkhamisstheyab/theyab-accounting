@@ -81,6 +81,33 @@ export function appendEntry(
   return next.length > AUDIT_LIMIT ? next.slice(0, AUDIT_LIMIT) : next;
 }
 
+/**
+ * يضمّ إلى السجلّ قيوداً ليست فيه.
+ *
+ * سجلّ التدقيق يُكتب ولا يُحذف منه شيء — لا على الخادم ولا بيد صاحب كل
+ * الصلاحيات. فقيدٌ عند الخادم وليس في الجهاز لا يُعالَج بمحوه من الخادم،
+ * بل بأن يستردّه الجهاز. وذلك آمن دائماً: الضمّ يُضيف ولا يكتب فوق شيء.
+ *
+ * ويقع هذا حين يُستورَد السجلّ كاملاً فوق جلسةٍ كانت أرسلت قيودها: تذهب
+ * من الجهاز وتبقى عند الخادم.
+ *
+ * والترتيب بالوقت الأحدث أولاً كما يكتبه appendEntry، والمكرَّر يُعرف
+ * بمعرّفه فلا يدخل مرتين.
+ */
+export function mergeAudit(
+  log: AuditEntry[],
+  incoming: AuditEntry[]
+): AuditEntry[] {
+  const have = new Set(log.map((e) => e.id));
+  const added = incoming.filter((e) => e.id && !have.has(e.id));
+  if (added.length === 0) return log;
+
+  const merged = [...log, ...added].sort((a, b) =>
+    a.at < b.at ? 1 : a.at > b.at ? -1 : 0
+  );
+  return merged.length > AUDIT_LIMIT ? merged.slice(0, AUDIT_LIMIT) : merged;
+}
+
 /* ------------------------------------------------------------------ */
 /* التصفية                                                             */
 /* ------------------------------------------------------------------ */

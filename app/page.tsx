@@ -116,6 +116,7 @@ import {
   AuditEntity,
   AuditEntry,
   appendEntry,
+  mergeAudit,
   emptyAuditFilter,
   filterAudit,
   formatAuditTime,
@@ -1702,7 +1703,12 @@ export default function HomeV2() {
           )}
 
           {page === "مطابقة الخادم" && (
-            <ServerMatchPage local={fullState} />
+            <ServerMatchPage
+              local={fullState}
+              onAdoptAudit={(entries) =>
+                setAudit((prev) => mergeAudit(prev, entries))
+              }
+            />
           )}
 
           {page === "الموظفون" && (
@@ -13309,7 +13315,14 @@ function ServerSignIn({
     </Panel>
   );
 }
-function ServerMatchPage({ local }: { local: AppState }) {
+function ServerMatchPage({
+  local,
+  onAdoptAudit,
+}: {
+  local: AppState;
+  /** يضمّ قيود تدقيقٍ من الخادم ليست في الجهاز */
+  onAdoptAudit: (entries: AuditEntry[]) => void;
+}) {
   const [status, setStatus] = useState<SyncStatus | null>(null);
   const [fields, setFields] = useState<FieldComparison[] | null>(null);
   const [comparing, setComparing] = useState(false);
@@ -13328,6 +13341,7 @@ function ServerMatchPage({ local }: { local: AppState }) {
   const compare = async () => {
     setComparing(true);
     setProblem("");
+    setNote("");
     try {
       const server = await fetchServerState();
       const report = compareStates(local, server);
@@ -13354,6 +13368,39 @@ function ServerMatchPage({ local }: { local: AppState }) {
       setProblem(error instanceof Error ? error.message : "تعذّرت المقارنة");
     } finally {
       setComparing(false);
+    }
+  };
+
+  /*
+    استرداد قيود التدقيق.
+
+    سجلّ التدقيق لا يُحذف منه شيء على الخادم، فقيدٌ عنده وليس في الجهاز
+    لا يزول بمحوه هناك — بل بأن يستردّه الجهاز. والضمّ يُضيف ولا يكتب
+    فوق شيء، فهو آمن دائماً. ولولاه لبقي السطر أحمر ولما بدأ العدّ.
+  */
+  const [adopting, setAdopting] = useState(false);
+  const [note, setNote] = useState("");
+  const auditExtra = fields?.find((f) => f.field === "audit")?.extra.length ?? 0;
+
+  const adoptAudit = async () => {
+    setAdopting(true);
+    setProblem("");
+    try {
+      const server = await fetchServerState();
+      const have = new Set(local.audit.map((e) => e.id));
+      const missing = server.audit.filter((e) => !have.has(e.id));
+      onAdoptAudit(missing);
+      /*
+        لا تُعاد المقارنة من هنا: الدالّة تحمل بيانات الجهاز كما كانت قبل
+        الضمّ، فتُظهر الفرق نفسه وتوهم أن الاسترداد لم ينفع. فيُخفى التقرير
+        القديم ويُطلب إعادة المقارنة — فتُقرأ البيانات بعد الضمّ.
+      */
+      setFields(null);
+      setNote(`استُردّ ${missing.length} من قيود التدقيق — اضغط «قارن الآن»`);
+    } catch (error) {
+      setProblem(error instanceof Error ? error.message : "تعذّر الاسترداد");
+    } finally {
+      setAdopting(false);
     }
   };
 
@@ -13437,6 +13484,12 @@ function ServerMatchPage({ local }: { local: AppState }) {
             <Banner tone="error">{problem}</Banner>
           </div>
         ) : null}
+
+        {note ? (
+          <div className="mt-4">
+            <Banner tone="ok">{note}</Banner>
+          </div>
+        ) : null}
       </Panel>
 
       <Panel
@@ -13508,6 +13561,27 @@ function ServerMatchPage({ local }: { local: AppState }) {
           title="تقرير المقارنة"
           subtitle={`قُورن في ${new Date(comparedAt).toLocaleString("ar-KW")}`}
         >
+          {auditExtra > 0 ? (
+            <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-4">
+              <p className="mb-2 font-bold text-amber-900">
+                في الخادم {auditExtra} من قيود التدقيق ليست في جهازك
+              </p>
+              <p className="mb-3 text-sm text-amber-900">
+                وقعت في جلسةٍ سابقة ثم استُبدل سجلّ جهازك باستيرادٍ كامل. والخادم
+                لا يُحذف منه قيد تدقيق، فالصواب أن يستردّها جهازك — وهو يُضيف ولا
+                يكتب فوق شيء.
+              </p>
+              <button
+                type="button"
+                onClick={adoptAudit}
+                disabled={adopting}
+                className="rounded-lg bg-amber-700 px-5 py-2 font-bold text-white disabled:cursor-not-allowed disabled:bg-slate-300"
+              >
+                {adopting ? "يسترد…" : `استرداد ${auditExtra} من الخادم`}
+              </button>
+            </div>
+          ) : null}
+
           <Banner tone={agree ? "ok" : "error"}>
             {agree
               ? "النسختان متطابقتان في الحقول كلها — لا فرق في صفّ واحد."
