@@ -1954,12 +1954,39 @@ export default function HomeV2() {
                 );
               }}
               onImport={(next) => {
+                /*
+                  الحقول الواحد والعشرون كلها — لا ستةٌ منها.
+
+                  كان يستورد الحركات والمشاريع والعقود والأرصدة والمواد
+                  واستلامها وحدها، واسمه «يستبدل كل شيء». فمن استعاد نسخته
+                  على جهازٍ جديد وجد دفاتره وقد ذهب منها المستخدمون
+                  والموظفون وحضورهم وعروض الأسعار والفواتير وبنود الأعمال
+                  وسجل التدقيق وبيانات الشركة — ولا رسالة تقول له.
+
+                  وأخطرها المستخدمون: بذهابهم لا تظهر شاشة الدخول أصلاً،
+                  فيفتح النظام بكامل الصلاحيات بلا كلمة سرّ.
+                */
                 setMovements(next.movements);
                 setProjects(next.projects);
                 setContractors(next.contractors);
                 setOpeningBalances(next.openingBalances);
                 setMaterials(next.materials);
                 setMaterialReceipts(next.materialReceipts);
+                setCompany(next.company);
+                setUsers(next.users);
+                setAudit(next.audit);
+                setYearLocks(next.yearLocks);
+                setChart(next.chart);
+                setItems(next.items);
+                setPayments(next.payments);
+                setPeople(next.people);
+                setEmployees(next.employees);
+                setAttendance(next.attendance);
+                setPayrollRuns(next.payrollRuns);
+                setPayrollSettings(next.payrollSettings);
+                setWorkItems(next.workItems);
+                setQuotations(next.quotations);
+                setInvoices(next.invoices);
                 setYear(availableYears(next.movements, next.openingBalances)[0]);
                 log(
                   "استيراد",

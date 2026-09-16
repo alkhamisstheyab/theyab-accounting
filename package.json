@@ -16,7 +16,8 @@
     "check:match": "node db/check-match-log.mjs",
     "check:print": "node db/check-print-shape.mjs",
     "check:login": "node db/check-login.mjs",
-    "verify:live": "node db/verify-live.mjs"
+    "verify:live": "node db/verify-live.mjs",
+    "check:import": "node db/check-import.mjs"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
