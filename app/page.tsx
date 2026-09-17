@@ -189,6 +189,7 @@ import {
   type SyncStatus,
 } from "@/lib/sync";
 import { compareStates, type FieldComparison } from "@/lib/changes";
+import { isAdminExpenseToGeneral } from "@/lib/admin-to-general";
 import {
   CLOSED_PAYMENT_REASON,
   isClosedContractorPayment,
@@ -1933,16 +1934,23 @@ export default function HomeV2() {
               onBulkFix={(fix, targets, item) => {
                 const ids = new Set(targets.map((m) => m.id));
                 const before = targets[0]?.debitCode ?? "";
+                /*
+                  نقل المشروع وحده لا يمسّ الحساب ولا البند. والاعتماد لا
+                  يُمسّ في الحالين — فالتصحيح قرار صاحب الشركة لا تعديل
+                  يُعاد إلى الانتظار، ولو أُعيد لخرجت المصروفات من القوائم.
+                */
                 setMovements((prev) =>
                   prev.map((m) =>
                     ids.has(m.id)
-                      ? {
-                          ...m,
-                          debitCode: fix.toAccount,
-                          itemCode: item.code,
-                          itemName: item.name,
-                          project: fix.toProject ?? m.project,
-                        }
+                      ? fix.toAccount && item
+                        ? {
+                            ...m,
+                            debitCode: fix.toAccount,
+                            itemCode: item.code,
+                            itemName: item.name,
+                            project: fix.toProject ?? m.project,
+                          }
+                        : { ...m, project: fix.toProject ?? m.project }
                       : m
                   )
                 );
@@ -1956,9 +1964,11 @@ export default function HomeV2() {
                     before: `الحساب ${before} · القيود ${targets
                       .map((m) => m.entryNo)
                       .join("، ")}`,
-                    after: `الحساب ${fix.toAccount} — ${item.name}${
-                      fix.toProject ? ` · ${fix.toProject}` : ""
-                    }`,
+                    after: fix.toAccount
+                      ? `الحساب ${fix.toAccount} — ${item?.name ?? ""}${
+                          fix.toProject ? ` · ${fix.toProject}` : ""
+                        }`
+                      : `المشروع «${fix.toProject}» — الحساب والاعتماد كما هما`,
                   }
                 );
               }}
@@ -7491,7 +7501,8 @@ function SettingsPage({
   onBulkFix: (
     fix: BulkFix,
     targets: Movement[],
-    item: ItemDefinition
+    /** غائبٌ في تصحيحٍ ينقل المشروع وحده */
+    item?: ItemDefinition
   ) => void;
   onImport: (state: ReturnType<typeof emptyState>) => void;
   onImportMaterials: (
@@ -8321,8 +8332,11 @@ type BulkFix = {
   id: string;
   title: string;
   reason: string;
-  /** الحساب الذي تنتقل إليه الحركات — يلزم وجود بند يشير إليه */
-  toAccount: string;
+  /**
+   * الحساب الذي تنتقل إليه الحركات — يلزم وجود بند يشير إليه.
+   * ويُترك فارغاً في تصحيحٍ ينقل المشروع وحده: فيبقى الحساب والبند كما هما.
+   */
+  toAccount?: string;
   /** السلّة أو المشروع الذي تنتقل إليه — يُترك فارغاً فيبقى كل شيء كما هو */
   toProject?: string;
   match: (m: Movement) => boolean;
@@ -8350,6 +8364,14 @@ const BULK_FIXES: BulkFix[] = [
       /^(5140|5120|6290|6210)$/.test(m.debitCode) &&
       /(إيجار|ايجار|أجرة|اجرة)\s*سيار[ةه]/.test(m.description),
   },
+  {
+    id: "admin-to-general",
+    title: "المصروفات الإدارية ← «عام»",
+    reason:
+      "قاعدة صاحب الشركة: المصروفات الإدارية (6xxx) على «عام». وهذه سبقت القاعدة فبقيت على «مصروفات مشتركة» — رواتب الموظفين وعمولات البنك والإقامات وإيجار المكتب ومستلزماته. ورُوجعت قبل النقل: ما يخدم المواقع (سكن العمال وأكلهم، صيانة السيارات والمولد، المخالفات المرورية) يبقى مشتركاً، والكهرباء والماء تبقى، وأخطاء الحساب تُصحَّح وحدها. والحساب لا يتغيّر ولا الاعتماد — فلا يتغيّر الميزان ولا صافي الربح.",
+    toProject: "عام",
+    match: isAdminExpenseToGeneral,
+  },
 ];
 
 function BulkFixPanel({
@@ -8361,15 +8383,19 @@ function BulkFixPanel({
   movements: Movement[];
   items: ItemDefinition[];
   yearLocks: YearLocks;
-  onApply: (fix: BulkFix, targets: Movement[], item: ItemDefinition) => void;
+  onApply: (fix: BulkFix, targets: Movement[], item?: ItemDefinition) => void;
 }) {
   const pending = BULK_FIXES.map((fix) => {
     const matched = movements.filter(fix.match);
     const targets = matched.filter((m) => !isYearClosed(yearLocks, m.fiscalYear));
     const lockedCount = matched.length - targets.length;
     // البند هو ما يربط الحركة بالحساب في شاشة الإدخال، فلا تصحيح قبل إنشائه
-    const item = items.find((i) => i.account === fix.toAccount);
-    return { fix, targets, lockedCount, item };
+    // — إلا تصحيحٌ ينقل المشروع وحده، فلا حساب فيه ولا بند
+    const item = fix.toAccount
+      ? items.find((i) => i.account === fix.toAccount)
+      : undefined;
+    const ready = !fix.toAccount || Boolean(item);
+    return { fix, targets, lockedCount, item, ready };
   }).filter((p) => p.targets.length > 0 || p.lockedCount > 0);
 
   if (pending.length === 0) return null;
@@ -8380,11 +8406,14 @@ function BulkFixPanel({
       subtitle="تُطبَّق على الحركات القديمة دفعة واحدة بعد عرض أثرها — ولا تُنفَّذ من تلقاء نفسها"
     >
       <div className="space-y-6">
-        {pending.map(({ fix, targets, lockedCount, item }) => {
+        {pending.map(({ fix, targets, lockedCount, item, ready }) => {
           const total = targets.reduce((s, m) => s + m.amount, 0);
           const byProject = new Map<string, { n: number; sum: number }>();
           for (const m of targets) {
-            const key = m.project || "بلا مشروع";
+            /* في نقل المشروع وحده كلها من مشروعٍ واحد، فتُجمع بالحساب */
+            const key = fix.toAccount
+              ? m.project || "بلا مشروع"
+              : m.debitCode;
             const row = byProject.get(key) ?? { n: 0, sum: 0 };
             byProject.set(key, { n: row.n + 1, sum: row.sum + m.amount });
           }
@@ -8402,7 +8431,7 @@ function BulkFixPanel({
                 </p>
               )}
 
-              {!item && (
+              {!ready && (
                 <Banner tone="warn">
                   لا يوجد بند مرتبط بالحساب {fix.toAccount}. أنشئه أولاً من
                   «البيانات الأساسية ← البنود»، ثم عد إلى هنا.
@@ -8422,7 +8451,7 @@ function BulkFixPanel({
                     <table className="w-full text-right text-sm">
                       <thead className="bg-slate-100">
                         <tr>
-                          <Th>المشروع</Th>
+                          <Th>{fix.toAccount ? "المشروع" : "الحساب"}</Th>
                           <Th>عدد الحركات</Th>
                           <Th>المبلغ</Th>
                         </tr>
@@ -8454,16 +8483,17 @@ function BulkFixPanel({
                   </div>
 
                   <button
-                    disabled={!item}
+                    disabled={!ready}
                     onClick={() => {
-                      if (!item) return;
+                      if (!ready) return;
+                      const what = fix.toAccount
+                        ? `إلى الحساب ${fix.toAccount} — ${item?.name ?? ""}${
+                            fix.toProject ? `\nوإلى «${fix.toProject}»` : ""
+                          }`
+                        : `إلى «${fix.toProject}»\nالحساب والاعتماد لا يتغيّران`;
                       if (
                         !window.confirm(
-                          `تحويل ${targets.length} حركة بمجموع ${fmt(
-                            total
-                          )} د.ك إلى الحساب ${fix.toAccount} — ${item.name}${
-                            fix.toProject ? `\nوإلى «${fix.toProject}»` : ""
-                          }؟\n\nيُسجَّل في سجل التدقيق، وتستطيع التراجع باستعادة نسخة احتياطية.`
+                          `نقل ${targets.length} حركة بمجموع ${fmt(total)} د.ك ${what}؟\n\nيُسجَّل في سجل التدقيق، وتستطيع التراجع باستعادة نسخة احتياطية.`
                         )
                       ) {
                         return;
