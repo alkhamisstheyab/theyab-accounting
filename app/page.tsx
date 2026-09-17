@@ -190,6 +190,7 @@ import {
 } from "@/lib/sync";
 import { compareStates, type FieldComparison } from "@/lib/changes";
 import { isAdminExpenseToGeneral } from "@/lib/admin-to-general";
+import { isAluminiumOnSalaries, isCarPaintOnGovFees } from "@/lib/account-corrections";
 import {
   CLOSED_PAYMENT_REASON,
   isClosedContractorPayment,
@@ -8371,6 +8372,22 @@ const BULK_FIXES: BulkFix[] = [
       "قاعدة صاحب الشركة: المصروفات الإدارية (6xxx) على «عام». وهذه سبقت القاعدة فبقيت على «مصروفات مشتركة» — رواتب الموظفين وعمولات البنك والإقامات وإيجار المكتب ومستلزماته. ورُوجعت قبل النقل: ما يخدم المواقع (سكن العمال وأكلهم، صيانة السيارات والمولد، المخالفات المرورية) يبقى مشتركاً، والكهرباء والماء تبقى، وأخطاء الحساب تُصحَّح وحدها. والحساب لا يتغيّر ولا الاعتماد — فلا يتغيّر الميزان ولا صافي الربح.",
     toProject: "عام",
     match: isAdminExpenseToGeneral,
+  },
+  {
+    id: "aluminium-to-materials",
+    title: "دفعة الألمنيوم ← «مواد إنشائية» (5110)",
+    reason:
+      "دفعة ألمنيوم بألفٍ وخمسمئة (قيد ١٢٩٦، مايو ٢٠٢٥) قُيّدت على «رواتب وأجور إدارية»، فضخّمت الرواتب الإدارية وأنقصت التكاليف المباشرة. ومورّد الألمنيوم مسجّلٌ «مورّداً»، فدفعته مواد. ومشروعها قديم مُقفل غير موجود في النظام، فتبقى على «مصروفات مشتركة». صافي ربح ٢٠٢٥ لا يتغيّر.",
+    toAccount: "5110",
+    match: isAluminiumOnSalaries,
+  },
+  {
+    id: "car-paint-to-maintenance",
+    title: "صبغ السيارة ← «صيانة وإصلاحات» (6250)",
+    reason:
+      "صبغ سيارة (قيد ١٠٢١، فبراير ٢٠٢٦) قُيّد على «رسوم ومصروفات حكومية»، والصبغ صيانة لا رسم. ويبقى على «مصروفات مشتركة» كسائر صيانة السيارات. صافي الربح لا يتغيّر.",
+    toAccount: "6250",
+    match: isCarPaintOnGovFees,
   },
 ];
 

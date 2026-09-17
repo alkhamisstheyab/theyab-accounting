@@ -1,15 +1,21 @@
 /**
- * يفحص نقل المصروفات الإدارية إلى «عام».
+ * يفحص تصحيحات مراجعة المصروفات الإدارية (١٧ سبتمبر ٢٠٢٦).
  *
  *   node db/check-admin-to-general.mjs <نسخة.json>
  *
- * يُنقل ٢١٦ حركة بمجموع ٣٤٬٣٩٤٫١٣٥ دفعةً واحدة. والذي يُخشى منه:
- *   • أن يتغيّر ميزان المراجعة أو صافي الربح — والقاعدة أنهما لا يتغيّران.
- *   • أن تُعاد الحركات إلى «بانتظار الاعتماد» فتخرج من القوائم المالية.
- *   • أن يُنقل ما قرّر صاحب الشركة إبقاءه: العمال والسيارات والكهرباء.
- *   • أن يُمسّ الحساب أو البند.
+ * ثلاثة تصحيحات تُطبَّق من شاشة الإعدادات:
+ *   ١. ٢١٧ مصروفاً إدارياً من «مصروفات مشتركة» إلى «عام» — المشروع وحده.
+ *   ٢. دفعة الألمنيوم من الرواتب إلى المواد (5110).
+ *   ٣. صبغ السيارة من الرسوم الحكومية إلى الصيانة (6250).
  *
- * فيُطبَّق التصحيح كما تطبّقه الشاشة، ويُقارن قبله وبعده.
+ * والذي يُخشى منه:
+ *   • أن يتغيّر صافي الربح — والقاعدة أنه لا يتغيّر في أيٍّ منها.
+ *   • أن يتغيّر الميزان في غير الحسابات المقصودة، أو بغير المبلغ المقصود.
+ *   • أن تُعاد الحركات إلى «بانتظار الاعتماد» فتخرج من القوائم المالية.
+ *   • أن يُنقل ما قرّر صاحب الشركة إبقاءه.
+ *   • أن تدخل دفعة الألمنيوم قفل دفعات المقاولين فيتغيّر ما أُقرّ عليه.
+ *
+ * فتُطبَّق كما يطبّقها المعالج في الشاشة، ويُقارن قبلها وبعدها.
  */
 import fs from "fs";
 import { createJiti } from "jiti";
@@ -24,6 +30,10 @@ if (!BACKUP) {
 
 const { parseBackup } = await jiti.import("../lib/storage.ts");
 const { isAdminExpenseToGeneral } = await jiti.import("../lib/admin-to-general.ts");
+const { isAluminiumOnSalaries, isCarPaintOnGovFees } = await jiti.import(
+  "../lib/account-corrections.ts"
+);
+const { isClosedContractorPayment } = await jiti.import("../lib/closed-payments.ts");
 const { buildTrialBalance, computeTotals, buildIncomeStatement } = await jiti.import(
   "../lib/accounting.ts"
 );
@@ -35,114 +45,172 @@ const check = (label, ok, detail = "") => {
 };
 const sum = (list) => list.reduce((t, m) => t + Number(m.amount || 0), 0).toFixed(3);
 
-const before = parseBackup(fs.readFileSync(BACKUP, "utf8")).movements;
-const targets = before.filter(isAdminExpenseToGeneral);
+const { movements: before, items } = parseBackup(fs.readFileSync(BACKUP, "utf8"));
 
-console.log("");
+/* ---- التصحيحات كما يطبّقها المعالج في الشاشة ---- */
+const itemFor = (account) => items.find((i) => i.account === account);
 
-/* ---- ما يُنقل ---- */
-check("يُنقل ٢١٦ حركة", targets.length === 216, String(targets.length));
-check("بمجموع ٣٤٬٣٩٤٫١٣٥", sum(targets) === "34394.135", sum(targets));
-
-/* ---- التطبيق كما في الشاشة: المشروع وحده ---- */
-const ids = new Set(targets.map((m) => m.id));
-const after = before.map((m) => (ids.has(m.id) ? { ...m, project: "عام" } : m));
-
-/* ---- لا يُمسّ الحساب ولا البند ولا الاعتماد ولا المبلغ ---- */
-const moved = after.filter((m) => ids.has(m.id));
-const original = new Map(before.map((m) => [m.id, m]));
-const untouched = moved.every((m) => {
-  const o = original.get(m.id);
-  return (
-    m.debitCode === o.debitCode &&
-    m.creditCode === o.creditCode &&
-    m.itemCode === o.itemCode &&
-    m.amount === o.amount &&
-    m.approval === o.approval &&
-    m.approvedBy === o.approvedBy &&
-    m.fiscalYear === o.fiscalYear
-  );
-});
-check("الحساب والبند والمبلغ والاعتماد كما هي", untouched);
-check(
-  "وكلها ما زالت «معتمدة» — فلا تخرج من القوائم",
-  moved.every((m) => m.approval === "معتمدة"),
-  `${moved.filter((m) => m.approval === "معتمدة").length} من ${moved.length}`
-);
-
-/* ---- الميزان وصافي الربح لكل سنة ---- */
-for (const year of [2025, 2026]) {
-  const b = before.filter((m) => m.fiscalYear === year);
-  const a = after.filter((m) => m.fiscalYear === year);
-  /*
-    كان هذا يقرأ r.code و r.debit — وليسا في الصفّ، فيطبع الطرفان NaN متطابقة
-    ويمرّ الفحص مهما تغيّر الميزان. فحصٌ لا يستطيع أن يسقط لا يفحص شيئاً.
-  */
-  const tb = (list) =>
-    buildTrialBalance(computeTotals(list, {}, true)).rows.map((r) =>
-      [
-        r.account.code,
-        Number(r.periodDebit).toFixed(3),
-        Number(r.periodCredit).toFixed(3),
-        Number(r.closingDebit).toFixed(3),
-        Number(r.closingCredit).toFixed(3),
-      ].join(":")
-    );
-  const tbBefore = tb(b);
-  const real = tbBefore.length > 0 && tbBefore.every((row) => !row.includes("NaN"));
-  check(`ميزان ${year} يُقرأ أرقاماً حقيقية`, real, `${tbBefore.length} حساباً`);
-  check(`ميزان مراجعة ${year} لا يتغيّر`, tbBefore.join("|") === tb(a).join("|"));
-
-  /* ويسقط إن تغيّر فعلاً — فيُثبت أنه يفحص */
-  const tampered = a.map((m, i) => (i === 0 ? { ...m, amount: m.amount + 1 } : m));
-  check(
-    `وفحص ميزان ${year} يسقط إن تغيّر مبلغٌ واحد`,
-    tbBefore.join("|") !== tb(tampered).join("|")
-  );
-
-  const np = (list) =>
-    Number(buildIncomeStatement(computeTotals(list, {}, true)).netProfit).toFixed(3);
-  check(`وصافي ربح ${year} لا يتغيّر`, np(b) === np(a), np(a));
+function apply(list, match, { toAccount, toProject }) {
+  const item = toAccount ? itemFor(toAccount) : undefined;
+  return list.map((m) => {
+    if (!match(m)) return m;
+    return toAccount && item
+      ? { ...m, debitCode: toAccount, itemCode: item.code, itemName: item.name, project: toProject ?? m.project }
+      : { ...m, project: toProject ?? m.project };
+  });
 }
 
-/* ---- ما قُرّر إبقاؤه يبقى ---- */
-const staysShared = after.filter(
-  (m) =>
-    m.project === "مصروفات مشتركة" &&
-    String(m.debitCode).startsWith("6")
+const general = before.filter(isAdminExpenseToGeneral);
+const aluminium = before.filter(isAluminiumOnSalaries);
+const paint = before.filter(isCarPaintOnGovFees);
+
+console.log("\nما تمسّه التصحيحات:\n");
+check("٢١٧ مصروفاً إدارياً إلى «عام»", general.length === 217, String(general.length));
+check("بمجموع ٣٤٬٥٢٤٫١٣٥", sum(general) === "34524.135", sum(general));
+check(
+  "ودفعة ألمنيوم واحدة: قيد ١٢٩٦ لسنة ٢٠٢٥ بألفٍ وخمسمئة",
+  aluminium.length === 1 &&
+    aluminium[0].entryNo === 1296 &&
+    aluminium[0].fiscalYear === 2025 &&
+    sum(aluminium) === "1500.000",
+  aluminium.map((m) => `${m.fiscalYear}/${m.entryNo}`).join("، ")
 );
 check(
-  "يبقى على «مصروفات مشتركة» ٦٥ حركة: العمال والسيارات ٥٧، والكهرباء ٥، وأخطاء الحساب ٣",
-  staysShared.length === 65,
-  String(staysShared.length)
+  "وصبغ سيارة واحد: قيد ١٠٢١ لسنة ٢٠٢٦",
+  paint.length === 1 && paint[0].entryNo === 1021 && paint[0].fiscalYear === 2026,
+  paint.map((m) => `${m.fiscalYear}/${m.entryNo}`).join("، ")
+);
+check("وبندا الحسابين الجديدين موجودان", Boolean(itemFor("5110") && itemFor("6250")));
+
+let after = apply(before, isAdminExpenseToGeneral, { toProject: "عام" });
+after = apply(after, isAluminiumOnSalaries, { toAccount: "5110" });
+after = apply(after, isCarPaintOnGovFees, { toAccount: "6250" });
+
+const byId = new Map(after.map((m) => [m.id, m]));
+
+console.log("\nما لا يجوز أن يتغيّر:\n");
+
+/* ---- الاعتماد ---- */
+const touched = [...general, ...aluminium, ...paint];
+check(
+  "الاعتماد كما هو في كل ما مُسّ — فلا يخرج شيء من القوائم",
+  touched.every((m) => byId.get(m.id).approval === m.approval),
+  `${touched.length} حركة`
 );
 check(
-  "ولا تُنقل صيانة السيارات والمولد",
-  moved.every((m) => m.debitCode !== "6250")
-);
-check("ولا الكهرباء والماء", moved.every((m) => m.debitCode !== "6220"));
-check(
-  "ولا سكن العمال وأكلهم",
-  moved.every((m) => !/سكن العمال|أكل عمال|اكل عمال|ملابس عمال/.test(m.description))
-);
-check(
-  "ولا دفعة الألمنيوم ولا رسوم الحدود — أخطاء حساب تُصحَّح وحدها",
-  moved.every((m) => !/لمونيوم|حدود قسيمة/.test(m.description))
+  "والمبالغ كما هي",
+  touched.every((m) => byId.get(m.id).amount === m.amount)
 );
 
-/* ---- لا يمسّ غير «مصروفات مشتركة» ---- */
+/* ---- صافي الربح لكل سنة ---- */
+const netProfit = (list, year) =>
+  Number(
+    buildIncomeStatement(
+      computeTotals(list.filter((m) => m.fiscalYear === year), {}, true)
+    ).netProfit
+  ).toFixed(3);
+for (const year of [2025, 2026]) {
+  check(
+    `صافي ربح ${year} لا يتغيّر`,
+    netProfit(before, year) === netProfit(after, year),
+    netProfit(after, year)
+  );
+}
+
+/* ---- الميزان: يتغيّر في الحسابات المقصودة وحدها، وبالمبلغ المقصود ---- */
+const balances = (list, year) => {
+  const tb = buildTrialBalance(
+    computeTotals(list.filter((m) => m.fiscalYear === year), {}, true),
+    false
+  );
+  return new Map(
+    tb.rows.map((r) => [r.account.code, Number(r.periodDebit) - Number(r.periodCredit)])
+  );
+};
+
+const expected = {
+  2025: { "6110": -1500, "5110": 1500 },
+  2026: { "6260": -89.5, "6250": 89.5 },
+};
+
+for (const year of [2025, 2026]) {
+  const b = balances(before, year);
+  const a = balances(after, year);
+  const codes = new Set([...b.keys(), ...a.keys()]);
+  const moved = {};
+  for (const code of codes) {
+    const delta = Number(((a.get(code) ?? 0) - (b.get(code) ?? 0)).toFixed(3));
+    if (delta !== 0) moved[code] = delta;
+  }
+  const want = expected[year];
+  const same =
+    Object.keys(moved).length === Object.keys(want).length &&
+    Object.entries(want).every(([code, d]) => moved[code] === d);
+  check(
+    `ميزان ${year} يتغيّر في ${Object.keys(want).join(" و")} وحدهما، وبالمبلغ المقصود`,
+    same,
+    JSON.stringify(moved)
+  );
+}
+
+/* فحص الميزان يسقط إن تغيّر ما لا يجوز — فيُثبت أنه يفحص */
+const tampered = after.map((m, i) => (i === 0 ? { ...m, amount: m.amount + 1 } : m));
+const year0 = after[0].fiscalYear;
+const tb0 = balances(after, year0);
+const tbT = balances(tampered, year0);
 check(
-  "لا يُنقل إلا ما كان على «مصروفات مشتركة»",
-  targets.every((m) => m.project === "مصروفات مشتركة")
+  "وفحص الميزان يسقط إن تغيّر مبلغٌ خارج التصحيح",
+  [...tb0.keys()].some((c) => Number((tb0.get(c) - (tbT.get(c) ?? 0)).toFixed(3)) !== 0)
 );
 
-/* ---- تطبيقه مرةً ثانية لا يفعل شيئاً ---- */
-const again = after.filter(isAdminExpenseToGeneral);
-check("وتطبيقه مرةً ثانية لا يجد شيئاً", again.length === 0, String(again.length));
+console.log("\nما قُرّر إبقاؤه:\n");
+
+/* ---- ما يبقى على «مصروفات مشتركة» ---- */
+const movedToGeneral = new Set(general.map((m) => m.id));
+check(
+  "لا تُنقل صيانة السيارات والمولد",
+  general.every((m) => m.debitCode !== "6250")
+);
+check("ولا الكهرباء والماء", general.every((m) => m.debitCode !== "6220"));
+check(
+  "ولا سكن العمال وأكلهم وملابسهم",
+  general.every((m) => !/سكن العمال|أكل عمال|اكل عمال|ملابس عمال/.test(m.description))
+);
+check(
+  "ودفعة الألمنيوم لا تُنقل إلى «عام» — تبقى مشتركة",
+  byId.get(aluminium[0].id).project === "مصروفات مشتركة" && !movedToGeneral.has(aluminium[0].id)
+);
+check(
+  "وصبغ السيارة يبقى مشتركاً مع صيانة السيارات",
+  byId.get(paint[0].id).project === "مصروفات مشتركة"
+);
+check(
+  "ورسوم حدود القسيمة تنتقل إلى «عام»",
+  after.some(
+    (m) => /حدود قسيمة/.test(m.description) && m.project === "عام" && m.fiscalYear === 2025
+  )
+);
+
+/* ---- قفل دفعات المقاولين لا يتغيّر ---- */
+const closedBefore = before.filter(isClosedContractorPayment).length;
+const closedAfter = after.filter(isClosedContractorPayment).length;
+check(
+  "وقفل دفعات مقاولي ٢٠٢٥ باقٍ على ٤٧ — الألمنيوم إلى 5110 لا 5120",
+  closedBefore === 47 && closedAfter === 47,
+  `${closedBefore} ← ${closedAfter}`
+);
+
+/* ---- التطبيق مرةً ثانية لا يجد شيئاً ---- */
+check(
+  "وتطبيقها مرةً ثانية لا يجد شيئاً",
+  after.filter(isAdminExpenseToGeneral).length === 0 &&
+    after.filter(isAluminiumOnSalaries).length === 0 &&
+    after.filter(isCarPaintOnGovFees).length === 0
+);
 
 console.log(
   bad === 0
-    ? "\n✓ النقل: ٢١٦ إلى «عام» — ولا يتغيّر الميزان ولا الربح ولا الاعتماد"
+    ? "\n✓ التصحيحات الثلاثة: صافي الربح والاعتماد كما هما، والميزان يتغيّر حيث قُصد وحده"
     : `\n✗ ${bad} فحصاً أخفق`
 );
 process.exit(bad === 0 ? 0 : 1);
