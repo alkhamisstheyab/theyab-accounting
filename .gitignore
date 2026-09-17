@@ -54,3 +54,4 @@ next-env.d.ts
 /.parallel-check/
 /.next-verify/
 /.next-check/
+/.next-render/

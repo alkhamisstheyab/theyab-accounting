@@ -186,6 +186,32 @@ check(
   /break-inside:\s*auto/.test(css) ? "" : "بدونه يُحشر العقد في صفحة"
 );
 
+/* ------------------------------------------------------------------ */
+/* الأوراق المصمّمة: الفاتورة والسندات وعرض السعر وقسيمة الراتب         */
+/* ------------------------------------------------------------------ */
+/*
+  كانت تخرج عند الطباعة بشكلٍ وألوانٍ غير التي صُمّمت: قاعدة جداول
+  التقارير تطوّق خلاياها بإطاراتٍ رمادية، والمتصفّح يحذف ألوان خلفيتها
+  (الشريط الذهبي، التذييل البيج، صفّ الإجمالي الكحلي).
+*/
+const marked = (page.match(/voucher-body designed-sheet/g) ?? []).length;
+check("الأوراق المصمّمة الثلاث معلَّمة", marked === 3, `${marked}`);
+check(
+  "والعقد غير معلَّم — قواعده له وحده",
+  !/contract-sheet[^"]*designed-sheet|designed-sheet[^"]*contract-sheet/.test(page)
+);
+check(
+  "تُطبع بألوانها",
+  /\.designed-sheet\s*,\s*\.designed-sheet\s*\*\s*\{[^}]*print-color-adjust:\s*exact/s.test(css)
+);
+check(
+  "وإطارات جداول التقارير لا تمسّها",
+  /\bth:where\(:not\(\.designed-sheet \*\)\)/.test(css) &&
+    /\btd:where\(:not\(\.designed-sheet \*\)\)/.test(css) &&
+    /thead th:where\(:not\(\.designed-sheet \*\)\)/.test(css) &&
+    !/^\s*(thead\s+)?th\s*,?\s*$/m.test(css)
+);
+
 console.log(
   bad === 0
     ? "\n✓ شكل العقد المطبوع كما ضُبط — ولم ينكسر منه شيء"

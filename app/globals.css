@@ -138,15 +138,38 @@ body {
     page-break-inside: avoid;
   }
 
-  th,
-  td {
+  /*
+    جداول التقارير: حدود رمادية وحشو ضيّق ونصّ أسود. ولا تمسّ الأوراق
+    المصمّمة — الفاتورة والسندات وعرض السعر وقسيمة الراتب — فتلك لها
+    تصميمها: جدول الفاتورة «بلا حدود داخلية» بقرار المجلس، وكان هذا
+    القيد يطوّقه بإطارات رمادية فتخرج الورقة بشكلٍ غير الذي صُمّم.
+
+    والاستثناء داخل :where() فلا يرفع وزن القاعدة: فتبقى قواعد العقد
+    — وهي أثقل منها — غالبةً عليها كما كانت.
+  */
+  th:where(:not(.designed-sheet *)),
+  td:where(:not(.designed-sheet *)) {
     border: 1px solid #999 !important;
     padding: 4px 6px !important;
     color: #000 !important;
   }
 
-  thead th {
+  thead th:where(:not(.designed-sheet *)) {
     background: #eee !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /*
+    الأوراق المصمّمة تُطبع بألوانها.
+
+    المتصفّح يحذف ألوان الخلفية عند الطباعة توفيراً للحبر، ما لم يُؤمر
+    بإبقائها — فيختفي الشريط الذهبي أعلى الفاتورة والتذييل البيج، ويصير
+    صفّ الإجمالي الكحلي في عرض السعر أبيض. وكان هذا الأمر مكتوباً للعقد
+    وحده.
+  */
+  .designed-sheet,
+  .designed-sheet * {
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }

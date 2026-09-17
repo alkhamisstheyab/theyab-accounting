@@ -2552,7 +2552,7 @@ function DocSheet({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="voucher-body mx-auto flex max-w-3xl flex-col bg-white shadow-xl"
+        className="voucher-body designed-sheet mx-auto flex max-w-3xl flex-col bg-white shadow-xl"
         style={{ minHeight: "27cm" }}
       >
         <div className="flex justify-end gap-3 p-6 pb-0 no-print">
@@ -10959,7 +10959,7 @@ function QuotationSheet({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="voucher-body mx-auto max-w-4xl bg-white p-8 shadow-xl"
+        className="voucher-body designed-sheet mx-auto max-w-4xl bg-white p-8 shadow-xl"
         style={{ minHeight: "26cm" }}
       >
         <div className="mb-6 flex justify-end gap-3 no-print">
@@ -16658,7 +16658,7 @@ function PayslipSheet({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="voucher-body mx-auto max-w-2xl bg-white p-10 shadow-xl"
+        className="voucher-body designed-sheet mx-auto max-w-2xl bg-white p-10 shadow-xl"
       >
         <div className="mb-6 flex justify-end gap-3 no-print">
           <button
