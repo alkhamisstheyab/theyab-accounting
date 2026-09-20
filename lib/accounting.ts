@@ -999,9 +999,31 @@ export function projectSummary(movements: Movement[], projectName: string) {
 /** حساب أجور المقاولين — البند الافتراضي لدفعات العقود */
 export const CONTRACTOR_EXPENSE = "5120";
 
+/** حساب إيرادات المقاولات — الطرف الدائن في قبض دفعات العملاء */
+export const CLIENT_REVENUE = "4110";
+
 /**
- * ما دُفع فعلاً على عقد، محسوباً من قيود الدفع المرتبطة به لا من
- * حالة الدفعة المكتوبة يدوياً.
+ * اتّجاه الحركة على العقد: ما يزيد المنفَّذ منه، وما يردّه.
+ *
+ * العقد نوعان والقيد فيهما معكوس: دفعة المقاول تجعل المصروف مديناً،
+ * ودفعة العميل تجعل الإيراد دائناً. فلو حُسبا بقاعدةٍ واحدة لظهر
+ * مقبوضُ العميل بالسالب — وهو ما كان يقع قبل أن يُربط قبضٌ بعقد.
+ *
+ * والردّ في الحالتين عكس دفعته فيُخصم: إرجاع مقاولٍ مبلغاً، أو
+ * إلغاء قبضٍ من عميل.
+ */
+function contractSign(m: Movement): number {
+  const debit = getAccount(m.debitCode)?.type;
+  const credit = getAccount(m.creditCode)?.type;
+  if (debit === TYPE_EXPENSE) return 1; // دفعةٌ لمقاول أو مورّد
+  if (credit === TYPE_REVENUE) return 1; // قبضٌ من عميل
+  if (debit === TYPE_REVENUE) return -1; // إلغاء قبض
+  return -1; // ردٌّ من المقاول، أو قيدٌ عكسي
+}
+
+/**
+ * ما دُفع فعلاً على عقد — أو ما قُبض منه إن كان عقد عميل — محسوباً من
+ * قيود الدفع المرتبطة به لا من حالة الدفعة المكتوبة يدوياً.
  */
 export function contractPayments(movements: Movement[], contractNumber: string) {
   const linked = movements.filter(
@@ -1012,9 +1034,7 @@ export function contractPayments(movements: Movement[], contractNumber: string) 
   let total = 0;
 
   for (const m of linked) {
-    // الدفع للمقاول يجعل حسابه مديناً؛ أي رد منه يُخصم
-    const sign = getAccount(m.debitCode)?.type === TYPE_EXPENSE ? 1 : -1;
-    const amount = round3(sign * m.amount);
+    const amount = round3(contractSign(m) * m.amount);
     total += amount;
 
     const no = m.installmentNumber ?? 0;
@@ -1034,6 +1054,22 @@ export function unlinkedContractorMovements(
       !m.contractNumber &&
       m.debitCode === CONTRACTOR_EXPENSE &&
       (!project || m.project === project) &&
+      validate(m).valid
+  );
+}
+
+/**
+ * حركات مرشّحة للربط بعقد عميل: قبضٌ على حساب الإيراد وغير مرتبط بعد.
+ *
+ * ولا تُقيَّد بالمشروع كقرينتها: دفعات العملاء القديمة كُتبت على
+ * «مصروفات مشتركة» و«عام» قبل أن تُفتح المشاريع، فلو صُفّيت بالمشروع
+ * لاختفى أكثرها عمّن يربط. والمشروع يُعرض في السطر ليُرى.
+ */
+export function unlinkedClientReceipts(movements: Movement[]) {
+  return movements.filter(
+    (m) =>
+      !m.contractNumber &&
+      m.creditCode === CLIENT_REVENUE &&
       validate(m).valid
   );
 }

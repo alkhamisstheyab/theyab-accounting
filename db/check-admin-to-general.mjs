@@ -64,6 +64,19 @@ const general = before.filter(isAdminExpenseToGeneral);
 const aluminium = before.filter(isAluminiumOnSalaries);
 const paint = before.filter(isCarPaintOnGovFees);
 
+/*
+  التصحيحات طُبّقت على دفاتر الشركة في ١٧ سبتمبر ٢٠٢٦، فالنسخ التي تلتها
+  لا يوجد فيها ما يُصحَّح. وهذا الفحص يُراد به النسخةُ التي قبلها، فيُقال
+  ذلك ولا يُسقَط بخطأٍ يُفهم منه أن شيئاً انكسر.
+*/
+if (general.length === 0 && aluminium.length === 0 && paint.length === 0) {
+  console.log(
+    "\n· هذه النسخة بعد التصحيح — لا حركة تنطبق عليها أيٌّ من التصحيحات الثلاثة." +
+      "\n  افحص بنسخةٍ سابقة لـ ١٧ سبتمبر ٢٠٢٦ إن أردت التحقّق منها.\n"
+  );
+  process.exit(0);
+}
+
 console.log("\nما تمسّه التصحيحات:\n");
 check("٢١٧ مصروفاً إدارياً إلى «عام»", general.length === 217, String(general.length));
 check("بمجموع ٣٤٬٥٢٤٫١٣٥", sum(general) === "34524.135", sum(general));

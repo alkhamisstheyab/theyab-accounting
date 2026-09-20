@@ -69,6 +69,8 @@ import {
   sortMovements,
   unknownPaymentMethods,
   unlinkedContractorMovements,
+  unlinkedClientReceipts,
+  CLIENT_REVENUE,
   validate,
 } from "@/lib/accounting";
 import { amountInWords } from "@/lib/arabic-numbers";
@@ -3017,6 +3019,19 @@ function MovementForm({
         paymentMethod: form.paymentMethod,
       });
 
+  /**
+   * أيّ عقدٍ تُربط به هذه الحركة — إن كانت تُربط أصلاً.
+   *
+   * «مقاول» متى كان القيد على أجور المقاولين، و«عميل» متى كان قبضاً
+   * على حساب الإيراد. وما عداهما لا يُربط.
+   */
+  const linkKind: "مقاول" | "عميل" | null =
+    derived.debitCode === CONTRACTOR_EXPENSE
+      ? "مقاول"
+      : derived.creditCode === CLIENT_REVENUE
+        ? "عميل"
+        : null;
+
   const draft: Partial<Movement> = {
     ...form,
     ...derived,
@@ -3051,8 +3066,15 @@ function MovementForm({
       person: form.person,
       paymentMethod: form.paymentMethod,
       party: form.party,
-      contractNumber: form.contractNumber || undefined,
-      installmentNumber: Number(form.installmentNumber) || undefined,
+      /*
+        الربط يُمحى إن لم يعد القيد قابلاً له: يُختار عقدٌ ثم يُبدَّل البند
+        فيصير القيد على حسابٍ آخر — فيبقى رقم العقد في حركةٍ لا تخصّه،
+        ويُحسب في مدفوعه وهو منه براء.
+      */
+      contractNumber: linkKind ? form.contractNumber || undefined : undefined,
+      installmentNumber: linkKind
+        ? Number(form.installmentNumber) || undefined
+        : undefined,
     };
 
     if (editing) {
@@ -3232,12 +3254,27 @@ function MovementForm({
         </Field>
       </div>
 
-      {/* ربط دفعة عقد — يظهر حين يكون القيد على حساب أجور المقاولين */}
-      {derived.debitCode === CONTRACTOR_EXPENSE && (
+      {/*
+        ربط الدفعة بعقدها — يظهر لدفعات المقاولين ولقبض العملاء.
+
+        والقيدان معكوسان: دفعة المقاول تُقيَّد على المصروف، ودفعة العميل
+        على الإيراد. فيُعرض لكلٍّ عقودُه وحدها، وإلا رُبط قبضٌ بعقد مقاول
+        فظهر المقبوض في غير موضعه.
+      */}
+      {linkKind && (
         <div className="mt-5 rounded-xl border border-blue-200 bg-blue-50 p-4">
-          <p className="mb-3 text-sm font-bold">ربط الدفعة بعقد مقاول</p>
+          <p className="mb-3 text-sm font-bold">
+            {linkKind === "عميل" ? "ربط القبض بعقد العميل" : "ربط الدفعة بعقد مقاول"}
+          </p>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <Field label="العقد" hint="اختياري — الربط يُحدّث المدفوع والمتبقي">
+            <Field
+              label="العقد"
+              hint={
+                linkKind === "عميل"
+                  ? "اختياري — الربط يُحدّث المقبوض والمتبقي على العميل"
+                  : "اختياري — الربط يُحدّث المدفوع والمتبقي"
+              }
+            >
               <select
                 value={form.contractNumber}
                 onChange={(e) => {
@@ -3251,7 +3288,8 @@ function MovementForm({
               >
                 <option value="">بدون ربط</option>
                 {contractors
-                  .filter((c) => !form.project || c.project === form.project)
+                  .filter((c) => (c.counterpartyType === "عميل") === (linkKind === "عميل"))
+                  .filter((c) => linkKind === "عميل" || !form.project || c.project === form.project)
                   .map((c) => (
                     <option key={c.id} value={c.contractNumber}>
                       {c.contractNumber} — {c.name} ({c.project})
@@ -5155,9 +5193,14 @@ function ContractorsPage({
   };
 
   const payments = (c: Contractor) => contractPayments(movements, c.contractNumber);
-  const candidates = selected
-    ? unlinkedContractorMovements(movements, selected.project)
-    : [];
+
+  /* عقد العميل يُربط بقبضه، وعقد المقاول بدفعاته — ولا يختلطان */
+  const isClientContract = selected?.counterpartyType === "عميل";
+  const candidates = !selected
+    ? []
+    : isClientContract
+      ? unlinkedClientReceipts(movements)
+      : unlinkedContractorMovements(movements, selected.project);
 
   /** العقد وملاحقه معاً — الالتزام الحقيقي على المقاول */
   const totalWithAddenda = (c: Contractor) =>
@@ -5761,7 +5804,23 @@ function ContractorsPage({
                           </button>
                           <button
                             onClick={() => {
-                              if (window.confirm(`حذف «${c.contractNumber}»؟`)) {
+                              /*
+                                الحذف لا يمسّ القيود: تبقى الحركات المرتبطة
+                                وفيها رقم عقدٍ لم يعد موجوداً، فيسقط مدفوعها
+                                من كل كشف. فيُقال العدد قبل الحذف لا بعده.
+                              */
+                              const linkedCount = movements.filter(
+                                (m) => m.contractNumber === c.contractNumber
+                              ).length;
+                              const warning =
+                                linkedCount > 0
+                                  ? `\n\nتنبيه: ${linkedCount} حركة مرتبطة بهذا العقد. حذفه يفكّ ربطها — والقيود نفسها لا تُحذف.`
+                                  : "";
+                              if (
+                                window.confirm(
+                                  `حذف «${c.contractNumber}» — ${c.name}؟${warning}`
+                                )
+                              ) {
                                 setContractors((prev) =>
                                   prev.filter((x) => x.id !== c.id)
                                 );
@@ -5843,8 +5902,9 @@ function ContractorsPage({
                       <Th>شرط الاستحقاق</Th>
                       <Th>القيمة</Th>
                       <Th>اعتماد الإنجاز</Th>
-                      <Th>المدفوع فعلاً</Th>
+                      <Th>{isClientContract ? "المقبوض فعلاً" : "المدفوع فعلاً"}</Th>
                       <Th>المتبقي</Th>
+                      <Th>حالة السداد</Th>
                     </tr>
                   </thead>
                   <tbody>
@@ -5873,6 +5933,26 @@ function ContractorsPage({
                           <Td>
                             <Money value={round3(value - paid)} />
                           </Td>
+                          <Td>
+                            {/*
+                              الحالة تُقرأ من القيود المرتبطة لا من حقلٍ يُكتب
+                              باليد: الدفعة تصير مدفوعةً حين يُربط بها صرفُها،
+                              فلا يُقال «مدفوعة» ولا قيد بها.
+                            */}
+                            {paid <= 0 ? (
+                              <span className="text-slate-400">
+                                {isClientContract ? "لم تُقبض" : "لم تُدفع"}
+                              </span>
+                            ) : round3(value - paid) <= 0 ? (
+                              <span className="font-bold text-green-700">
+                                ✓ {isClientContract ? "مقبوضة بالكامل" : "مدفوعة بالكامل"}
+                              </span>
+                            ) : (
+                              <span className="font-bold text-amber-700">
+                                {isClientContract ? "مقبوضة جزئياً" : "مدفوعة جزئياً"}
+                              </span>
+                            )}
+                          </Td>
                         </tr>
                       );
                     })}
@@ -5880,7 +5960,8 @@ function ContractorsPage({
                 </table>
 
                 <h5 className="mb-3 mt-6 font-bold">
-                  قيود الدفع المرتبطة ({p.movements.length})
+                  {isClientContract ? "قيود القبض المرتبطة" : "قيود الدفع المرتبطة"} (
+                  {p.movements.length})
                 </h5>
                 {p.movements.length === 0 ? (
                   <p className="text-sm text-slate-500">
@@ -5923,9 +6004,17 @@ function ContractorsPage({
                 )}
 
                 <h5 className="mb-3 mt-6 font-bold">
-                  حركات أجور مقاولين غير مرتبطة في {selected.project} (
-                  {candidates.length})
+                  {isClientContract
+                    ? `دفعات قبض من العملاء غير مرتبطة (${candidates.length})`
+                    : `حركات أجور مقاولين غير مرتبطة في ${selected.project} (${candidates.length})`}
                 </h5>
+                {isClientContract && candidates.length > 0 && (
+                  <p className="mb-3 text-sm text-slate-600">
+                    القبض القديم كُتب على «عام» و«مصروفات مشتركة» قبل فتح المشاريع،
+                    فتُعرض دفعات القبض كلّها ويُبيَّن مشروع كلٍّ منها — اربط ما يخصّ
+                    هذا العقد وحده.
+                  </p>
+                )}
                 {candidates.length === 0 ? (
                   <p className="text-sm text-slate-500">لا توجد حركات مرشّحة.</p>
                 ) : (
@@ -5955,6 +6044,8 @@ function ContractorsPage({
                           <Th>القيد</Th>
                           <Th>التاريخ</Th>
                           <Th>البيان</Th>
+                          {isClientContract && <Th>المشروع</Th>}
+                          {isClientContract && <Th>طريقة الدفع</Th>}
                           <Th>المبلغ</Th>
                           <Th>ربط</Th>
                         </tr>
@@ -5965,6 +6056,8 @@ function ContractorsPage({
                             <Td>{m.entryNo}</Td>
                             <Td>{m.date}</Td>
                             <Td>{m.description || "—"}</Td>
+                            {isClientContract && <Td>{m.project || "—"}</Td>}
+                            {isClientContract && <Td>{m.paymentMethod || "—"}</Td>}
                             <Td>
                               <Money value={m.amount} />
                             </Td>
