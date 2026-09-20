@@ -90,6 +90,20 @@ export type Installment = {
   condition: string;
   /** حالة الدفع المسجّلة يدوياً */
   status: string;
+
+  /**
+   * ما سُدِّد من هذه الدفعة من خارج حسابات الشركة.
+   *
+   * كدعم الدولة للتكييف والألمنيوم: تدفعه الجهة الحكومية للمورّد
+   * مباشرةً عن العميل، فلا يدخل حساب الشركة ولا يخرج منه — ولا قيد
+   * له في الدفاتر بحال. وإنما يُكتب هنا لئلا يظهر العقد وكأن قيمته
+   * لم تُسدَّد، وهو قد سُدّد.
+   *
+   * ولا يُخلط بالمدفوع: المدفوع محسوبٌ من القيود، وهذا خارجها.
+   */
+  externalPaid?: string;
+  /** من أين جاء ذلك السداد — «دعم الدولة للتكييف، دُفع لليوسفي» */
+  externalNote?: string;
   /** هل اعتُمد إنجاز المرحلة؟ */
   approved: boolean;
   /** اسم من اعتمدها */
@@ -1042,6 +1056,8 @@ function migrateContractor(raw: unknown): Contractor {
         confirmedBy: str(item.confirmedBy),
         confirmedAt: str(item.confirmedAt),
         confirmNote: str(item.confirmNote),
+        externalPaid: str(item.externalPaid) || undefined,
+        externalNote: str(item.externalNote) || undefined,
         // تمثيل جدول العقد — اختياري، والقديم بلا شيء منه
         no: Number(item.no) > 0 ? Number(item.no) : undefined,
         stage: str(item.stage) || undefined,

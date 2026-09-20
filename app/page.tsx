@@ -70,6 +70,7 @@ import {
   unknownPaymentMethods,
   unlinkedContractorMovements,
   unlinkedClientReceipts,
+  unlinkedSupplierMovements,
   CLIENT_REVENUE,
   validate,
 } from "@/lib/accounting";
@@ -1613,6 +1614,7 @@ export default function HomeV2() {
               setContractors={setContractors}
               canManage={allow("contractors.manage")}
               onPrint={setContractFor}
+              onLog={log}
               onLink={(movementId, contractNumber, installmentNumber) =>
                 setMovements((prev) =>
                   prev.map((m) =>
@@ -3026,7 +3028,7 @@ function MovementForm({
    * على حساب الإيراد. وما عداهما لا يُربط.
    */
   const linkKind: "مقاول" | "عميل" | null =
-    derived.debitCode === CONTRACTOR_EXPENSE
+    derived.debitCode.startsWith("5")
       ? "مقاول"
       : derived.creditCode === CLIENT_REVENUE
         ? "عميل"
@@ -3264,7 +3266,9 @@ function MovementForm({
       {linkKind && (
         <div className="mt-5 rounded-xl border border-blue-200 bg-blue-50 p-4">
           <p className="mb-3 text-sm font-bold">
-            {linkKind === "عميل" ? "ربط القبض بعقد العميل" : "ربط الدفعة بعقد مقاول"}
+            {linkKind === "عميل"
+              ? "ربط القبض بعقد العميل"
+              : "ربط الدفعة بعقد المقاول أو المورّد"}
           </p>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <Field
@@ -4946,6 +4950,7 @@ function ContractorsPage({
   canManage,
   onLink,
   onPrint,
+  onLog,
 }: {
   contractors: Contractor[];
   projects: Project[];
@@ -4960,6 +4965,12 @@ function ContractorsPage({
     installmentNumber: number | undefined
   ) => void;
   onPrint: (contract: Contractor) => void;
+  onLog: (
+    action: AuditAction,
+    entity: AuditEntity,
+    summary: string,
+    change?: { before?: string; after?: string }
+  ) => void;
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -5194,13 +5205,67 @@ function ContractorsPage({
 
   const payments = (c: Contractor) => contractPayments(movements, c.contractNumber);
 
+  /*
+    السداد من خارج حسابات الشركة: دعم الدولة يُدفع للمورّد مباشرةً عن
+    العميل، فلا قيد له في الدفاتر ولا أثر في القوائم — وإنما يُكتب في
+    سجلّ العقد وحده لئلا يظهر العقد مستحقاً وقد سُدّد.
+  */
+  const [externalFor, setExternalFor] = useState<number | null>(null);
+  const [externalAmount, setExternalAmount] = useState("");
+  const [externalNote, setExternalNote] = useState("");
+
+  const externalOf = (i: Installment) => round3(Number(i.externalPaid) || 0);
+
+  const externalTotal = (c: Contractor) =>
+    round3(
+      c.installments
+        .filter(isPayableInstallment)
+        .reduce((sum, i) => sum + externalOf(i), 0)
+    );
+
+  const saveExternal = (contract: Contractor, number: number) => {
+    const amount = round3(Number(externalAmount) || 0);
+    setContractors((prev) =>
+      prev.map((c) =>
+        c.id !== contract.id
+          ? c
+          : {
+              ...c,
+              installments: c.installments.map((i) =>
+                i.number !== number
+                  ? i
+                  : {
+                      ...i,
+                      externalPaid: amount > 0 ? String(amount) : undefined,
+                      externalNote: amount > 0 ? externalNote.trim() : undefined,
+                    }
+              ),
+            }
+      )
+    );
+    onLog(
+      amount > 0 ? "تعديل" : "حذف",
+      "دفعة",
+      amount > 0
+        ? `سداد من خارج الشركة — عقد ${contract.contractNumber} · الدفعة ${number} · ${fmt(amount)} د.ك`
+        : `إلغاء سداد من خارج الشركة — عقد ${contract.contractNumber} · الدفعة ${number}`,
+      { after: amount > 0 ? externalNote.trim() : undefined }
+    );
+    setExternalFor(null);
+    setExternalAmount("");
+    setExternalNote("");
+  };
+
   /* عقد العميل يُربط بقبضه، وعقد المقاول بدفعاته — ولا يختلطان */
   const isClientContract = selected?.counterpartyType === "عميل";
+  const isSupplierContract = selected?.counterpartyType === "مورّد";
   const candidates = !selected
     ? []
     : isClientContract
       ? unlinkedClientReceipts(movements)
-      : unlinkedContractorMovements(movements, selected.project);
+      : isSupplierContract
+        ? unlinkedSupplierMovements(movements, selected.project)
+        : unlinkedContractorMovements(movements, selected.project);
 
   /** العقد وملاحقه معاً — الالتزام الحقيقي على المقاول */
   const totalWithAddenda = (c: Contractor) =>
@@ -5872,8 +5937,16 @@ function ContractorsPage({
                 <div className="mb-5 grid grid-cols-1 gap-3 md:grid-cols-3">
                   {[
                     ["قيمة المستند", selected.contractValue],
-                    ["المدفوع", p.total],
-                    ["المتبقي", round3(selected.contractValue - p.total)],
+                    [isClientContract ? "المقبوض" : "المدفوع", p.total],
+                    ...(externalTotal(selected) > 0
+                      ? [["مسدَّد من خارج الشركة", externalTotal(selected)] as const]
+                      : []),
+                    [
+                      "المتبقي",
+                      round3(
+                        selected.contractValue - p.total - externalTotal(selected)
+                      ),
+                    ],
                   ].map(([label, value]) => (
                     <div
                       key={String(label)}
@@ -5903,6 +5976,7 @@ function ContractorsPage({
                       <Th>القيمة</Th>
                       <Th>اعتماد الإنجاز</Th>
                       <Th>{isClientContract ? "المقبوض فعلاً" : "المدفوع فعلاً"}</Th>
+                      <Th>من خارج الشركة</Th>
                       <Th>المتبقي</Th>
                       <Th>حالة السداد</Th>
                     </tr>
@@ -5911,8 +5985,12 @@ function ContractorsPage({
                     {selected.installments.filter(isPayableInstallment).map((i) => {
                       const value = round3(Number(i.value) || 0);
                       const paid = p.byInstallment.get(i.number) ?? 0;
+                      const external = externalOf(i);
+                      const settled = round3(paid + external);
+                      const editing = externalFor === i.number;
                       return (
-                        <tr key={i.number} className="border-b border-slate-100">
+                        <Fragment key={i.number}>
+                        <tr className="border-b border-slate-100">
                           <Td>{i.number}</Td>
                           <Td>{i.condition || "—"}</Td>
                           <Td>
@@ -5931,21 +6009,46 @@ function ContractorsPage({
                             <Money value={paid} />
                           </Td>
                           <Td>
-                            <Money value={round3(value - paid)} />
+                            {external > 0 ? (
+                              <span title={i.externalNote || ""}>
+                                <Money value={external} />
+                              </span>
+                            ) : (
+                              <span className="text-slate-300">—</span>
+                            )}
+                            {canManage && (
+                              <button
+                                onClick={() => {
+                                  setExternalFor(editing ? null : i.number);
+                                  setExternalAmount(
+                                    external > 0 ? String(external) : ""
+                                  );
+                                  setExternalNote(i.externalNote ?? "");
+                                }}
+                                className="mr-2 text-xs text-blue-600 underline"
+                              >
+                                {editing ? "إلغاء" : external > 0 ? "تعديل" : "تسجيل"}
+                              </button>
+                            )}
+                          </Td>
+                          <Td>
+                            <Money value={round3(value - settled)} />
                           </Td>
                           <Td>
                             {/*
                               الحالة تُقرأ من القيود المرتبطة لا من حقلٍ يُكتب
                               باليد: الدفعة تصير مدفوعةً حين يُربط بها صرفُها،
-                              فلا يُقال «مدفوعة» ولا قيد بها.
+                              فلا يُقال «مدفوعة» ولا قيد بها. ويُضاف إليها ما
+                              سُدّد من خارج الشركة، وهو مكتوبٌ في عموده.
                             */}
-                            {paid <= 0 ? (
+                            {settled <= 0 ? (
                               <span className="text-slate-400">
                                 {isClientContract ? "لم تُقبض" : "لم تُدفع"}
                               </span>
-                            ) : round3(value - paid) <= 0 ? (
+                            ) : round3(value - settled) <= 0 ? (
                               <span className="font-bold text-green-700">
                                 ✓ {isClientContract ? "مقبوضة بالكامل" : "مدفوعة بالكامل"}
+                                {external > 0 && paid <= 0 ? " — من خارج الشركة" : ""}
                               </span>
                             ) : (
                               <span className="font-bold text-amber-700">
@@ -5954,6 +6057,51 @@ function ContractorsPage({
                             )}
                           </Td>
                         </tr>
+                        {editing && (
+                          <tr className="border-b border-blue-200 bg-blue-50">
+                            <td colSpan={8} className="p-4">
+                              <p className="mb-3 text-sm">
+                                سدادٌ لم يمرّ بحساب الشركة — كدعم الدولة يُدفع
+                                للمورّد مباشرةً عن العميل.{" "}
+                                <b>لا يُسجَّل له قيد في الدفاتر</b>، ولا يظهر في
+                                الميزان ولا في القوائم المالية: لا مال دخل ولا خرج.
+                              </p>
+                              <div className="flex flex-wrap items-end gap-3">
+                                <div className="w-40">
+                                  <Field label="المبلغ (د.ك)">
+                                    <input
+                                      type="number"
+                                      step="0.001"
+                                      value={externalAmount}
+                                      onChange={(e) =>
+                                        setExternalAmount(e.target.value)
+                                      }
+                                      className={inputClass}
+                                    />
+                                  </Field>
+                                </div>
+                                <div className="min-w-64 flex-1">
+                                  <Field label="مصدر السداد">
+                                    <input
+                                      type="text"
+                                      value={externalNote}
+                                      onChange={(e) => setExternalNote(e.target.value)}
+                                      placeholder="دعم الدولة للتكييف — دُفع للمورّد مباشرةً"
+                                      className={inputClass}
+                                    />
+                                  </Field>
+                                </div>
+                                <button
+                                  onClick={() => saveExternal(selected, i.number)}
+                                  className="rounded-lg bg-blue-600 px-5 py-2 font-bold text-white"
+                                >
+                                  حفظ
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                        </Fragment>
                       );
                     })}
                   </tbody>
@@ -6006,7 +6154,9 @@ function ContractorsPage({
                 <h5 className="mb-3 mt-6 font-bold">
                   {isClientContract
                     ? `دفعات قبض من العملاء غير مرتبطة (${candidates.length})`
-                    : `حركات أجور مقاولين غير مرتبطة في ${selected.project} (${candidates.length})`}
+                    : isSupplierContract
+                      ? `مصروفات مباشرة غير مرتبطة في ${selected.project} (${candidates.length})`
+                      : `حركات أجور مقاولين غير مرتبطة في ${selected.project} (${candidates.length})`}
                 </h5>
                 {isClientContract && candidates.length > 0 && (
                   <p className="mb-3 text-sm text-slate-600">
@@ -6046,6 +6196,7 @@ function ContractorsPage({
                           <Th>البيان</Th>
                           {isClientContract && <Th>المشروع</Th>}
                           {isClientContract && <Th>طريقة الدفع</Th>}
+                          {isSupplierContract && <Th>الحساب</Th>}
                           <Th>المبلغ</Th>
                           <Th>ربط</Th>
                         </tr>
@@ -6058,6 +6209,7 @@ function ContractorsPage({
                             <Td>{m.description || "—"}</Td>
                             {isClientContract && <Td>{m.project || "—"}</Td>}
                             {isClientContract && <Td>{m.paymentMethod || "—"}</Td>}
+                            {isSupplierContract && <Td>{accountLabel(m.debitCode)}</Td>}
                             <Td>
                               <Money value={m.amount} />
                             </Td>

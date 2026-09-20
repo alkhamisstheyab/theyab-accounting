@@ -1059,6 +1059,27 @@ export function unlinkedContractorMovements(
 }
 
 /**
+ * حركات مرشّحة للربط بعقد مورّد: أي تكلفة تنفيذٍ مباشرة على المشروع.
+ *
+ * عقد المقاول دفعاته على حسابٍ واحد معروف (أجور المقاولين)، أما المورّد
+ * فيُشترى منه بحسب ما ورّد: موادّ، وإيجار معدات، وماء وكهرباء للموقع.
+ * فيُعرض مصروف المشروع المباشر كلّه ويختار صاحب القرار.
+ */
+export function unlinkedSupplierMovements(
+  movements: Movement[],
+  project: string
+) {
+  return movements.filter(
+    (m) =>
+      !m.contractNumber &&
+      getAccount(m.debitCode)?.type === TYPE_EXPENSE &&
+      m.debitCode.startsWith("5") &&
+      (!project || m.project === project) &&
+      validate(m).valid
+  );
+}
+
+/**
  * حركات مرشّحة للربط بعقد عميل: قبضٌ على حساب الإيراد وغير مرتبط بعد.
  *
  * ولا تُقيَّد بالمشروع كقرينتها: دفعات العملاء القديمة كُتبت على

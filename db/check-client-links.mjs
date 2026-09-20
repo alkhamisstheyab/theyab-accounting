@@ -29,6 +29,7 @@ const {
   contractPayments,
   unlinkedClientReceipts,
   unlinkedContractorMovements,
+  unlinkedSupplierMovements,
   computeTotals,
   buildTrialBalance,
   buildIncomeStatement,
@@ -76,6 +77,40 @@ check(
   receipts.every((m) => m.debitCode !== CONTRACTOR_EXPENSE)
 );
 check("وعقود العملاء موجودة", clientContracts.length > 0, `${clientContracts.length} عقد`);
+
+/* عقود الموردين: تُربط بمصروف المشروع المباشر كلّه لا بأجور المقاولين وحدها */
+const supplier = contractors.find(
+  (c) => c.counterpartyType === "مورّد" && c.project
+);
+const supplierCandidates = unlinkedSupplierMovements(movements, supplier.project);
+check(
+  "ومصروف المشروع المباشر يُعرض لعقد المورّد",
+  supplierCandidates.length > 0,
+  `${supplier.contractNumber} · ${supplierCandidates.length} حركة`
+);
+check(
+  "وكلّه على مشروع العقد وحده",
+  supplierCandidates.every((m) => m.project === supplier.project)
+);
+check(
+  "وكلّه تكاليف تنفيذٍ مباشرة (5)",
+  supplierCandidates.every((m) => m.debitCode.startsWith("5"))
+);
+check(
+  "ولا قبضَ فيه ولا مصروفاً إدارياً",
+  supplierCandidates.every(
+    (m) => m.creditCode !== CLIENT_REVENUE && !m.debitCode.startsWith("6")
+  )
+);
+check(
+  "وأجور المقاولين منه — فهي مصروفٌ مباشر",
+  supplierCandidates.some((m) => m.debitCode === CONTRACTOR_EXPENSE) ||
+    unlinkedContractorMovements(movements, supplier.project).length === 0
+);
+check(
+  "والمرتبط سلفاً لا يُعرض مرةً أخرى",
+  supplierCandidates.every((m) => !m.contractNumber)
+);
 
 console.log("\nالمقبوض والمتبقي بعد الربط:\n");
 
