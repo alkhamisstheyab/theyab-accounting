@@ -1609,7 +1609,13 @@ export default function HomeV2() {
             <ContractorsPage
               contractors={contractors}
               projects={projects}
-              movements={yearMovements}
+              /*
+                العقد يمتدّ سنتين فأكثر، ودفعاته لا تُصفّى بالسنة
+                المعروضة: عقدٌ دفعته الأولى في ٢٠٢٥ وباقيه في ٢٠٢٦ كان
+                يظهر في كل سنةٍ ناقصاً دفعات الأخرى. فيُحسب على عمره
+                كله — كما تُحسب ربحية المشروع.
+              */
+              movements={approvedMovements}
               company={company}
               setContractors={setContractors}
               canManage={allow("contractors.manage")}
@@ -1706,7 +1712,8 @@ export default function HomeV2() {
             <ApprovalsPage
               contractors={contractors}
               projects={projects}
-              movements={movements}
+              /* المدفوع على العقد: المعتمد من كل السنوات */
+              movements={approvedMovements}
               approverName={currentUser.name}
               canApprove={allow("contracts.approve")}
               canConfirm={allow("contracts.confirm")}

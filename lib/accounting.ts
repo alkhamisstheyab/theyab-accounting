@@ -13,6 +13,7 @@ import {
   ITEM_MAP as GENERATED_ITEMS,
   PAYMENT_MAP as GENERATED_PAYMENTS,
 } from "./chart-of-accounts";
+import { isClosedContractorPayment } from "./closed-payments";
 
 export type { Account, AccountType, ItemDefinition };
 export { GENERATED_CHART, GENERATED_ITEMS, GENERATED_PAYMENTS };
@@ -1054,6 +1055,8 @@ export function unlinkedContractorMovements(
       !m.contractNumber &&
       m.debitCode === CONTRACTOR_EXPENSE &&
       (!project || m.project === project) &&
+      /* دفعات ٢٠٢٥ المُقفلة لا تُربط بعقدٍ ولا مشروع */
+      !isClosedContractorPayment(m) &&
       validate(m).valid
   );
 }
@@ -1075,6 +1078,7 @@ export function unlinkedSupplierMovements(
       getAccount(m.debitCode)?.type === TYPE_EXPENSE &&
       m.debitCode.startsWith("5") &&
       (!project || m.project === project) &&
+      !isClosedContractorPayment(m) &&
       validate(m).valid
   );
 }
