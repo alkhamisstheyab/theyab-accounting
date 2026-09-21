@@ -196,6 +196,11 @@ import {
 } from "@/lib/sync";
 import { compareStates, type FieldComparison } from "@/lib/changes";
 import { isAdminExpenseToGeneral } from "@/lib/admin-to-general";
+import {
+  findDuplicateMovements,
+  duplicateSignature,
+  DUPLICATE_WINDOW_DAYS,
+} from "@/lib/duplicates";
 import { isAluminiumOnSalaries, isCarPaintOnGovFees } from "@/lib/account-corrections";
 import {
   CLOSED_PAYMENT_REASON,
@@ -1246,6 +1251,7 @@ export default function HomeV2() {
             <MovementForm
               year={year}
               projects={projects}
+              movements={movements}
               contractors={contractors}
               people={people}
               editing={editing}
@@ -3054,6 +3060,7 @@ function formOf(movement: Movement): typeof BLANK_FORM {
 function MovementForm({
   year,
   projects,
+  movements,
   contractors,
   people,
   editing,
@@ -3065,6 +3072,8 @@ function MovementForm({
 }: {
   year: number;
   projects: Project[];
+  /** كل الحركات — يُبحث فيها عن المكرَّر قبل الحفظ */
+  movements: Movement[];
   contractors: Contractor[];
   people: string[];
   editing: Movement | null;
@@ -3143,6 +3152,19 @@ function MovementForm({
   // التاريخ هو ما يحدّد السنة، فالقفل يُفحص على سنة التاريخ لا السنة المعروضة
   const entryYearLocked = !!form.date && isYearClosed(lockedYears, entryYear);
 
+  /*
+    المكرَّر: يُبحث عنه كلما تغيّرت المسوّدة، ويُقرَّ عليه ببصمته — فلو
+    بقي الإقرار بعد تغيير المبلغ أو التاريخ لمرّت حركةٌ مكرَّرة بإقرارٍ
+    لغيرها.
+  */
+  const duplicates = useMemo(
+    () => findDuplicateMovements({ ...draft, id: editing?.id }, movements),
+    [draft.date, draft.amount, draft.debitCode, draft.creditCode, draft.project, draft.description, draft.party, editing, movements]
+  );
+  const [dupCleared, setDupCleared] = useState("");
+  const dupSignature = duplicateSignature(draft);
+  const dupBlocking = duplicates.length > 0 && dupCleared !== dupSignature;
+
   const check = entryYearLocked
     ? {
         valid: false,
@@ -3151,7 +3173,7 @@ function MovementForm({
     : validate(draft);
 
   const handleSave = () => {
-    if (!check.valid) return;
+    if (!check.valid || dupBlocking) return;
     const item = ITEM_MAP.find((i) => i.code === form.itemCode);
     const common = {
       fiscalYear: fiscalYearOf(form.date),
@@ -3605,10 +3627,68 @@ function MovementForm({
         )}
       </div>
 
+      {duplicates.length > 0 && (
+        <div
+          className={`mt-6 rounded-xl border p-4 ${
+            duplicates.some((d) => d.exact)
+              ? "border-red-300 bg-red-50"
+              : "border-amber-300 bg-amber-50"
+          }`}
+        >
+          <p className="mb-2 font-bold">
+            {duplicates.some((d) => d.exact)
+              ? "تنبيه: يبدو أن هذه الحركة مكرَّرة"
+              : "انتبه: توجد حركة تشبه هذه"}
+          </p>
+          <p className="mb-3 text-sm">
+            وُجد في الدفاتر {duplicates.length === 1 ? "قيدٌ" : `${duplicates.length} قيود`}
+            {" "}بنفس المبلغ خلال {DUPLICATE_WINDOW_DAYS} أيام:
+          </p>
+          <table className="mb-3 w-full text-right text-sm">
+            <thead>
+              <tr>
+                <Th>القيد</Th>
+                <Th>التاريخ</Th>
+                <Th>البيان</Th>
+                <Th>المبلغ</Th>
+                <Th>وجه الشبه</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {duplicates.map((d) => (
+                <tr key={d.movement.id} className="border-b border-white/60">
+                  <Td>{d.movement.entryNo}</Td>
+                  <Td>{d.movement.date}</Td>
+                  <Td>{d.movement.description || "—"}</Td>
+                  <Td>
+                    <Money value={d.movement.amount} />
+                  </Td>
+                  <Td>{d.reason}</Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <label className="flex items-center gap-2 text-sm font-medium">
+            <input
+              type="checkbox"
+              checked={dupCleared === dupSignature}
+              onChange={(e) => setDupCleared(e.target.checked ? dupSignature : "")}
+            />
+            راجعتُها، وهذه حركة أخرى — احفظها
+          </label>
+          {dupBlocking && (
+            <p className="mt-2 text-sm">
+              الحفظ متوقّف حتى تُقرّ ذلك. وإن كانت هي نفسها فلا تحفظها؛ عدّل القائمة
+              من <b>جدول الحركات</b> إن لزم.
+            </p>
+          )}
+        </div>
+      )}
+
       <div className="mt-6 flex flex-wrap gap-3">
         <button
           onClick={handleSave}
-          disabled={!check.valid}
+          disabled={!check.valid || dupBlocking}
           className="rounded-lg bg-slate-900 px-6 py-3 font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-300"
         >
           {editing ? "حفظ التعديل" : "حفظ الحركة"}
