@@ -35,6 +35,7 @@ const {
   buildIncomeStatement,
   CLIENT_REVENUE,
   CONTRACTOR_EXPENSE,
+  NON_PROJECT_BUCKETS,
 } = await jiti.import("../lib/accounting.ts");
 
 let bad = 0;
@@ -77,6 +78,38 @@ check(
   receipts.every((m) => m.debitCode !== CONTRACTOR_EXPENSE)
 );
 check("وعقود العملاء موجودة", clientContracts.length > 0, `${clientContracts.length} عقد`);
+
+/*
+  مالُ مشروعٍ لا يُعرض على عقد مشروعٍ آخر — طلبُ صاحب الشركة في ٢١
+  سبتمبر ٢٠٢٦. والقبض القديم على «عام» و«مصروفات مشتركة» غير منسوبٍ
+  إلى مشروع، فيُعرض بطلبٍ صريح وحده.
+*/
+const withProject = clientContracts.find((c) =>
+  receipts.some((m) => m.project === c.project)
+);
+const scoped = unlinkedClientReceipts(movements, withProject.project);
+const widened = unlinkedClientReceipts(movements, withProject.project, true);
+
+check(
+  "قبض المشروع وحده يُعرض على عقده",
+  scoped.length > 0 && scoped.every((m) => m.project === withProject.project),
+  `${withProject.project} · ${scoped.length} من ${receipts.length}`
+);
+check(
+  "ولا يُعرض قبض مشروعٍ آخر ولو طُلب التوسيع",
+  widened.every(
+    (m) => m.project === withProject.project || NON_PROJECT_BUCKETS.includes(m.project)
+  ),
+  `${widened.length} عند التوسيع`
+);
+check(
+  "والتوسيع يزيد غير المنسوب وحده",
+  widened.length > scoped.length &&
+    widened
+      .filter((m) => !scoped.some((s) => s.id === m.id))
+      .every((m) => NON_PROJECT_BUCKETS.includes(m.project)),
+  `+${widened.length - scoped.length}`
+);
 
 /* عقود الموردين: تُربط بمصروف المشروع المباشر كلّه لا بأجور المقاولين وحدها */
 const supplier = contractors.find(

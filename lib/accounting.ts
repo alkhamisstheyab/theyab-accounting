@@ -1084,17 +1084,26 @@ export function unlinkedSupplierMovements(
 }
 
 /**
- * حركات مرشّحة للربط بعقد عميل: قبضٌ على حساب الإيراد وغير مرتبط بعد.
+ * حركات مرشّحة للربط بعقد عميل: قبضٌ على حساب الإيراد وغير مرتبط بعد،
+ * على مشروع العقد نفسه.
  *
- * ولا تُقيَّد بالمشروع كقرينتها: دفعات العملاء القديمة كُتبت على
- * «مصروفات مشتركة» و«عام» قبل أن تُفتح المشاريع، فلو صُفّيت بالمشروع
- * لاختفى أكثرها عمّن يربط. والمشروع يُعرض في السطر ليُرى.
+ * ومالُ مشروعٍ لا يُعرض على عقد مشروعٍ آخر بحال — وإنما يبقى بابٌ
+ * واحد: القبض القديم الذي كُتب على «عام» و«مصروفات مشتركة» قبل أن
+ * تُفتح المشاريع، فذاك غير منسوبٍ إلى مشروعٍ أصلاً، ويُطلب صراحةً
+ * حين يُراد نسبُه إلى عقده.
  */
-export function unlinkedClientReceipts(movements: Movement[]) {
+export function unlinkedClientReceipts(
+  movements: Movement[],
+  project = "",
+  includeUnassigned = false
+) {
   return movements.filter(
     (m) =>
       !m.contractNumber &&
       m.creditCode === CLIENT_REVENUE &&
+      (!project ||
+        m.project === project ||
+        (includeUnassigned && isNonProject(m.project))) &&
       validate(m).valid
   );
 }

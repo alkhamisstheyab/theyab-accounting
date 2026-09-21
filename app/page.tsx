@@ -5217,6 +5217,12 @@ function ContractorsPage({
     العميل، فلا قيد له في الدفاتر ولا أثر في القوائم — وإنما يُكتب في
     سجلّ العقد وحده لئلا يظهر العقد مستحقاً وقد سُدّد.
   */
+  /*
+    القبض القديم كُتب على «عام» و«مصروفات مشتركة» قبل أن تُفتح المشاريع.
+    فلا يُعرض مع قبض المشروع إلا بطلب — ومالُ مشروعٍ آخر لا يُعرض بحال.
+  */
+  const [showUnassigned, setShowUnassigned] = useState(false);
+
   const [externalFor, setExternalFor] = useState<number | null>(null);
   const [externalAmount, setExternalAmount] = useState("");
   const [externalNote, setExternalNote] = useState("");
@@ -5269,7 +5275,7 @@ function ContractorsPage({
   const candidates = !selected
     ? []
     : isClientContract
-      ? unlinkedClientReceipts(movements)
+      ? unlinkedClientReceipts(movements, selected.project, showUnassigned)
       : isSupplierContract
         ? unlinkedSupplierMovements(movements, selected.project)
         : unlinkedContractorMovements(movements, selected.project);
@@ -6175,12 +6181,16 @@ function ContractorsPage({
                       ? `مصروفات مباشرة غير مرتبطة في ${selected.project} (${candidates.length})`
                       : `حركات أجور مقاولين غير مرتبطة في ${selected.project} (${candidates.length})`}
                 </h5>
-                {isClientContract && candidates.length > 0 && (
-                  <p className="mb-3 text-sm text-slate-600">
-                    القبض القديم كُتب على «عام» و«مصروفات مشتركة» قبل فتح المشاريع،
-                    فتُعرض دفعات القبض كلّها ويُبيَّن مشروع كلٍّ منها — اربط ما يخصّ
-                    هذا العقد وحده.
-                  </p>
+                {isClientContract && (
+                  <label className="mb-3 flex items-center gap-2 text-sm text-slate-600">
+                    <input
+                      type="checkbox"
+                      checked={showUnassigned}
+                      onChange={(e) => setShowUnassigned(e.target.checked)}
+                    />
+                    أظهر أيضاً القبض المسجَّل على «عام» و«مصروفات مشتركة» — وهو قبضٌ
+                    قديم كُتب قبل أن تُفتح المشاريع. ولا يُعرض قبضُ مشروعٍ آخر بحال.
+                  </label>
                 )}
                 {candidates.length === 0 ? (
                   <p className="text-sm text-slate-500">لا توجد حركات مرشّحة.</p>
