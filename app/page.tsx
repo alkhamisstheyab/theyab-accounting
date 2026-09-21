@@ -275,6 +275,8 @@ import {
   NoticeTone,
   activitySince,
   buildNotices,
+  INSURANCE_ALERT_DAYS,
+  projectInsurance,
 } from "@/lib/notifications";
 import {
   Invoice,
@@ -755,6 +757,7 @@ export default function HomeV2() {
       buildNotices({
         movements,
         contractors,
+        projects,
         quotations,
         workItems,
         audit,
@@ -767,6 +770,7 @@ export default function HomeV2() {
     [
       movements,
       contractors,
+      projects,
       quotations,
       workItems,
       audit,
@@ -1360,6 +1364,8 @@ export default function HomeV2() {
               projects={projects}
               movements={movements}
               year={year}
+              today={todayISO()}
+              canManage={allow("projects.manage")}
               setProjects={setProjects}
               openProject={(p) => setPage("حركات المشروع:" + p.name)}
             />
@@ -4415,6 +4421,8 @@ function ProjectsPage({
   projects,
   movements,
   year,
+  today,
+  canManage,
   setProjects,
   openProject,
 }: {
@@ -4422,12 +4430,61 @@ function ProjectsPage({
   /** كل الحركات في كل السنوات — ميزانية المشروع تُقاس على عمره لا على سنة */
   movements: Movement[];
   year: number;
+  /** تاريخ اليوم — عليه يقوم حساب انتهاء التأمين */
+  today: string;
+  /** تعديل بيانات المشروع ووثيقة تأمينه */
+  canManage: boolean;
   setProjects: Dispatch<SetStateAction<Project[]>>;
   openProject: (project: Project) => void;
 }) {
   const [name, setName] = useState("");
   const [budget, setBudget] = useState("");
   const [error, setError] = useState("");
+  /* وثيقة التأمين المفتوحة للتحرير */
+  const [policyFor, setPolicyFor] = useState<string | null>(null);
+  const [policy, setPolicy] = useState({
+    insurer: "",
+    policyNumber: "",
+    insuranceStart: "",
+    insuranceEnd: "",
+    insuranceValue: "",
+    insuranceNote: "",
+  });
+
+  const insurance = new Map(
+    projectInsurance(projects, today).map((r) => [r.project.id, r])
+  );
+
+  const openPolicy = (project: Project) => {
+    setPolicyFor(project.id);
+    setPolicy({
+      insurer: project.insurer ?? "",
+      policyNumber: project.policyNumber ?? "",
+      insuranceStart: project.insuranceStart ?? "",
+      insuranceEnd: project.insuranceEnd ?? "",
+      insuranceValue: project.insuranceValue ? String(project.insuranceValue) : "",
+      insuranceNote: project.insuranceNote ?? "",
+    });
+  };
+
+  const savePolicy = (id: string) => {
+    setProjects((prev) =>
+      prev.map((p) =>
+        p.id !== id
+          ? p
+          : {
+              ...p,
+              insurer: policy.insurer.trim() || undefined,
+              policyNumber: policy.policyNumber.trim() || undefined,
+              insuranceStart: policy.insuranceStart || undefined,
+              insuranceEnd: policy.insuranceEnd || undefined,
+              insuranceValue: round3(Number(policy.insuranceValue) || 0) || undefined,
+              insuranceNote: policy.insuranceNote.trim() || undefined,
+            }
+      )
+    );
+    setPolicyFor(null);
+  };
 
   const add = () => {
     const trimmed = name.trim();
@@ -4539,6 +4596,157 @@ function ProjectsPage({
                     </div>
                   ))}
                 </div>
+
+                {/* تأمين الموقع على العاملين — وثيقةٌ لها مدّة تنتهي */}
+                {(() => {
+                  const row = insurance.get(project.id);
+                  if (!row) return null;
+                  const tone =
+                    row.state === "منتهٍ"
+                      ? "border-red-300 bg-red-50 text-red-800"
+                      : row.state === "يقترب"
+                        ? "border-amber-300 bg-amber-50 text-amber-900"
+                        : row.state === "غير مسجّل"
+                          ? "border-slate-200 bg-slate-50 text-slate-600"
+                          : "border-green-200 bg-green-50 text-green-800";
+                  return (
+                    <div className={`mt-3 rounded-xl border p-3 text-sm ${tone}`}>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span>
+                          <b>تأمين الموقع:</b>{" "}
+                          {row.state === "غير مسجّل" ? (
+                            <>لا وثيقة مسجّلة — سجّلها ليُنبَّه إليها قبل انتهائها.</>
+                          ) : (
+                            <>
+                              {project.insurer || "شركة غير مذكورة"}
+                              {project.policyNumber
+                                ? ` · وثيقة ${project.policyNumber}`
+                                : ""}
+                              {" · ينتهي "}
+                              {project.insuranceEnd}
+                              {" — "}
+                              {row.state === "منتهٍ"
+                                ? `منتهٍ منذ ${Math.abs(row.daysLeft)} يوماً`
+                                : `باقٍ ${row.daysLeft} يوماً`}
+                            </>
+                          )}
+                        </span>
+                        {canManage && (
+                          <button
+                            onClick={() =>
+                              policyFor === project.id
+                                ? setPolicyFor(null)
+                                : openPolicy(project)
+                            }
+                            className="rounded-lg bg-white px-3 py-1 text-blue-700 underline"
+                          >
+                            {policyFor === project.id
+                              ? "إلغاء"
+                              : row.state === "غير مسجّل"
+                                ? "تسجيل الوثيقة"
+                                : "تعديل"}
+                          </button>
+                        )}
+                      </div>
+                      {project.insuranceNote && policyFor !== project.id && (
+                        <p className="mt-1 text-xs">{project.insuranceNote}</p>
+                      )}
+
+                      {policyFor === project.id && (
+                        <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
+                          <Field label="شركة التأمين">
+                            <input
+                              type="text"
+                              value={policy.insurer}
+                              onChange={(e) =>
+                                setPolicy((x) => ({ ...x, insurer: e.target.value }))
+                              }
+                              className={inputClass}
+                            />
+                          </Field>
+                          <Field label="رقم الوثيقة">
+                            <input
+                              type="text"
+                              value={policy.policyNumber}
+                              onChange={(e) =>
+                                setPolicy((x) => ({
+                                  ...x,
+                                  policyNumber: e.target.value,
+                                }))
+                              }
+                              className={inputClass}
+                            />
+                          </Field>
+                          <Field label="قسط التأمين (د.ك)">
+                            <input
+                              type="number"
+                              step="0.001"
+                              value={policy.insuranceValue}
+                              onChange={(e) =>
+                                setPolicy((x) => ({
+                                  ...x,
+                                  insuranceValue: e.target.value,
+                                }))
+                              }
+                              className={inputClass}
+                            />
+                          </Field>
+                          <Field label="بداية التأمين">
+                            <input
+                              type="date"
+                              value={policy.insuranceStart}
+                              onChange={(e) =>
+                                setPolicy((x) => ({
+                                  ...x,
+                                  insuranceStart: e.target.value,
+                                }))
+                              }
+                              className={inputClass}
+                            />
+                          </Field>
+                          <Field
+                            label="انتهاء التأمين"
+                            hint={`التنبيه يبدأ قبل الانتهاء بـ ${INSURANCE_ALERT_DAYS} يوماً`}
+                          >
+                            <input
+                              type="date"
+                              value={policy.insuranceEnd}
+                              onChange={(e) =>
+                                setPolicy((x) => ({
+                                  ...x,
+                                  insuranceEnd: e.target.value,
+                                }))
+                              }
+                              className={inputClass}
+                            />
+                          </Field>
+                          <Field label="ملاحظة">
+                            <input
+                              type="text"
+                              value={policy.insuranceNote}
+                              onChange={(e) =>
+                                setPolicy((x) => ({
+                                  ...x,
+                                  insuranceNote: e.target.value,
+                                }))
+                              }
+                              placeholder="تأمين على العاملين في الموقع"
+                              className={inputClass}
+                            />
+                          </Field>
+                          <div className="md:col-span-3">
+                            <button
+                              onClick={() => savePolicy(project.id)}
+                              className="rounded-lg bg-blue-600 px-5 py-2 font-bold text-white"
+                            >
+                              حفظ الوثيقة
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {years.length > 1 && (
                   <p className="mt-2 text-xs text-slate-500">

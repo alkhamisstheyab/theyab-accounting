@@ -11,7 +11,7 @@
  * وكل إشعار مشروط بصلاحية: لا يُنبَّه أحد إلى ما لا يستطيع فعله.
  */
 
-import { Movement, isApproved, round3 } from "./accounting";
+import { Movement, isApproved, isNonProject, round3 } from "./accounting";
 import { AuditEntry } from "./audit";
 import { Permission } from "./permissions";
 import { Quotation, WorkItem, isCostStale, quotationAgeDays } from "./quotations";
@@ -19,8 +19,8 @@ import {
   BackupMeta,
   daysSince,
 } from "./file-backup";
-import { Contractor, Installment, isInstallmentDue } from "./storage";
-import { allDurations } from "./contract-dates";
+import { Contractor, Installment, Project, isInstallmentDue } from "./storage";
+import { allDurations, daysBetween } from "./contract-dates";
 
 export type NoticeTone = "action" | "warn" | "info";
 
@@ -40,6 +40,8 @@ export type Notice = {
 export type NoticeInput = {
   movements: Movement[];
   contractors: Contractor[];
+  /** المشاريع — لتأمين المواقع ومدده */
+  projects: Project[];
   quotations: Quotation[];
   workItems: WorkItem[];
   audit: AuditEntry[];
@@ -101,6 +103,54 @@ export function dueUnpaid(
     }
   }
   return rows;
+}
+
+/**
+ * حالة تأمين الموقع لكل مشروع قائم.
+ *
+ * والتنبيه قبل الانتهاء بشهر: مدّةٌ تكفي لمراجعة شركة التأمين وتجديد
+ * الوثيقة قبل أن يعمل أحدٌ في موقعٍ بلا غطاء.
+ *
+ * والمشاريع المنتهية لا يُنبَّه إليها: لا عاملَ فيها يُؤمَّن عليه.
+ */
+export const INSURANCE_ALERT_DAYS = 30;
+
+export type InsuranceState = "سارٍ" | "يقترب" | "منتهٍ" | "غير مسجّل";
+
+export type InsuranceRow = {
+  project: Project;
+  state: InsuranceState;
+  /** موجبٌ قبل الانتهاء، سالبٌ بعده، وصفرٌ لغير المسجّل */
+  daysLeft: number;
+};
+
+export function projectInsurance(
+  projects: Project[],
+  today: string
+): InsuranceRow[] {
+  const rows: InsuranceRow[] = [];
+  for (const project of projects) {
+    if (project.status && project.status !== "نشط") continue;
+    /* «عام» و«مصروفات مشتركة» وعاءان محاسبيان لا موقعَ لهما */
+    if (isNonProject(project.name)) continue;
+    const end = project.insuranceEnd ?? "";
+    if (!end) {
+      rows.push({ project, state: "غير مسجّل", daysLeft: 0 });
+      continue;
+    }
+    const daysLeft = daysBetween(today, end);
+    rows.push({
+      project,
+      state:
+        daysLeft < 0
+          ? "منتهٍ"
+          : daysLeft <= INSURANCE_ALERT_DAYS
+            ? "يقترب"
+            : "سارٍ",
+      daysLeft,
+    });
+  }
+  return rows.sort((a, b) => a.daysLeft - b.daysLeft);
 }
 
 export function buildNotices(input: NoticeInput): Notice[] {
@@ -226,6 +276,57 @@ export function buildNotices(input: NoticeInput): Notice[] {
       count: soon.length,
       needs: "contractors.view",
     });
+  }
+
+  /* ---- تأمين المواقع ---- */
+
+  const insurance = projectInsurance(input.projects, input.today);
+
+  const lapsed = insurance.filter((r) => r.state === "منتهٍ");
+  if (lapsed.length > 0) {
+    notices.push({
+      id: "insurance-expired",
+      tone: "action",
+      title: `${lapsed.length} موقعاً تأمينه منتهٍ`,
+      detail:
+        lapsed
+          .map((r) => `${r.project.name} منذ ${Math.abs(r.daysLeft)} يوماً`)
+          .join(" · ") +
+        " — والعمل قائم، فالمسؤولية على الشركة حتى يُجدَّد.",
+      page: "المشاريع",
+      count: lapsed.length,
+      needs: "projects.view",
+    });
+  }
+
+  const expiring = insurance.filter((r) => r.state === "يقترب");
+  if (expiring.length > 0) {
+    notices.push({
+      id: "insurance-expiring",
+      tone: "warn",
+      title: `${expiring.length} موقعاً يقترب انتهاء تأمينه`,
+      detail: expiring
+        .map((r) => `${r.project.name} بعد ${r.daysLeft} يوماً (${r.project.insuranceEnd})`)
+        .join(" · "),
+      page: "المشاريع",
+      count: expiring.length,
+      needs: "projects.view",
+    });
+  }
+
+  const uninsured = insurance.filter((r) => r.state === "غير مسجّل");
+  if (uninsured.length > 0) {
+    notices.push({
+      id: "insurance-missing",
+      tone: "info",
+      title: `${uninsured.length} مشروعاً بلا وثيقة تأمين مسجّلة`,
+      detail:
+        uninsured.map((r) => r.project.name).join(" · ") +
+        " — سجّل الوثيقة وتاريخ انتهائها ليُنبَّه إليها قبل انقضائها.",
+      page: "المشاريع",
+      count: uninsured.length,
+      needs: "projects.manage",
+  });
   }
 
   /* ---- سلامة البيانات ---- */

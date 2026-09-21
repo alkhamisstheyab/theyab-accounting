@@ -74,6 +74,26 @@ export type Project = {
   /** تاريخ بدء التنفيذ */
   startDate: string;
   status: string;
+
+  /* --------------------------------------------------------------
+   * تأمين الموقع على العاملين.
+   *
+   * لكل مشروعٍ وثيقةُ تأمينٍ على من يعمل فيه، لها مدّةٌ تنتهي. وانتهاؤها
+   * وهم يعملون مسؤوليةٌ على الشركة، ولا يُعرف إلا بالسؤال — فيُسجَّل هنا
+   * ويُنبَّه إليه قبل انقضائه بمدّةٍ تكفي للتجديد.
+   * -------------------------------------------------------------- */
+
+  /** شركة التأمين */
+  insurer?: string;
+  /** رقم الوثيقة كما في المستند */
+  policyNumber?: string;
+  /** yyyy-mm-dd */
+  insuranceStart?: string;
+  /** yyyy-mm-dd — عليه يقوم التنبيه */
+  insuranceEnd?: string;
+  /** قسط التأمين */
+  insuranceValue?: number;
+  insuranceNote?: string;
 };
 
 /**
@@ -993,6 +1013,14 @@ function migrateProject(raw: unknown): Project {
     budget: round3(Number(p.budget) || 0),
     startDate: str(p.startDate),
     status: str(p.status, "نشط") || "نشط",
+    insurer: str(p.insurer) || undefined,
+    policyNumber: str(p.policyNumber) || undefined,
+    insuranceStart: str(p.insuranceStart) || undefined,
+    insuranceEnd: str(p.insuranceEnd) || undefined,
+    insuranceValue: Number(p.insuranceValue) > 0
+      ? round3(Number(p.insuranceValue))
+      : undefined,
+    insuranceNote: str(p.insuranceNote) || undefined,
   };
 }
 
