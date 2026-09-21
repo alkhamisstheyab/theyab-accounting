@@ -160,6 +160,8 @@ import {
   DEFAULT_PEOPLE,
   Installment,
   isPayableInstallment,
+  installmentNet,
+  installmentDeduction,
   Material,
   MaterialReceipt,
   Project,
@@ -5236,6 +5238,14 @@ function ContractorsPage({
         .reduce((sum, i) => sum + externalOf(i), 0)
     );
 
+  /* خصومات المهندس: تُنقص المستحق ولا تُنقص قيمة العقد */
+  const deductionTotal = (c: Contractor) =>
+    round3(
+      c.installments
+        .filter(isPayableInstallment)
+        .reduce((sum, i) => sum + installmentDeduction(i), 0)
+    );
+
   const saveExternal = (contract: Contractor, number: number) => {
     const amount = round3(Number(externalAmount) || 0);
     setContractors((prev) =>
@@ -5954,10 +5964,16 @@ function ContractorsPage({
                     ...(externalTotal(selected) > 0
                       ? [["مسدَّد من خارج الشركة", externalTotal(selected)] as const]
                       : []),
+                    ...(deductionTotal(selected) > 0
+                      ? [["خصومات المهندس", deductionTotal(selected)] as const]
+                      : []),
                     [
                       "المتبقي",
                       round3(
-                        selected.contractValue - p.total - externalTotal(selected)
+                        selected.contractValue -
+                          p.total -
+                          externalTotal(selected) -
+                          deductionTotal(selected)
                       ),
                     ],
                   ].map(([label, value]) => (
@@ -5988,6 +6004,7 @@ function ContractorsPage({
                       <Th>شرط الاستحقاق</Th>
                       <Th>القيمة</Th>
                       <Th>اعتماد الإنجاز</Th>
+                      <Th>خصم المهندس</Th>
                       <Th>{isClientContract ? "المقبوض فعلاً" : "المدفوع فعلاً"}</Th>
                       <Th>من خارج الشركة</Th>
                       <Th>المتبقي</Th>
@@ -5996,7 +6013,8 @@ function ContractorsPage({
                   </thead>
                   <tbody>
                     {selected.installments.filter(isPayableInstallment).map((i) => {
-                      const value = round3(Number(i.value) || 0);
+                      const value = installmentNet(i);
+                      const cut = installmentDeduction(i);
                       const paid = p.byInstallment.get(i.number) ?? 0;
                       const external = externalOf(i);
                       const settled = round3(paid + external);
@@ -6008,6 +6026,20 @@ function ContractorsPage({
                           <Td>{i.condition || "—"}</Td>
                           <Td>
                             <Money value={value} />
+                            {cut > 0 && (
+                              <div className="text-xs text-slate-500">
+                                بعد الخصم — قيمتها {fmt(round3(value + cut))}
+                              </div>
+                            )}
+                          </Td>
+                          <Td>
+                            {cut > 0 ? (
+                              <span className="font-bold text-red-700" title={i.deductionReason || ""}>
+                                − <Money value={cut} />
+                              </span>
+                            ) : (
+                              <span className="text-slate-300">—</span>
+                            )}
                           </Td>
                           <Td>
                             {i.approved ? (
@@ -6082,7 +6114,7 @@ function ContractorsPage({
                         </tr>
                         {editing && (
                           <tr className="border-b border-blue-200 bg-blue-50">
-                            <td colSpan={8} className="p-4">
+                            <td colSpan={9} className="p-4">
                               <p className="mb-3 text-sm">
                                 سدادٌ لم يمرّ بحساب الشركة — كدعم الدولة يُدفع
                                 للمورّد مباشرةً عن العميل.{" "}
@@ -13064,6 +13096,13 @@ function ApprovalsPage({
 }) {
   const [projectFilter, setProjectFilter] = useState("الكل");
   const [note, setNote] = useState("");
+  /*
+    الخصم يُكتب مع الاعتماد لا بعده: المرحلة تُنجَز وفيها تقصيرٌ أو
+    تأخير، فيشهد المهندس بالإنجاز ويحسم ما يستحقّه الحسم في آنٍ واحد،
+    ثم تُقرّه الإدارة وهي تراه.
+  */
+  const [deduction, setDeduction] = useState("");
+  const [deductionReason, setDeductionReason] = useState("");
   const [message, setMessage] = useState("");
 
   const visible = contractors.filter(
@@ -13090,6 +13129,15 @@ function ApprovalsPage({
                       approvedBy: approved ? approverName : "",
                       approvedAt: approved ? new Date().toISOString() : "",
                       approvalNote: approved ? note.trim() : "",
+                      /* الخصم من الاعتماد، فسحبه يسحبه */
+                      deduction:
+                        approved && round3(Number(deduction) || 0) > 0
+                          ? String(round3(Number(deduction) || 0))
+                          : undefined,
+                      deductionReason:
+                        approved && round3(Number(deduction) || 0) > 0
+                          ? deductionReason.trim()
+                          : undefined,
                       // سحب اعتماد المهندس يُسقط إقرار الإدارة المبني عليه
                       ...(approved
                         ? null
@@ -13114,10 +13162,21 @@ function ApprovalsPage({
       `عقد ${contract?.contractNumber ?? "?"} · الدفعة ${installmentNumber} · ${fmt(
         Number(installment?.value) || 0
       )} د.ك · ${contract?.project ?? ""}`,
-      { after: approved && note.trim() ? note.trim() : undefined }
+      {
+        after:
+          approved && round3(Number(deduction) || 0) > 0
+            ? `خصم ${fmt(round3(Number(deduction) || 0))} د.ك — ${
+                deductionReason.trim() || "بلا سبب مكتوب"
+              }${note.trim() ? ` · ${note.trim()}` : ""}`
+            : approved && note.trim()
+              ? note.trim()
+              : undefined,
+      }
     );
 
     setNote("");
+    setDeduction("");
+    setDeductionReason("");
     setMessage(
       approved
         ? `اعتُمد إنجاز الدفعة ${installmentNumber} — تنتظر إقرار الإدارة`
@@ -13268,7 +13327,7 @@ function ApprovalsPage({
               </div>
 
               {canApprove && (
-                <div className="mb-4 max-w-xl">
+                <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-3">
                   <Field
                     label="ملاحظة الاعتماد"
                     hint="تُحفظ مع الدفعة التي تعتمدها بعد كتابتها"
@@ -13278,6 +13337,31 @@ function ApprovalsPage({
                       value={note}
                       onChange={(e) => setNote(e.target.value)}
                       placeholder="مثال: عُوين الموقع وتم صب السقف بالكامل"
+                      className={inputClass}
+                    />
+                  </Field>
+                  <Field
+                    label="خصم على الدفعة (د.ك)"
+                    hint="تقصيرٌ أو تأخير — يُنقص المستحق ولا يمسّ قيمة العقد"
+                  >
+                    <input
+                      type="number"
+                      step="0.001"
+                      value={deduction}
+                      onChange={(e) => setDeduction(e.target.value)}
+                      placeholder="0.000"
+                      className={inputClass}
+                    />
+                  </Field>
+                  <Field
+                    label="سبب الخصم"
+                    hint="يُعرض للإدارة قبل الإقرار"
+                  >
+                    <input
+                      type="text"
+                      value={deductionReason}
+                      onChange={(e) => setDeductionReason(e.target.value)}
+                      placeholder="مثال: تأخير عشرة أيام عن الموعد"
                       className={inputClass}
                     />
                   </Field>
@@ -13291,6 +13375,8 @@ function ApprovalsPage({
                       <Th>#</Th>
                       <Th>المرحلة والاستحقاق</Th>
                       <Th>القيمة</Th>
+                      <Th>الخصم</Th>
+                      <Th>المستحق</Th>
                       <Th>اعتماد المهندس</Th>
                       <Th>إقرار الإدارة</Th>
                       <Th>حالة الصرف</Th>
@@ -13302,6 +13388,8 @@ function ApprovalsPage({
                       .filter(isPayableInstallment)
                       .map((installment) => {
                       const value = round3(Number(installment.value) || 0);
+                      const cut = installmentDeduction(installment);
+                      const net = installmentNet(installment);
                       const paid =
                         payments.byInstallment.get(installment.number) ?? 0;
 
@@ -13314,7 +13402,7 @@ function ApprovalsPage({
                           }
                         : isZero(paid)
                         ? { text: "مستحقة وغير مدفوعة", cls: "font-bold text-amber-700" }
-                        : paid + 0.0005 < value
+                        : paid + 0.0005 < net
                         ? { text: `مدفوع منها ${fmt(paid)}`, cls: "text-blue-700" }
                         : { text: "مدفوعة بالكامل", cls: "font-bold text-green-700" };
 
@@ -13334,6 +13422,25 @@ function ApprovalsPage({
                           </Td>
                           <Td>
                             <Money value={value} />
+                          </Td>
+                          <Td>
+                            {cut > 0 ? (
+                              <div>
+                                <span className="font-bold text-red-700">
+                                  − <Money value={cut} />
+                                </span>
+                                <div className="text-xs text-slate-500">
+                                  {installment.deductionReason || "بلا سبب مكتوب"}
+                                </div>
+                              </div>
+                            ) : (
+                              <span className="text-slate-300">—</span>
+                            )}
+                          </Td>
+                          <Td>
+                            <span className={cut > 0 ? "font-bold" : ""}>
+                              <Money value={net} />
+                            </span>
                           </Td>
                           <Td>
                             {installment.approved ? (

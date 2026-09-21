@@ -104,6 +104,20 @@ export type Installment = {
   externalPaid?: string;
   /** من أين جاء ذلك السداد — «دعم الدولة للتكييف، دُفع لليوسفي» */
   externalNote?: string;
+
+  /**
+   * خصمٌ على الدفعة يقرّره المهندس مع اعتماده الإنجاز.
+   *
+   * فالمرحلة قد تُنجَز ويُشهد بإنجازها، وفيها تقصيرٌ أو تأخير يستوجب
+   * خصماً. فيُعتمد الإنجاز ويُكتب الخصم وسببه معاً، ثم تُقرّه الإدارة
+   * وهي تراه — لا أن يُقرَّ الإنجاز أولاً ثم يُتذكّر الخصم بعد الصرف.
+   *
+   * والمستحق للصرف = قيمة الدفعة ناقص الخصم. وقيمة العقد لا تتغيّر:
+   * الخصم جزاءٌ على التنفيذ، لا تعديلٌ للعقد.
+   */
+  deduction?: string;
+  /** سببه — يُطالَب به، فخصمٌ بلا سببٍ لا يُدافَع عنه */
+  deductionReason?: string;
   /** هل اعتُمد إنجاز المرحلة؟ */
   approved: boolean;
   /** اسم من اعتمدها */
@@ -161,6 +175,23 @@ export type Installment = {
 /** الدفعة القابلة للصرف — التوثيقية ليست منها */
 export const isPayableInstallment = (i: Installment): boolean =>
   i.informational !== true;
+
+/** قيمة الدفعة كما في العقد */
+export const installmentValue = (i: Installment): number =>
+  round3(Number(i.value) || 0);
+
+/** خصم المهندس على الدفعة — صفرٌ إن لم يكن */
+export const installmentDeduction = (i: Installment): number =>
+  round3(Number(i.deduction) || 0);
+
+/**
+ * المستحق للصرف: قيمة الدفعة ناقص خصم المهندس.
+ *
+ * وهو ما يُقاس به المدفوع والمتبقي — لا القيمة وحدها، وإلا ظهرت
+ * الدفعة ناقصةً أبداً وقد استوفى المقاول حقّه بعد الخصم.
+ */
+export const installmentNet = (i: Installment): number =>
+  round3(installmentValue(i) - installmentDeduction(i));
 
 /** الدفعة مستحقة متى اعتمد المهندس إنجازها وأقرّتها الإدارة */
 export const isInstallmentDue = (installment: Installment): boolean =>
@@ -1058,6 +1089,8 @@ function migrateContractor(raw: unknown): Contractor {
         confirmNote: str(item.confirmNote),
         externalPaid: str(item.externalPaid) || undefined,
         externalNote: str(item.externalNote) || undefined,
+        deduction: str(item.deduction) || undefined,
+        deductionReason: str(item.deductionReason) || undefined,
         // تمثيل جدول العقد — اختياري، والقديم بلا شيء منه
         no: Number(item.no) > 0 ? Number(item.no) : undefined,
         stage: str(item.stage) || undefined,

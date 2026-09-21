@@ -18,6 +18,7 @@
     "check:client-links": "node db/check-client-links.mjs",
     "check:external": "node db/check-external-settlement.mjs",
     "check:lifetime": "node db/check-contract-lifetime.mjs",
+    "check:deduction": "node db/check-deduction.mjs",
     "render:print": "node db/render-print.mjs",
     "check:login": "node db/check-login.mjs",
     "verify:live": "node db/verify-live.mjs",
