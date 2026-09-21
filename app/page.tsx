@@ -1634,7 +1634,27 @@ export default function HomeV2() {
                 setMovements((prev) =>
                   prev.map((m) =>
                     m.id === movementId
-                      ? { ...m, contractNumber, installmentNumber }
+                      ? {
+                          ...m,
+                          contractNumber,
+                          installmentNumber,
+                          /* الربط بدفعةٍ واحدة يُلغي توزيعاً سابقاً، وكذلك فكّه */
+                          installmentSplits: undefined,
+                        }
+                      : m
+                  )
+                )
+              }
+              onSplit={(movementId, contractNumber, splits) =>
+                setMovements((prev) =>
+                  prev.map((m) =>
+                    m.id === movementId
+                      ? {
+                          ...m,
+                          contractNumber,
+                          installmentNumber: undefined,
+                          installmentSplits: splits,
+                        }
                       : m
                   )
                 )
@@ -5343,6 +5363,7 @@ function ContractorsPage({
   setContractors,
   canManage,
   onLink,
+  onSplit,
   onPrint,
   onLog,
 }: {
@@ -5357,6 +5378,12 @@ function ContractorsPage({
     movementId: string,
     contractNumber: string,
     installmentNumber: number | undefined
+  ) => void;
+  /** توزيع مبلغ حركةٍ واحدة على أكثر من دفعة */
+  onSplit: (
+    movementId: string,
+    contractNumber: string,
+    splits: InstallmentSplit[]
   ) => void;
   onPrint: (contract: Contractor) => void;
   onLog: (
@@ -5375,6 +5402,32 @@ function ContractorsPage({
   const [installments, setInstallments] = useState<Installment[]>([]);
   const [error, setError] = useState("");
   const [linkInstallment, setLinkInstallment] = useState("");
+
+  /*
+    توزيع حركةٍ على أكثر من دفعة من هذه الشاشة نفسها: يُفتح السطر تحت
+    الحركة، فيُرى مبلغُها وحصصُها معاً — ولا يُحفظ إلا إذا طابق المجموع.
+  */
+  const [splitFor, setSplitFor] = useState<string | null>(null);
+  const [splitRows, setSplitRows] = useState<{ number: number; amount: string }[]>([
+    { number: 0, amount: "" },
+  ]);
+
+  const openSplit = (movement: Movement) => {
+    setSplitFor(movement.id);
+    setSplitRows(
+      movement.installmentSplits?.length
+        ? movement.installmentSplits.map((x) => ({
+            number: x.number,
+            amount: String(x.amount),
+          }))
+        : [{ number: 0, amount: "" }]
+    );
+  };
+
+  const splitParts = splitRows
+    .filter((r) => r.number > 0 && round3(Number(r.amount) || 0) > 0)
+    .map((r) => ({ number: r.number, amount: round3(Number(r.amount) || 0) }));
+  const splitSum = round3(splitParts.reduce((sum, r) => sum + r.amount, 0));
   /*
     النموذج يُفتح أعلى اللوحة وهو طويل، والجدول تحته. فمن ضغط
     «تعديل» على صفٍّ بعيد لا يرى شيئاً يتغيّر أمامه — يبدو الزرّ
@@ -6569,7 +6622,8 @@ function ContractorsPage({
                     </thead>
                     <tbody>
                       {p.movements.map((m) => (
-                        <tr key={m.id} className="border-b border-slate-100">
+                        <Fragment key={m.id}>
+                        <tr className="border-b border-slate-100">
                           <Td>{m.entryNo}</Td>
                           <Td>{m.date}</Td>
                           <Td>{m.description || "—"}</Td>
@@ -6595,8 +6649,139 @@ function ContractorsPage({
                             >
                               فكّ
                             </button>
+                            {canManage && (
+                              <button
+                                onClick={() =>
+                                  splitFor === m.id ? setSplitFor(null) : openSplit(m)
+                                }
+                                className="mr-2 text-xs text-blue-600 underline"
+                              >
+                                {splitFor === m.id ? "إلغاء" : "وزّع"}
+                              </button>
+                            )}
                           </Td>
                         </tr>
+                        {splitFor === m.id && (
+                          <tr className="border-b border-blue-200 bg-blue-50">
+                            <td colSpan={9} className="p-4">
+                              <p className="mb-3 text-sm">
+                                وزّع <b>{fmt(m.amount)}</b> د.ك على دفعات العقد —
+                                جزءٌ يُتمّ دفعةً والباقي على التي تليها.
+                              </p>
+                              {splitRows.map((row, index) => (
+                                <div
+                                  key={index}
+                                  className="mb-2 flex flex-wrap items-center gap-3"
+                                >
+                                  <select
+                                    value={row.number || ""}
+                                    onChange={(e) =>
+                                      setSplitRows(
+                                        splitRows.map((r, i) =>
+                                          i === index
+                                            ? { ...r, number: Number(e.target.value) || 0 }
+                                            : r
+                                        )
+                                      )
+                                    }
+                                    className={`${inputClass} w-72`}
+                                  >
+                                    <option value="">اختر الدفعة</option>
+                                    {selected.installments
+                                      .filter(isPayableInstallment)
+                                      .map((i) => (
+                                        <option key={i.number} value={i.number}>
+                                          الدفعة {i.number} — {fmt(installmentNet(i))} د.ك
+                                          {i.condition ? ` · ${i.condition}` : ""}
+                                        </option>
+                                      ))}
+                                  </select>
+                                  <input
+                                    type="number"
+                                    step="0.001"
+                                    value={row.amount}
+                                    onChange={(e) =>
+                                      setSplitRows(
+                                        splitRows.map((r, i) =>
+                                          i === index ? { ...r, amount: e.target.value } : r
+                                        )
+                                      )
+                                    }
+                                    placeholder="المبلغ"
+                                    className={`${inputClass} w-40`}
+                                  />
+                                  {splitRows.length > 1 && (
+                                    <button
+                                      onClick={() =>
+                                        setSplitRows(
+                                          splitRows.filter((_, i) => i !== index)
+                                        )
+                                      }
+                                      className="text-sm text-red-700 underline"
+                                    >
+                                      احذف
+                                    </button>
+                                  )}
+                                </div>
+                              ))}
+                              <div className="mt-3 flex flex-wrap items-center gap-4 text-sm">
+                                <button
+                                  onClick={() =>
+                                    setSplitRows([
+                                      ...splitRows,
+                                      { number: 0, amount: "" },
+                                    ])
+                                  }
+                                  className="rounded-lg bg-white px-4 py-2 font-bold text-blue-700"
+                                >
+                                  + دفعة أخرى
+                                </button>
+                                <span>
+                                  المجموع <b className="tabular-nums">{fmt(splitSum)}</b>{" "}
+                                  من <b className="tabular-nums">{fmt(m.amount)}</b> د.ك
+                                </span>
+                                {round3(m.amount - splitSum) !== 0 ? (
+                                  <span className="font-bold text-red-700">
+                                    {splitSum < m.amount
+                                      ? `ينقص ${fmt(round3(m.amount - splitSum))} د.ك`
+                                      : `يزيد ${fmt(round3(splitSum - m.amount))} د.ك`}
+                                  </span>
+                                ) : (
+                                  <span className="font-bold text-green-700">✓ مطابق</span>
+                                )}
+                                <button
+                                  disabled={round3(m.amount - splitSum) !== 0}
+                                  onClick={() => {
+                                    onSplit(m.id, selected.contractNumber, splitParts);
+                                    onLog(
+                                      "تعديل",
+                                      "عقد",
+                                      `توزيع القيد ${m.entryNo} بمبلغ ${fmt(
+                                        m.amount
+                                      )} د.ك على دفعات العقد ${selected.contractNumber}`,
+                                      {
+                                        after: splitParts
+                                          .map((x) => `الدفعة ${x.number}: ${fmt(x.amount)}`)
+                                          .join(" · "),
+                                      }
+                                    );
+                                    setSplitFor(null);
+                                  }}
+                                  className="rounded-lg bg-blue-600 px-5 py-2 font-bold text-white disabled:bg-slate-300"
+                                >
+                                  حفظ التوزيع
+                                </button>
+                                <button
+                                  onClick={() => setSplitFor(null)}
+                                  className="text-sm text-slate-600 underline"
+                                >
+                                  إلغاء
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                        </Fragment>
                       ))}
                     </tbody>
                   </table>
@@ -6658,7 +6843,8 @@ function ContractorsPage({
                       </thead>
                       <tbody>
                         {candidates.map((m) => (
-                          <tr key={m.id} className="border-b border-slate-100">
+                          <Fragment key={m.id}>
+                          <tr className="border-b border-slate-100">
                             <Td>{m.entryNo}</Td>
                             <Td>{m.date}</Td>
                             <Td>{m.description || "—"}</Td>
@@ -6681,8 +6867,137 @@ function ContractorsPage({
                               >
                                 ربط
                               </button>
+                              <button
+                                onClick={() =>
+                                  splitFor === m.id ? setSplitFor(null) : openSplit(m)
+                                }
+                                className="mr-2 text-xs text-blue-600 underline"
+                              >
+                                {splitFor === m.id ? "إلغاء" : "وزّع على دفعتين"}
+                              </button>
                             </Td>
                           </tr>
+                        {splitFor === m.id && (
+                          <tr className="border-b border-blue-200 bg-blue-50">
+                            <td colSpan={9} className="p-4">
+                              <p className="mb-3 text-sm">
+                                وزّع <b>{fmt(m.amount)}</b> د.ك على دفعات العقد —
+                                جزءٌ يُتمّ دفعةً والباقي على التي تليها.
+                              </p>
+                              {splitRows.map((row, index) => (
+                                <div
+                                  key={index}
+                                  className="mb-2 flex flex-wrap items-center gap-3"
+                                >
+                                  <select
+                                    value={row.number || ""}
+                                    onChange={(e) =>
+                                      setSplitRows(
+                                        splitRows.map((r, i) =>
+                                          i === index
+                                            ? { ...r, number: Number(e.target.value) || 0 }
+                                            : r
+                                        )
+                                      )
+                                    }
+                                    className={`${inputClass} w-72`}
+                                  >
+                                    <option value="">اختر الدفعة</option>
+                                    {selected.installments
+                                      .filter(isPayableInstallment)
+                                      .map((i) => (
+                                        <option key={i.number} value={i.number}>
+                                          الدفعة {i.number} — {fmt(installmentNet(i))} د.ك
+                                          {i.condition ? ` · ${i.condition}` : ""}
+                                        </option>
+                                      ))}
+                                  </select>
+                                  <input
+                                    type="number"
+                                    step="0.001"
+                                    value={row.amount}
+                                    onChange={(e) =>
+                                      setSplitRows(
+                                        splitRows.map((r, i) =>
+                                          i === index ? { ...r, amount: e.target.value } : r
+                                        )
+                                      )
+                                    }
+                                    placeholder="المبلغ"
+                                    className={`${inputClass} w-40`}
+                                  />
+                                  {splitRows.length > 1 && (
+                                    <button
+                                      onClick={() =>
+                                        setSplitRows(
+                                          splitRows.filter((_, i) => i !== index)
+                                        )
+                                      }
+                                      className="text-sm text-red-700 underline"
+                                    >
+                                      احذف
+                                    </button>
+                                  )}
+                                </div>
+                              ))}
+                              <div className="mt-3 flex flex-wrap items-center gap-4 text-sm">
+                                <button
+                                  onClick={() =>
+                                    setSplitRows([
+                                      ...splitRows,
+                                      { number: 0, amount: "" },
+                                    ])
+                                  }
+                                  className="rounded-lg bg-white px-4 py-2 font-bold text-blue-700"
+                                >
+                                  + دفعة أخرى
+                                </button>
+                                <span>
+                                  المجموع <b className="tabular-nums">{fmt(splitSum)}</b>{" "}
+                                  من <b className="tabular-nums">{fmt(m.amount)}</b> د.ك
+                                </span>
+                                {round3(m.amount - splitSum) !== 0 ? (
+                                  <span className="font-bold text-red-700">
+                                    {splitSum < m.amount
+                                      ? `ينقص ${fmt(round3(m.amount - splitSum))} د.ك`
+                                      : `يزيد ${fmt(round3(splitSum - m.amount))} د.ك`}
+                                  </span>
+                                ) : (
+                                  <span className="font-bold text-green-700">✓ مطابق</span>
+                                )}
+                                <button
+                                  disabled={round3(m.amount - splitSum) !== 0}
+                                  onClick={() => {
+                                    onSplit(m.id, selected.contractNumber, splitParts);
+                                    onLog(
+                                      "تعديل",
+                                      "عقد",
+                                      `توزيع القيد ${m.entryNo} بمبلغ ${fmt(
+                                        m.amount
+                                      )} د.ك على دفعات العقد ${selected.contractNumber}`,
+                                      {
+                                        after: splitParts
+                                          .map((x) => `الدفعة ${x.number}: ${fmt(x.amount)}`)
+                                          .join(" · "),
+                                      }
+                                    );
+                                    setSplitFor(null);
+                                  }}
+                                  className="rounded-lg bg-blue-600 px-5 py-2 font-bold text-white disabled:bg-slate-300"
+                                >
+                                  حفظ التوزيع
+                                </button>
+                                <button
+                                  onClick={() => setSplitFor(null)}
+                                  className="text-sm text-slate-600 underline"
+                                >
+                                  إلغاء
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                          </Fragment>
                         ))}
                       </tbody>
                     </table>

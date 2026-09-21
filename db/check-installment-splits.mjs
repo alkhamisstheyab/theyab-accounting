@@ -201,6 +201,33 @@ check(
     .every((m) => m.installmentSplits === undefined)
 );
 
+console.log("\nوالشاشتان تكتبانه:\n");
+
+/*
+  التوزيع يُكتب من شاشة الإدخال ومن شاشة العقود معاً. وهذا فحص شيفرة
+  لا حساب: يمسك أن يُنزع أحد المسارين أو يُنسى إسقاط التوزيع عند الربط
+  بدفعةٍ واحدة — فيبقى توزيعٌ قديم تحت ربطٍ جديد.
+*/
+const page = fs.readFileSync("app/page.tsx", "utf8");
+check(
+  "شاشة الإدخال تكتب التوزيع",
+  page.includes("parseSplits(form.installmentSplits)")
+);
+check("وشاشة العقود تكتبه كذلك", /onSplit=\{\(movementId, contractNumber, splits\)/.test(page));
+check(
+  "وزرّ «وزّع» في جدولَي المرتبطة والمرشّحة",
+  (page.match(/openSplit\(m\)/g) ?? []).length >= 2,
+  `${(page.match(/openSplit\(m\)/g) ?? []).length}`
+);
+check(
+  "والربط بدفعةٍ واحدة يُسقط توزيعاً سابقاً",
+  /installmentNumber,\s*\n\s*\/\*[^*]*\*\/\s*\n\s*installmentSplits: undefined,/.test(page)
+);
+check(
+  "ولا يُحفظ توزيعٌ لا يطابق مجموعه المبلغ",
+  page.includes("disabled={round3(m.amount - splitSum) !== 0}")
+);
+
 console.log(
   bad === 0
     ? "\n✓ المبلغ الواحد يُوزَّع على دفعتين، ولا يُحسب مرتين، ولا يمسّ الدفاتر"
