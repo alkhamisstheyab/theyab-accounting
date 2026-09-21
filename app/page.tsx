@@ -15,6 +15,7 @@ import {
   AccountType,
   CHART_OF_ACCOUNTS,
   CONTRACTOR_EXPENSE,
+  InstallmentSplit,
   GENERATED_CHART,
   GENERATED_ITEMS,
   GENERATED_PAYMENTS,
@@ -2948,9 +2949,53 @@ const BLANK_FORM = {
   manual: false,
   contractNumber: "",
   installmentNumber: "",
+  /* حصص الدفعات: «3:300|4:700» — نصٌّ في النموذج، ومصفوفةٌ في الحركة */
+  installmentSplits: "",
 };
 
 /** يملأ النموذج من حركة قائمة، ويفعّل الوضع اليدوي إن كان قيدها لا يتبع القواعد */
+/*
+  حصص الدفعات في النموذج نصٌّ واحد: «3:300|4:700».
+
+  والحقل نصّي لأن النموذج كلّه نصوص — فيُقرأ ويُكتب بدالّتين، ويبقى
+  مصدر الحقيقة مصفوفةَ الحركة لا النصّ.
+*/
+function parseSplits(text: string): InstallmentSplit[] | undefined {
+  const parts = (text ?? "")
+    .split("|")
+    .map((row) => row.split(":"))
+    .map(([number, amount]) => ({
+      number: Number(number) || 0,
+      amount: round3(Number(amount) || 0),
+    }))
+    .filter((x) => x.number > 0 && x.amount > 0);
+  return parts.length > 0 ? parts : undefined;
+}
+
+function splitsToText(splits: InstallmentSplit[] | undefined): string {
+  return (splits ?? []).map((x) => `${x.number}:${x.amount}`).join("|");
+}
+
+/** صفوف التوزيع كما تُعرض في الشاشة */
+type SplitRow = { number: number; amount: string };
+
+const splitsToRows = (text: string): SplitRow[] => {
+  const rows = (text ?? "")
+    .split("|")
+    .filter(Boolean)
+    .map((row) => {
+      const [number, amount] = row.split(":");
+      return { number: Number(number) || 0, amount: amount ?? "" };
+    });
+  return rows.length > 0 ? rows : [{ number: 0, amount: "" }];
+};
+
+const rowsToSplits = (rows: SplitRow[]): string =>
+  rows
+    .filter((r) => r.number > 0 && round3(Number(r.amount) || 0) > 0)
+    .map((r) => `${r.number}:${round3(Number(r.amount) || 0)}`)
+    .join("|");
+
 function formOf(movement: Movement): typeof BLANK_FORM {
   const derived = deriveEntry({
     movementType: movement.movementType,
@@ -2982,6 +3027,7 @@ function formOf(movement: Movement): typeof BLANK_FORM {
     installmentNumber: movement.installmentNumber
       ? String(movement.installmentNumber)
       : "",
+    installmentSplits: splitsToText(movement.installmentSplits),
   };
 }
 
@@ -3042,6 +3088,23 @@ function MovementForm({
    * «مقاول» متى كان القيد على أجور المقاولين، و«عميل» متى كان قبضاً
    * على حساب الإيراد. وما عداهما لا يُربط.
    */
+  /* صفوف التوزيع: تُشتقّ من الحقل النصّي وتُعاد إليه عند كل تغيير */
+  const splitting = form.installmentSplits.length > 0;
+  const splitRows = useMemo(
+    () => splitsToRows(form.installmentSplits),
+    [form.installmentSplits]
+  );
+  const setSplitRows = (rows: SplitRow[]) =>
+    setForm((prev) => ({
+      ...prev,
+      /* الصفّ الفارغ يبقى معروضاً، والنصّ لا يحفظ إلا التامّ منها */
+      installmentSplits: rowsToSplits(rows) || " ",
+    }));
+  const splitTotal = round3(
+    splitRows.reduce((sum, r) => sum + (Number(r.amount) || 0), 0)
+  );
+  const splitRemainder = round3((Number(form.amount) || 0) - splitTotal);
+
   const linkKind: "مقاول" | "عميل" | null =
     derived.debitCode.startsWith("5")
       ? "مقاول"
@@ -3054,6 +3117,7 @@ function MovementForm({
     ...derived,
     amount: Number(form.amount) || 0,
     installmentNumber: Number(form.installmentNumber) || undefined,
+    installmentSplits: parseSplits(form.installmentSplits),
   };
   const entryYear = fiscalYearOf(form.date);
   // التاريخ هو ما يحدّد السنة، فالقفل يُفحص على سنة التاريخ لا السنة المعروضة
@@ -3092,6 +3156,11 @@ function MovementForm({
       installmentNumber: linkKind
         ? Number(form.installmentNumber) || undefined
         : undefined,
+      /* التوزيع يتبع الربط: لا عقد فلا حصص */
+      installmentSplits:
+        linkKind && form.contractNumber
+          ? parseSplits(form.installmentSplits)
+          : undefined,
     };
 
     if (editing) {
@@ -3301,6 +3370,7 @@ function MovementForm({
                     ...prev,
                     contractNumber: e.target.value,
                     installmentNumber: "",
+                    installmentSplits: "",
                   }));
                 }}
                 className={inputClass}
@@ -3317,7 +3387,7 @@ function MovementForm({
               </select>
             </Field>
 
-            {form.contractNumber && (
+            {form.contractNumber && !splitting && (
               <Field label="الدفعة">
                 <select
                   value={form.installmentNumber}
@@ -3338,8 +3408,115 @@ function MovementForm({
               </Field>
             )}
           </div>
+
+          {form.contractNumber && (
+            <>
+              <label className="mt-4 flex items-center gap-2 text-sm font-medium">
+                <input
+                  type="checkbox"
+                  checked={splitting}
+                  onChange={(e) => {
+                    const on = e.target.checked;
+                    setForm((prev) => ({
+                      ...prev,
+                      installmentSplits: on
+                        ? prev.installmentNumber && prev.amount
+                          ? `${prev.installmentNumber}:${prev.amount}`
+                          : " "
+                        : "",
+                      installmentNumber: on ? "" : prev.installmentNumber,
+                    }));
+                  }}
+                />
+                وزّع المبلغ على أكثر من دفعة — جزءٌ يُتمّ دفعةً والباقي على التي تليها
+              </label>
+
+              {splitting && (
+                <div className="mt-3 rounded-lg border border-blue-200 bg-white p-4">
+                  {splitRows.map((row, index) => (
+                    <div key={index} className="mb-2 flex flex-wrap items-center gap-3">
+                      <select
+                        value={row.number || ""}
+                        onChange={(e) =>
+                          setSplitRows(
+                            splitRows.map((r, i) =>
+                              i === index ? { ...r, number: Number(e.target.value) || 0 } : r
+                            )
+                          )
+                        }
+                        className={`${inputClass} w-64`}
+                      >
+                        <option value="">اختر الدفعة</option>
+                        {contractors
+                          .find((c) => c.contractNumber === form.contractNumber)
+                          ?.installments.filter(isPayableInstallment)
+                          .map((i) => (
+                            <option key={i.number} value={i.number}>
+                              الدفعة {i.number} — {fmt(installmentNet(i))} د.ك
+                              {i.condition ? ` · ${i.condition}` : ""}
+                            </option>
+                          ))}
+                      </select>
+                      <input
+                        type="number"
+                        step="0.001"
+                        value={row.amount}
+                        onChange={(e) =>
+                          setSplitRows(
+                            splitRows.map((r, i) =>
+                              i === index ? { ...r, amount: e.target.value } : r
+                            )
+                          )
+                        }
+                        placeholder="المبلغ"
+                        className={`${inputClass} w-40`}
+                      />
+                      {splitRows.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setSplitRows(splitRows.filter((_, i) => i !== index))
+                          }
+                          className="text-sm text-red-700 underline"
+                        >
+                          احذف
+                        </button>
+                      )}
+                    </div>
+                  ))}
+
+                  <div className="mt-3 flex flex-wrap items-center gap-4 text-sm">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setSplitRows([...splitRows, { number: 0, amount: "" }])
+                      }
+                      className="rounded-lg bg-blue-50 px-4 py-2 font-bold text-blue-700"
+                    >
+                      + دفعة أخرى
+                    </button>
+                    <span>
+                      مجموع التوزيع <b className="tabular-nums">{fmt(splitTotal)}</b> من{" "}
+                      <b className="tabular-nums">{fmt(round3(Number(form.amount) || 0))}</b> د.ك
+                    </span>
+                    {splitRemainder !== 0 && (
+                      <span className="font-bold text-red-700">
+                        {splitRemainder > 0
+                          ? `ينقص ${fmt(splitRemainder)} د.ك`
+                          : `يزيد ${fmt(Math.abs(splitRemainder))} د.ك`}
+                      </span>
+                    )}
+                    {splitRemainder === 0 && splitTotal > 0 && (
+                      <span className="font-bold text-green-700">✓ مطابق</span>
+                    )}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
         </div>
       )}
+
 
       <label className="mt-5 flex items-center gap-2 text-sm font-medium">
         <input
@@ -6396,7 +6573,18 @@ function ContractorsPage({
                           <Td>{m.entryNo}</Td>
                           <Td>{m.date}</Td>
                           <Td>{m.description || "—"}</Td>
-                          <Td>{m.installmentNumber || "غير محدّدة"}</Td>
+                          <Td>
+                            {/* الموزَّع يُقال بحصصه، فالرقم الواحد لا يصفه */}
+                            {m.installmentSplits?.length ? (
+                              <span title="مبلغٌ واحد موزَّع على أكثر من دفعة">
+                                {m.installmentSplits
+                                  .map((x) => `${x.number}: ${fmt(x.amount)}`)
+                                  .join(" · ")}
+                              </span>
+                            ) : (
+                              m.installmentNumber || "غير محدّدة"
+                            )}
+                          </Td>
                           <Td>
                             <Money value={m.amount} />
                           </Td>
@@ -10673,7 +10861,7 @@ function QuotationsPage({
                             q.status === "مسودة" &&
                             quotationAgeDays(q) >= COST_STALE_DAYS
                               ? "font-bold text-amber-700"
-                              : ""
+                              : " "
                           }
                         >
                           منذ {quotationAgeDays(q)} يوماً
@@ -15895,7 +16083,7 @@ function EmployeesPage({
                           className={
                             e.registeredWage !== e.basicWage
                               ? "font-bold text-amber-800"
-                              : ""
+                              : " "
                           }
                         >
                           {fmt(e.registeredWage)}

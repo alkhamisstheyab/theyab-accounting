@@ -62,6 +62,18 @@ export type Movement = {
   contractNumber?: string;
   /** ترتيب الدفعة داخل العقد، صفر يعني دفعة غير محدّدة */
   installmentNumber?: number;
+
+  /**
+   * توزيع المبلغ على أكثر من دفعة في العقد نفسه.
+   *
+   * فالمبلغ الواحد قد يُكمل دفعةً ويبدأ التي بعدها: تُدفع ألفٌ منها
+   * ثلاثمئة تُتمّ الدفعة الثالثة وسبعمئة على الرابعة. وكان يلزم شطره
+   * إلى قيدين، وهو مالٌ خرج مرةً واحدة بإيصالٍ واحد.
+   *
+   * ومجموع التوزيع يساوي مبلغ الحركة تماماً، وإلا رُفضت. ومتى وُجد
+   * التوزيع فهو المعتمد، ولا يُقرأ installmentNumber معه.
+   */
+  installmentSplits?: InstallmentSplit[];
   /** excel = مستوردة من الملف، app = أُدخلت في النظام */
   source: "excel" | "app";
 
@@ -79,6 +91,9 @@ export type Movement = {
   /** سبب الرفض أو ملاحظة المعتمِد */
   approvalNote: string;
 };
+
+/** حصّة دفعةٍ من مبلغ حركة */
+export type InstallmentSplit = { number: number; amount: number };
 
 export type ApprovalState = "بانتظار الاعتماد" | "معتمدة" | "مرفوضة";
 
@@ -356,6 +371,26 @@ export function validate(movement: Partial<Movement>): Validation {
   if (debit === credit) return bad("طرفا القيد نفس الحساب");
   if (amount <= 0) return bad("المبلغ يجب أن يكون أكبر من صفر");
   if (!movement.date) return bad("التاريخ مطلوب");
+
+  /*
+    التوزيع على الدفعات: مجموعه مبلغ الحركة تماماً. فلو قلّ أو زاد
+    لظهر العقد مدفوعاً بغير ما خرج من الصندوق.
+  */
+  const splits = movement.installmentSplits ?? [];
+  if (splits.length > 0) {
+    if (!movement.contractNumber) return bad("التوزيع على الدفعات يحتاج عقداً");
+    if (splits.some((x) => !(Number(x.number) > 0)))
+      return bad("كل حصّة تحتاج رقم دفعة");
+    if (splits.some((x) => round3(Number(x.amount) || 0) <= 0))
+      return bad("كل حصّة تحتاج مبلغاً أكبر من صفر");
+    if (new Set(splits.map((x) => Number(x.number))).size !== splits.length)
+      return bad("لا تُكرَّر الدفعة الواحدة في التوزيع");
+    const total = round3(splits.reduce((sum, x) => sum + (Number(x.amount) || 0), 0));
+    if (total !== amount)
+      return bad(
+        `مجموع التوزيع ${total.toFixed(3)} لا يساوي مبلغ الحركة ${amount.toFixed(3)}`
+      );
+  }
 
   return { valid: true, problem: "" };
 }
@@ -1035,8 +1070,20 @@ export function contractPayments(movements: Movement[], contractNumber: string) 
   let total = 0;
 
   for (const m of linked) {
-    const amount = round3(contractSign(m) * m.amount);
+    const sign = contractSign(m);
+    const amount = round3(sign * m.amount);
     total += amount;
+
+    /* التوزيع إن وُجد يُنسب كلُّ حصّةٍ إلى دفعتها، وإلا فالمبلغ كلّه لدفعةٍ واحدة */
+    const splits = m.installmentSplits ?? [];
+    if (splits.length > 0) {
+      for (const part of splits) {
+        const share = round3(sign * (Number(part.amount) || 0));
+        const no = Number(part.number) || 0;
+        byInstallment.set(no, round3((byInstallment.get(no) ?? 0) + share));
+      }
+      continue;
+    }
 
     const no = m.installmentNumber ?? 0;
     byInstallment.set(no, round3((byInstallment.get(no) ?? 0) + amount));

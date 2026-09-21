@@ -13,6 +13,7 @@ import {
   GENERATED_CHART,
   GENERATED_ITEMS,
   GENERATED_PAYMENTS,
+  InstallmentSplit,
   ItemDefinition,
   Movement,
   OpeningBalances,
@@ -961,6 +962,21 @@ const str = (v: unknown, fallback = "") =>
 /* الترحيل                                                             */
 /* ------------------------------------------------------------------ */
 
+/** حصص الدفعات كما تُقرأ من ملفٍ أو من القاعدة — والفارغ ليس شيئاً */
+function splitsOf(raw: unknown): InstallmentSplit[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const list = raw
+    .map((x) => {
+      const part = (x ?? {}) as Record<string, unknown>;
+      return {
+        number: Number(part.number) || 0,
+        amount: round3(Number(part.amount) || 0),
+      };
+    })
+    .filter((x) => x.number > 0 && x.amount > 0);
+  return list.length > 0 ? list : undefined;
+}
+
 function migrateMovement(raw: unknown): Movement {
   const m = (raw ?? {}) as Record<string, unknown>;
 
@@ -1001,6 +1017,12 @@ function migrateMovement(raw: unknown): Movement {
     approvalNote: str(m.approvalNote),
     contractNumber: str(m.contractNumber) || undefined,
     installmentNumber: Number(m.installmentNumber) || undefined,
+    /*
+      توزيع المبلغ على أكثر من دفعة — يُقرأ كما كُتب. والفارغ يعود
+      undefined لا مصفوفةً فارغة، وإلا اختلفت الحركة عن نفسها في
+      المقارنة مع الخادم فأُرسلت بلا سبب.
+    */
+    installmentSplits: splitsOf(m.installmentSplits),
     source: m.source === "excel" ? "excel" : "app",
   };
 }
