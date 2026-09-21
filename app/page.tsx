@@ -6048,7 +6048,17 @@ function ContractorsPage({
                               فلا يُقال «مدفوعة» ولا قيد بها. ويُضاف إليها ما
                               سُدّد من خارج الشركة، وهو مكتوبٌ في عموده.
                             */}
-                            {settled <= 0 ? (
+                            {/*
+                              الزائد يُقال صراحةً: رُبط بالدفعة أكثر من
+                              قيمتها — وأكثر ما يكون ذلك من قيدٍ يخصّ دفعةً
+                              أخرى. والرقم السالب وحده يُحيّر ولا يدلّ.
+                            */}
+                            {round3(settled - value) > 0 ? (
+                              <span className="font-bold text-red-700">
+                                زائد عن قيمة الدفعة بـ {fmt(round3(settled - value))} د.ك
+                                — راجع ربط القيود
+                              </span>
+                            ) : settled <= 0 ? (
                               <span className="text-slate-400">
                                 {isClientContract ? "لم تُقبض" : "لم تُدفع"}
                               </span>
