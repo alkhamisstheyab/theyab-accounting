@@ -1109,6 +1109,23 @@ export function unlinkedContractorMovements(
 }
 
 /**
+ * حركاتٌ مربوطة برقم عقدٍ لم يعد موجوداً.
+ *
+ * تنشأ حين يُحذف عقدٌ وحركاته مربوطةٌ به: يبقى الرقم فيها ولا عقدَ له،
+ * فتسقط من كل كشف — لا هي في عقدٍ ولا بين غير المرتبطة. وأخطر من ذلك
+ * أن يُنشأ عقدٌ جديد بالرقم نفسه فتلتصق به صامتةً.
+ */
+export function orphanContractLinks(
+  movements: Movement[],
+  contractNumbers: string[]
+): Movement[] {
+  const known = new Set(contractNumbers);
+  return movements.filter(
+    (m) => Boolean(m.contractNumber) && !known.has(m.contractNumber as string)
+  );
+}
+
+/**
  * حركات مرشّحة للربط بعقد مورّد: أي تكلفة تنفيذٍ مباشرة على المشروع.
  *
  * عقد المقاول دفعاته على حسابٍ واحد معروف (أجور المقاولين)، أما المورّد

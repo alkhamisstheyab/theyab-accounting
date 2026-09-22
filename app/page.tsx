@@ -72,6 +72,7 @@ import {
   unlinkedContractorMovements,
   unlinkedClientReceipts,
   unlinkedSupplierMovements,
+  orphanContractLinks,
   CLIENT_REVENUE,
   validate,
 } from "@/lib/accounting";
@@ -1651,6 +1652,28 @@ export default function HomeV2() {
                   )
                 )
               }
+              /*
+                حذف العقد يفكّ ربط حركاته حقاً — وكان يتركها مربوطةً برقمٍ
+                لا عقد له، فتسقط من كل كشف.
+              */
+              onUnlinkContract={(contractNumber) =>
+                setMovements((prev) =>
+                  prev.map((m) =>
+                    m.contractNumber === contractNumber
+                      ? {
+                          ...m,
+                          contractNumber: undefined,
+                          installmentNumber: undefined,
+                          installmentSplits: undefined,
+                        }
+                      : m
+                  )
+                )
+              }
+              orphans={orphanContractLinks(
+                movements,
+                contractors.map((c) => c.contractNumber)
+              )}
               onSplit={(movementId, contractNumber, splits) =>
                 setMovements((prev) =>
                   prev.map((m) =>
@@ -5444,6 +5467,8 @@ function ContractorsPage({
   canManage,
   onLink,
   onSplit,
+  onUnlinkContract,
+  orphans,
   onPrint,
   onLog,
 }: {
@@ -5459,6 +5484,10 @@ function ContractorsPage({
     contractNumber: string,
     installmentNumber: number | undefined
   ) => void;
+  /** فكّ ربط كل حركات عقدٍ — يُستدعى عند حذفه */
+  onUnlinkContract: (contractNumber: string) => void;
+  /** حركاتٌ مربوطة برقم عقدٍ لم يعد موجوداً */
+  orphans: Movement[];
   /** توزيع مبلغ حركةٍ واحدة على أكثر من دفعة */
   onSplit: (
     movementId: string,
@@ -5819,6 +5848,35 @@ function ContractorsPage({
 
   return (
     <>
+      {orphans.length > 0 && (
+        <Banner tone="warn">
+          <b>{orphans.length}</b> حركة مربوطة بعقودٍ لم تعد موجودة (
+          {[...new Set(orphans.map((m) => m.contractNumber))].join("، ")}) بمجموع{" "}
+          <b>{fmt(round3(orphans.reduce((s, m) => s + m.amount, 0)))}</b> د.ك — فهي لا
+          تظهر في أي عقد ولا بين غير المرتبطة.
+          {canManage && (
+            <button
+              onClick={() => {
+                const numbers = [...new Set(orphans.map((m) => m.contractNumber as string))];
+                for (const n of numbers) onUnlinkContract(n);
+                onLog(
+                  "تعديل",
+                  "عقد",
+                  `فكّ ربط ${orphans.length} حركة بعقودٍ محذوفة: ${numbers.join("، ")}`,
+                  {
+                    after: orphans
+                      .map((m) => `${m.fiscalYear}/${m.entryNo} · ${fmt(m.amount)}`)
+                      .join(" · "),
+                  }
+                );
+              }}
+              className="mr-3 rounded-lg bg-white px-3 py-1 font-bold text-amber-900 underline"
+            >
+              فكّ ربطها لتُربط بعقدها الصحيح
+            </button>
+          )}
+        </Banner>
+      )}
       {/* المدد أولاً: مدةٌ مضت أثرها خارج النظام لا فيه */}
       <ContractDurationsPanel
         contractors={contractors}
@@ -6411,9 +6469,9 @@ function ContractorsPage({
                           <button
                             onClick={() => {
                               /*
-                                الحذف لا يمسّ القيود: تبقى الحركات المرتبطة
-                                وفيها رقم عقدٍ لم يعد موجوداً، فيسقط مدفوعها
-                                من كل كشف. فيُقال العدد قبل الحذف لا بعده.
+                                الحذف يفكّ ربط الحركات ولا يحذفها: تعود إلى
+                                «غير المرتبطة» فتُربط بعقدها الصحيح. ويُقال
+                                عددها قبل الحذف لا بعده.
                               */
                               const linkedCount = movements.filter(
                                 (m) => m.contractNumber === c.contractNumber
@@ -6429,6 +6487,22 @@ function ContractorsPage({
                               ) {
                                 setContractors((prev) =>
                                   prev.filter((x) => x.id !== c.id)
+                                );
+                                /* ولا يُفكّ إن بقي عقدٌ آخر بالرقم نفسه */
+                                const shared = contractors.some(
+                                  (x) =>
+                                    x.id !== c.id &&
+                                    x.contractNumber === c.contractNumber
+                                );
+                                if (!shared) onUnlinkContract(c.contractNumber);
+                                onLog(
+                                  "حذف",
+                                  "عقد",
+                                  `حذف ${c.documentType} ${c.contractNumber} — ${c.name}${
+                                    linkedCount > 0 && !shared
+                                      ? ` · فُكّ ربط ${linkedCount} حركة`
+                                      : ""
+                                  }`
                                 );
                                 if (selectedId === c.id) setSelectedId(null);
                               }

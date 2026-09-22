@@ -22,6 +22,7 @@
     "check:insurance": "node db/check-site-insurance.mjs",
     "check:splits": "node db/check-installment-splits.mjs",
     "check:duplicates": "node db/check-duplicates.mjs",
+    "check:orphans": "node db/check-orphan-links.mjs",
     "render:print": "node db/render-print.mjs",
     "check:login": "node db/check-login.mjs",
     "verify:live": "node db/verify-live.mjs",
