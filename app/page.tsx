@@ -16902,6 +16902,15 @@ function AttendancePage({
   });
   const [message, setMessage] = useState("");
 
+  /*
+    تعبئة فترةٍ ماضية كاملة: الحضور كان ورقياً، والنظام يبدأ يومياً بعد
+    أيام. فتُملأ الأيام الناقصة «حاضراً» ويُترك المسجَّل كما هو — فما
+    سُجّل من غيابٍ أو مرضيةٍ أو إجازة هو الاستثناء الذي لا يُمسّ.
+  */
+  const [fillFrom, setFillFrom] = useState("");
+  const [fillTo, setFillTo] = useState("");
+  const [fillWho, setFillWho] = useState<string[]>([]);
+
   const active = employees.filter((e) => e.active);
   const days = useMemo(() => monthDays(month), [month]);
 
@@ -16962,6 +16971,103 @@ function AttendancePage({
       `تعبئة حضور ${monthLabel(month)} — ${additions.length} يوماً لـ ${active.length} موظفاً`
     );
     setMessage(`أُضيف ${additions.length} يوماً`);
+  };
+
+  /** أشهرٌ متتابعة من «من» إلى «إلى» */
+  const monthsBetween = (from: string, to: string): string[] => {
+    const list: string[] = [];
+    const [fy, fm] = from.split("-").map(Number);
+    const [ty, tm] = to.split("-").map(Number);
+    if (!fy || !fm || !ty || !tm) return list;
+    for (let y = fy, m = fm; y < ty || (y === ty && m <= tm); ) {
+      list.push(`${y}-${String(m).padStart(2, "0")}`);
+      m += 1;
+      if (m > 12) {
+        m = 1;
+        y += 1;
+      }
+      if (list.length > 120) break;
+    }
+    return list;
+  };
+
+  /**
+   * يملأ الأيام الناقصة في فترةٍ كاملة.
+   *
+   * ولا يمسّ يوماً مسجَّلاً، ولا يملأ قبل تاريخ التعيين ولا بعد اليوم،
+   * ويعلّم يوم راحة كل موظف بيوم راحته هو.
+   */
+  const fillRange = () => {
+    if (!fillFrom || !fillTo) {
+      setMessage("اختر شهر البداية وشهر النهاية");
+      return;
+    }
+    if (fillTo < fillFrom) {
+      setMessage("شهر النهاية قبل شهر البداية");
+      return;
+    }
+
+    const chosen = fillWho.length > 0
+      ? active.filter((e) => fillWho.includes(e.id))
+      : active;
+    if (chosen.length === 0) {
+      setMessage("لا موظفين مختارين");
+      return;
+    }
+
+    /* المسجَّل كلّه — لا الشهر المعروض وحده */
+    const taken = new Set(attendance.map((r) => `${r.employeeId}|${r.date}`));
+    const today = todayISO();
+    const additions: AttendanceDay[] = [];
+
+    for (const month of monthsBetween(fillFrom, fillTo)) {
+      for (const date of monthDays(month)) {
+        if (date > today) continue;
+        for (const employee of chosen) {
+          if (employee.hireDate && date < employee.hireDate) continue;
+          if (employee.endDate && date > employee.endDate) continue;
+          if (taken.has(`${employee.id}|${date}`)) continue;
+          const rest = dayName(date) === employee.restDay;
+          additions.push({
+            id: newId(),
+            employeeId: employee.id,
+            date,
+            status: rest ? "راحة أسبوعية" : "حاضر",
+            hours: rest ? 0 : settings.dailyHours,
+            overtimeHours: 0,
+            restDayHours: 0,
+            holidayHours: 0,
+            note: "",
+          });
+        }
+      }
+    }
+
+    if (additions.length === 0) {
+      setMessage("لا يوم ناقصاً في هذه الفترة — المسجَّل كما هو");
+      return;
+    }
+    if (
+      !window.confirm(
+        `تعبئة ${additions.length} يوماً لـ ${chosen.length} موظفاً من ${fillFrom} إلى ${fillTo}؟\n\nتُملأ الأيام الناقصة «حاضراً» ويوم الراحة «راحة أسبوعية». ولا يتغيّر يومٌ مسجَّل — فالغياب والمرضية والإجازة تبقى كما هي.`
+      )
+    ) {
+      return;
+    }
+
+    setAttendance((prev) => [...prev, ...additions]);
+    onLog(
+      "إنشاء",
+      "بيانات النظام",
+      `تعبئة حضور من ${fillFrom} إلى ${fillTo} — ${additions.length} يوماً لـ ${chosen.length} موظفاً`,
+      {
+        after:
+          fillWho.length > 0
+            ? chosen.map((e) => e.name).join("، ")
+            : "كل الموظفين على رأس العمل",
+      }
+    );
+    setMessage(`أُضيف ${additions.length} يوماً لـ ${chosen.length} موظفاً`);
   };
 
   const applyBulk = () => {
@@ -17129,6 +17235,83 @@ function AttendancePage({
         {message && (
           <p className="mb-4 text-sm font-medium text-green-700">{message}</p>
         )}
+
+        {/* تعبئة فترة ماضية — قبل أن يبدأ التسجيل اليومي */}
+        <div className="mb-5 rounded-xl border border-blue-200 bg-blue-50 p-4">
+          <p className="mb-1 font-bold">تعبئة فترة كاملة حضوراً</p>
+          <p className="mb-3 text-sm text-slate-600">
+            للفترة الماضية التي كان حضورها ورقياً: تُملأ الأيام الناقصة
+            «حاضراً»، ويوم راحة كل موظف «راحة أسبوعية».{" "}
+            <b>ولا يتغيّر يومٌ مسجَّل</b> — فالغياب والمرضية والإجازة المسجَّلة
+            تبقى كما هي. ولا يُملأ قبل تاريخ التعيين ولا بعد اليوم.
+          </p>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+            <Field label="من شهر">
+              <input
+                type="month"
+                value={fillFrom}
+                onChange={(e) => setFillFrom(e.target.value)}
+                className={inputClass}
+              />
+            </Field>
+            <Field label="إلى شهر">
+              <input
+                type="month"
+                value={fillTo}
+                onChange={(e) => setFillTo(e.target.value)}
+                className={inputClass}
+              />
+            </Field>
+            <div className="md:col-span-2">
+              <Field
+                label="الموظفون"
+                hint={
+                  fillWho.length === 0
+                    ? `الكل — ${active.length} موظفاً على رأس العمل`
+                    : `${fillWho.length} مختارين`
+                }
+              >
+                <div className="flex flex-wrap gap-2 rounded-lg border border-slate-300 bg-white p-2">
+                  <button
+                    onClick={() => setFillWho([])}
+                    className={`rounded-lg px-3 py-1 text-sm ${
+                      fillWho.length === 0
+                        ? "bg-blue-600 font-bold text-white"
+                        : "bg-slate-100"
+                    }`}
+                  >
+                    الكل
+                  </button>
+                  {active.map((e) => (
+                    <button
+                      key={e.id}
+                      onClick={() =>
+                        setFillWho((prev) =>
+                          prev.includes(e.id)
+                            ? prev.filter((x) => x !== e.id)
+                            : [...prev, e.id]
+                        )
+                      }
+                      className={`rounded-lg px-3 py-1 text-sm ${
+                        fillWho.includes(e.id)
+                          ? "bg-blue-600 font-bold text-white"
+                          : "bg-slate-100"
+                      }`}
+                    >
+                      {e.name}
+                    </button>
+                  ))}
+                </div>
+              </Field>
+            </div>
+          </div>
+          <button
+            onClick={fillRange}
+            className="mt-3 rounded-lg bg-blue-600 px-6 py-3 font-bold text-white"
+          >
+            املأ الفترة حضوراً
+          </button>
+        </div>
 
         {/* تسجيل استثناء */}
         <div className="mb-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
