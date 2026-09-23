@@ -24,6 +24,7 @@
     "check:duplicates": "node db/check-duplicates.mjs",
     "check:orphans": "node db/check-orphan-links.mjs",
     "check:payroll-advance": "node db/check-payroll-advance.mjs",
+    "check:entry-number": "node db/check-entry-number.mjs",
     "render:print": "node db/render-print.mjs",
     "check:login": "node db/check-login.mjs",
     "verify:live": "node db/verify-live.mjs",

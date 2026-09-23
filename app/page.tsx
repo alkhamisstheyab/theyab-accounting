@@ -1257,9 +1257,6 @@ export default function HomeV2() {
               contractors={contractors}
               people={people}
               editing={editing}
-              nextEntryNo={
-                nextEntryNo
-              }
               lockedYears={yearLocks}
               onSave={(movement) => {
                 if (isYearClosed(yearLocks, movement.fiscalYear)) return;
@@ -3089,7 +3086,6 @@ function MovementForm({
   contractors,
   people,
   editing,
-  nextEntryNo,
   lockedYears,
   onSave,
   onUpdate,
@@ -3102,7 +3098,7 @@ function MovementForm({
   contractors: Contractor[];
   people: string[];
   editing: Movement | null;
-  nextEntryNo: number;
+  /* رقم القيد يُشتقّ من سنة تاريخ الحركة داخل النموذج */
   lockedYears: YearLocks;
   onSave: (movement: Movement) => void;
   onUpdate: (movement: Movement) => void;
@@ -3178,6 +3174,21 @@ function MovementForm({
   const entryYearLocked = !!form.date && isYearClosed(lockedYears, entryYear);
 
   /*
+    ورقم القيد كذلك من سنة التاريخ لا من السنة المعروضة.
+
+    وقع في ٢٣ سبتمبر ٢٠٢٦: أُدخلت حركةٌ بتاريخ ٢٠٢٦ والشاشة تعرض ٢٠٢٥،
+    فأخذت الرقم التالي لأعلى رقمٍ في ٢٠٢٥ (١٨٠٨) وحُفظت في ٢٠٢٦ — حيث
+    الرقم مأخوذ. فتكرّر رقمان في سنةٍ واحدة، ورفضها الخادم.
+  */
+  const entryNumber = useMemo(
+    () =>
+      movements
+        .filter((m) => m.fiscalYear === entryYear)
+        .reduce((max, m) => Math.max(max, m.entryNo), 1000) + 1,
+    [movements, entryYear]
+  );
+
+  /*
     المكرَّر: يُبحث عنه كلما تغيّرت المسوّدة، ويُقرَّ عليه ببصمته — فلو
     بقي الإقرار بعد تغيير المبلغ أو التاريخ لمرّت حركةٌ مكرَّرة بإقرارٍ
     لغيرها.
@@ -3239,7 +3250,7 @@ function MovementForm({
 
     onSave({
       id: newId(),
-      entryNo: nextEntryNo,
+      entryNo: entryNumber,
       ...common,
       source: "app",
       approval: "بانتظار الاعتماد",
@@ -3248,7 +3259,7 @@ function MovementForm({
       approvalNote: "",
     });
     setForm(blank);
-    setMessage(`تم حفظ الحركة برقم قيد ${nextEntryNo}`);
+    setMessage(`تم حفظ الحركة برقم قيد ${entryNumber}`);
   };
 
   const yearMismatch = !!form.date && entryYear !== year;
@@ -3259,7 +3270,7 @@ function MovementForm({
       subtitle={
         editing
           ? `${editing.source === "excel" ? "حركة مستوردة من الإكسل" : "حركة مُدخلة في النظام"} — رقم القيد وتاريخ الإنشاء محفوظان`
-          : `رقم القيد التالي: ${nextEntryNo}`
+          : `رقم القيد التالي: ${entryNumber}`
       }
     >
       {editing && !validate(editing).valid && (
