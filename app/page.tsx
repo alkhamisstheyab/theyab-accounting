@@ -96,6 +96,7 @@ import {
   endOfService,
   hourlyWage,
   monthLabel,
+  EMPLOYEE_ADVANCE_ACCOUNT,
   payrollTotals,
   totalAllowances,
 } from "@/lib/payroll";
@@ -1855,6 +1856,7 @@ export default function HomeV2() {
           {page === "مسيّر الرواتب" && (
             <PayrollPage
               employees={employees}
+              movements={movements}
               attendance={attendance}
               settings={payrollSettings}
               runs={payrollRuns}
@@ -17362,6 +17364,7 @@ function AttendancePage({
 function PayrollPage({
   employees,
   attendance,
+  movements,
   settings,
   runs,
   year,
@@ -17376,6 +17379,8 @@ function PayrollPage({
 }: {
   employees: Employee[];
   attendance: AttendanceDay[];
+  /** كل الحركات — منها يُقرأ رصيد سلفة كل موظف */
+  movements: Movement[];
   settings: PayrollSettings;
   runs: PayrollRun[];
   year: number;
@@ -17395,12 +17400,41 @@ function PayrollPage({
 }) {
   const [month, setMonth] = useState(`${year}-01`);
   const [deductions, setDeductions] = useState<Record<string, string>>({});
+  /*
+    سداد السلفة غير «الخصومات الأخرى»: تلك جزاءٌ يُنقص المصروف، وهذا
+    استردادُ مالٍ سُلّم سلفاً — يُقفل به حساب سلف الموظفين ويبقى الراتب
+    مصروفاً بكامله. فله خانته وقيده.
+  */
+  const [advances, setAdvances] = useState<Record<string, string>>({});
   const [message, setMessage] = useState("");
 
   const months = Array.from(
     { length: 12 },
     (_, i) => `${year}-${String(i + 1).padStart(2, "0")}`
   );
+
+  /*
+    رصيد سلفة كل موظف كما في الدفاتر: يُبحث بالاسم لأن قيود السلف تحمل
+    اسم الموظف في خانة «الدافع/المستلم» لا معرّفه. فيُعرض ليُخصم منه،
+    ولا يُخصم من تلقائه — القرار لصاحبه.
+  */
+  const advanceBalance = useMemo(() => {
+    const balances = new Map<string, number>();
+    for (const m of movements) {
+      if (m.approval !== "معتمدة") continue;
+      const person = (m.person || "").trim();
+      if (!person) continue;
+      const sign =
+        m.debitCode === EMPLOYEE_ADVANCE_ACCOUNT
+          ? 1
+          : m.creditCode === EMPLOYEE_ADVANCE_ACCOUNT
+            ? -1
+            : 0;
+      if (sign === 0) continue;
+      balances.set(person, round3((balances.get(person) ?? 0) + sign * m.amount));
+    }
+    return balances;
+  }, [movements]);
 
   const existing = runs.find((r) => r.month === month) ?? null;
   const locked = isYearClosed(yearLocks, year);
@@ -17427,10 +17461,11 @@ function PayrollPage({
         attendance: own,
         settings,
         otherDeductions: Number(deductions[employee.id]) || 0,
+        advanceDeduction: Number(advances[employee.id]) || 0,
         yearOvertimeHours: priorOvertime,
       });
     });
-  }, [active, attendance, month, settings, deductions, year]);
+  }, [active, attendance, month, settings, deductions, advances, year]);
 
   const lines = existing ? existing.lines : computed;
   const totals = payrollTotals(lines);
@@ -17457,6 +17492,11 @@ function PayrollPage({
       lines: computed,
       deductions: Object.fromEntries(
         Object.entries(deductions).map(([k, v]) => [k, Number(v) || 0])
+      ),
+      advanceDeductions: Object.fromEntries(
+        Object.entries(advances)
+          .map(([k, v]) => [k, Number(v) || 0])
+          .filter(([, v]) => (v as number) > 0)
       ),
       note: "",
     };
@@ -17504,10 +17544,10 @@ function PayrollPage({
     let no = nextEntryNo;
 
     for (const line of existing.lines) {
-      if (line.net <= 0) continue;
       const employee = employees.find((e) => e.id === line.employeeId);
       if (!employee) continue;
 
+      if (line.net > 0)
       movements.push({
         id: newId(),
         entryNo: no++,
@@ -17534,6 +17574,37 @@ function PayrollPage({
         approvedAt: new Date().toISOString(),
         approvalNote: `مرحّل من مسيّر رواتب ${monthLabel(month)}`,
       });
+
+      /*
+        سداد السلفة قيدٌ ثانٍ: الراتب مصروفٌ بكامله، والمسدَّد منه يُقفل
+        حساب السلف. ولو رُحّل الصافي وحده لظهر الراتب ناقصاً في الدفاتر
+        وبقيت السلفة مفتوحةً في الميزانية أبداً.
+      */
+      const advance = round3(line.advanceDeduction || 0);
+      if (advance > 0) {
+        movements.push({
+          id: newId(),
+          entryNo: no++,
+          fiscalYear: year,
+          date: last,
+          movementType: "سداد سلفة",
+          description: `سداد سلفة من راتب ${monthLabel(month)} — ${line.employeeName}`,
+          itemCode: "",
+          itemName: "سلف وعهد الموظفين",
+          debitCode: wageAccountOf(employee),
+          creditCode: EMPLOYEE_ADVANCE_ACCOUNT,
+          amount: advance,
+          project: employee.project,
+          person: line.employeeName,
+          paymentMethod: "",
+          party: line.employeeName,
+          source: "app",
+          approval: "معتمدة",
+          approvedBy: currentUserName,
+          approvedAt: new Date().toISOString(),
+          approvalNote: `مرحّل من مسيّر رواتب ${monthLabel(month)}`,
+        });
+      }
     }
 
     if (movements.length === 0) {
@@ -17714,6 +17785,7 @@ function PayrollPage({
                 <Th>خصم مرضي</Th>
                 <Th>تأمينات</Th>
                 <Th>خصم آخر</Th>
+                <Th>سداد سلفة</Th>
                 <Th>الصافي</Th>
                 <Th>كشف</Th>
               </tr>
@@ -17773,6 +17845,52 @@ function PayrollPage({
                         placeholder="0"
                         className="w-24 rounded border border-slate-300 px-2 py-1 no-print"
                       />
+                    )}
+                  </Td>
+                  <Td>
+                    {existing ? (
+                      line.advanceDeduction ? (
+                        fmt(line.advanceDeduction)
+                      ) : (
+                        "—"
+                      )
+                    ) : (
+                      <>
+                        <input
+                          type="number"
+                          step="0.001"
+                          value={advances[line.employeeId] ?? ""}
+                          onChange={(e) =>
+                            setAdvances((p) => ({
+                              ...p,
+                              [line.employeeId]: e.target.value,
+                            }))
+                          }
+                          placeholder="0"
+                          className="w-24 rounded border border-slate-300 px-2 py-1 no-print"
+                        />
+                        {(advanceBalance.get(line.employeeName) ?? 0) > 0 && (
+                          <div className="mt-1 text-xs text-amber-800">
+                            بذمته {fmt(advanceBalance.get(line.employeeName) ?? 0)}
+                            <button
+                              onClick={() =>
+                                setAdvances((p) => ({
+                                  ...p,
+                                  [line.employeeId]: String(
+                                    Math.min(
+                                      advanceBalance.get(line.employeeName) ?? 0,
+                                      line.net
+                                    )
+                                  ),
+                                }))
+                              }
+                              className="mr-2 underline no-print"
+                            >
+                              اخصمها
+                            </button>
+                          </div>
+                        )}
+                      </>
                     )}
                   </Td>
                   <Td>

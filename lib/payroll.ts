@@ -66,6 +66,9 @@ export type Employee = {
   notes: string;
 };
 
+/** سلف الموظفين — يُقفَل بخصم السداد من الراتب */
+export const EMPLOYEE_ADVANCE_ACCOUNT = "1240";
+
 export const WEEK_DAYS = [
   "الأحد",
   "الاثنين",
@@ -293,6 +296,15 @@ export type PayrollLine = {
   gross: number;
   absenceDeduction: number;
   otherDeductions: number;
+
+  /**
+   * ما خُصم من الراتب سداداً لسلفةٍ سابقة.
+   *
+   * وهو غير «الخصومات الأخرى»: تلك جزاءٌ أو تسويةٌ تُنقص المصروف، وهذا
+   * استردادُ مالٍ سُلّم سلفاً — فيُقفل به حساب سلف الموظفين، ويبقى
+   * الراتب مصروفاً بكامله.
+   */
+  advanceDeduction: number;
   socialInsurance: number;
   totalDeductions: number;
   net: number;
@@ -312,6 +324,8 @@ export function computePayrollLine(input: {
   attendance: AttendanceDay[];
   settings: PayrollSettings;
   otherDeductions?: number;
+  /** سداد سلفة يُخصم من هذا الراتب */
+  advanceDeduction?: number;
   yearOvertimeHours?: number;
 }): PayrollLine {
   const { employee, attendance, settings } = input;
@@ -399,8 +413,13 @@ export function computePayrollLine(input: {
       : 0;
 
   const otherDeductions = round3(input.otherDeductions ?? 0);
+  const advanceDeduction = round3(input.advanceDeduction ?? 0);
   const totalDeductions = round3(
-    absenceDeduction + sickDeduction + socialInsurance + otherDeductions
+    absenceDeduction +
+      sickDeduction +
+      socialInsurance +
+      otherDeductions +
+      advanceDeduction
   );
 
   if (
@@ -433,6 +452,7 @@ export function computePayrollLine(input: {
     gross,
     absenceDeduction,
     otherDeductions,
+    advanceDeduction,
     socialInsurance,
     totalDeductions,
     net: round3(gross - totalDeductions),
@@ -550,6 +570,8 @@ export type PayrollRun = {
   lines: PayrollLine[];
   /** خصومات إضافية أُدخلت يدوياً: معرّف الموظف ← المبلغ */
   deductions: Record<string, number>;
+  /** سداد السلف من رواتب هذا الشهر: معرّف الموظف ← المبلغ */
+  advanceDeductions?: Record<string, number>;
   note: string;
 };
 
