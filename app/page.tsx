@@ -16973,6 +16973,44 @@ function AttendancePage({
     setMessage(`أُضيف ${additions.length} يوماً`);
   };
 
+  /*
+    حضورٌ خارج مدّة الخدمة: يقع حين يُملأ الحضور لموظفٍ بلا تاريخ تعيين
+    ثم يُسجَّل تاريخه بعد ذلك. فتبقى أيامٌ قبل التحاقه — تُفسد نهاية
+    خدمته ومسيّر شهرها لو رُحّل.
+  */
+  const outsideService = useMemo(
+    () =>
+      attendance.filter((r) => {
+        const e = employees.find((x) => x.id === r.employeeId);
+        if (!e) return false;
+        if (e.hireDate && r.date < e.hireDate) return true;
+        if (e.endDate && r.date > e.endDate) return true;
+        return false;
+      }),
+    [attendance, employees]
+  );
+
+  const cleanOutside = () => {
+    if (outsideService.length === 0) return;
+    const names = [...new Set(outsideService.map((r) => employees.find((e) => e.id === r.employeeId)?.name ?? "?"))];
+    if (
+      !window.confirm(
+        `حذف ${outsideService.length} يوماً مسجَّلاً خارج مدّة الخدمة؟\n\n${names.join("، ")}\n\nهي أيامٌ قبل تاريخ التعيين أو بعد انتهاء الخدمة، ولا تُحذف غيرها.`
+      )
+    ) {
+      return;
+    }
+    const ids = new Set(outsideService.map((r) => r.id));
+    setAttendance((prev) => prev.filter((r) => !ids.has(r.id)));
+    onLog(
+      "حذف",
+      "بيانات النظام",
+      `حذف ${outsideService.length} يوم حضورٍ خارج مدّة الخدمة`,
+      { after: names.join("، ") }
+    );
+    setMessage(`حُذف ${outsideService.length} يوماً خارج مدّة الخدمة`);
+  };
+
   /** أشهرٌ متتابعة من «من» إلى «إلى» */
   const monthsBetween = (from: string, to: string): string[] => {
     const list: string[] = [];
@@ -17234,6 +17272,27 @@ function AttendancePage({
 
         {message && (
           <p className="mb-4 text-sm font-medium text-green-700">{message}</p>
+        )}
+
+        {outsideService.length > 0 && (
+          <Banner tone="warn">
+            <b>{outsideService.length}</b> يوم حضورٍ مسجَّل خارج مدّة الخدمة —
+            قبل تاريخ التعيين أو بعد انتهائها:{" "}
+            {[
+              ...new Set(
+                outsideService.map(
+                  (r) => employees.find((e) => e.id === r.employeeId)?.name ?? "?"
+                )
+              ),
+            ].join("، ")}
+            .
+            <button
+              onClick={cleanOutside}
+              className="mr-3 rounded-lg bg-white px-3 py-1 font-bold text-amber-900 underline"
+            >
+              احذفها
+            </button>
+          </Banner>
         )}
 
         {/* تعبئة فترة ماضية — قبل أن يبدأ التسجيل اليومي */}

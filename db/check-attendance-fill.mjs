@@ -176,11 +176,39 @@ check(
   `${line.sickDays} يوم`
 );
 
+console.log("\nوالحضور خارج مدّة الخدمة يُكشف ويُحذف:\n");
+
+/* من التحق متأخراً وقد مُلئ له حضورٌ قبل تاريخه */
+const late = { ...one, hireDate: "2026-08-10" };
+const outside = [...existing, ...added].filter((r) => {
+  const e = r.employeeId === late.id ? late : employees.find((x) => x.id === r.employeeId);
+  if (!e) return false;
+  if (e.hireDate && r.date < e.hireDate) return true;
+  if (e.endDate && r.date > e.endDate) return true;
+  return false;
+});
+check(
+  "يُكشف الحضور قبل تاريخ التعيين",
+  outside.length > 0 && outside.every((r) => r.employeeId === late.id && r.date < late.hireDate),
+  `${outside.length} يوماً`
+);
+const cleaned = [...existing, ...added].filter((r) => !outside.some((o) => o.id === r.id));
+check(
+  "وحذفُه لا يمسّ حضور غيره",
+  cleaned.filter((r) => r.employeeId !== late.id).length ===
+    [...existing, ...added].filter((r) => r.employeeId !== late.id).length
+);
+check(
+  "ولا يبقى بعده يومٌ خارج المدّة",
+  !cleaned.some((r) => r.employeeId === late.id && r.date < late.hireDate)
+);
+
 /* والشاشة */
 const page = fs.readFileSync("app/page.tsx", "utf8");
 check("وللشاشة زرّ «املأ الفترة حضوراً»", page.includes("املأ الفترة حضوراً"));
 check("ويُختار فيها الموظفون أو الكل", page.includes("setFillWho"));
 check("ولا تمسّ المسجَّل", page.includes("if (taken.has(`${employee.id}|${date}`)) continue;"));
+check("ولافتةٌ تكشف الحضور خارج مدّة الخدمة", page.includes("outsideService"));
 
 console.log(
   bad === 0
