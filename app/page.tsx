@@ -17045,9 +17045,16 @@ function AttendancePage({
   const [fillFrom, setFillFrom] = useState("");
   const [fillTo, setFillTo] = useState("");
   const [fillWho, setFillWho] = useState<string[]>([]);
+  /* من يُسجَّل حضوره اليوم — فارغٌ يعني الجميع */
+  const [todayWho, setTodayWho] = useState<string[]>([]);
 
   const active = employees.filter((e) => e.active);
   const days = useMemo(() => monthDays(month), [month]);
+  /* بتوقيت الكويت — فمن سجّل بعد منتصف الليل سجّل ليومه */
+  const today = todayISO();
+  const doneToday = active.filter((e) =>
+    attendance.some((r) => r.employeeId === e.id && r.date === today)
+  ).length;
 
   /** سجلات الشهر مفهرسة: موظف|تاريخ */
   const index = useMemo(() => {
@@ -17079,6 +17086,13 @@ function AttendancePage({
     const additions: AttendanceDay[] = [];
     for (const employee of active) {
       for (const date of days) {
+        /*
+          لا يُملأ غدٌ لم يأتِ: الشهر الجاري يُملأ إلى اليوم وحده، وإلا
+          صار في الدفاتر حضورٌ لأيامٍ لم تقع بعد.
+        */
+        if (date > today) continue;
+        if (employee.hireDate && date < employee.hireDate) continue;
+        if (employee.endDate && date > employee.endDate) continue;
         if (index.has(`${employee.id}|${date}`)) continue;
         const rest = dayName(date) === employee.restDay;
         additions.push({
@@ -17147,6 +17161,87 @@ function AttendancePage({
   };
 
   /** أشهرٌ متتابعة من «من» إلى «إلى» */
+  /**
+   * حضور اليوم بضغطةٍ واحدة.
+   *
+   * التسجيل اليومي هو العمل الدائم، وتعبئةُ الشهر إنما كانت للفترة
+   * الورقية الماضية. ولو لزم أن يُدخَل أحدَ عشرَ موظفاً واحداً واحداً
+   * كل صباح لتُرك التسجيل بعد أسبوع.
+   *
+   * فالأصل أن الجميع حاضرون: تُضغط ضغطةً فيُسجَّل من على رأس العمل —
+   * كلُّهم أو من يُختار — ثم تُسجَّل الاستثناءات وحدها. ولا يُمسّ يومٌ
+   * سُجّل، فمن غاب اليوم وسُجّل غيابه يبقى غائباً.
+   */
+  const fillToday = () => {
+    const chosen =
+      todayWho.length > 0 ? active.filter((e) => todayWho.includes(e.id)) : active;
+    if (chosen.length === 0) {
+      setMessage("لا موظفين مختارين");
+      return;
+    }
+
+    const taken = new Set(attendance.map((r) => `${r.employeeId}|${r.date}`));
+    const additions: AttendanceDay[] = [];
+    let outside = 0;
+    let already = 0;
+
+    for (const employee of chosen) {
+      if (employee.hireDate && today < employee.hireDate) {
+        outside++;
+        continue;
+      }
+      if (employee.endDate && today > employee.endDate) {
+        outside++;
+        continue;
+      }
+      if (taken.has(`${employee.id}|${today}`)) {
+        already++;
+        continue;
+      }
+      const rest = dayName(today) === employee.restDay;
+      additions.push({
+        id: newId(),
+        employeeId: employee.id,
+        date: today,
+        status: rest ? "راحة أسبوعية" : "حاضر",
+        hours: rest ? 0 : settings.dailyHours,
+        overtimeHours: 0,
+        restDayHours: 0,
+        holidayHours: 0,
+        note: "",
+      });
+    }
+
+    if (additions.length === 0) {
+      setMessage(
+        already > 0
+          ? `حضور اليوم مسجَّل — ${already} موظفاً، ولا شيء لإضافته`
+          : "لا أحد على رأس العمل اليوم"
+      );
+      return;
+    }
+
+    setAttendance((prev) => [...prev, ...additions]);
+    onLog(
+      "إنشاء",
+      "بيانات النظام",
+      `حضور اليوم ${today} — ${additions.length} موظفاً`,
+      {
+        after:
+          todayWho.length > 0
+            ? additions
+                .map((a) => active.find((e) => e.id === a.employeeId)?.name ?? "")
+                .join("، ")
+            : "كل الموظفين على رأس العمل",
+      }
+    );
+    setMessage(
+      `سُجّل حضور اليوم لـ ${additions.length} موظفاً` +
+        (already > 0 ? ` · ${already} كان مسجَّلاً` : "") +
+        (outside > 0 ? ` · ${outside} خارج مدّة الخدمة` : "")
+    );
+  };
+
   const monthsBetween = (from: string, to: string): string[] => {
     const list: string[] = [];
     const [fy, fm] = from.split("-").map(Number);
@@ -17429,6 +17524,69 @@ function AttendancePage({
             </button>
           </Banner>
         )}
+
+        {/* حضور اليوم — العمل الدائم، بضغطة */}
+        <div className="mb-5 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+          <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+            <p className="font-bold">
+              حضور اليوم — {dayName(today)} {today}
+            </p>
+            <span className="text-sm text-slate-600">
+              {doneToday} من {active.length} مسجَّلون
+            </span>
+          </div>
+          <p className="mb-3 text-sm text-slate-600">
+            الأصل أن الجميع حاضرون: سجّلهم بضغطة ثم سجّل الاستثناءات وحدها من
+            اللوحة أدناه. <b>ولا يتغيّر من سُجّل اليوم</b> — ولا يُسجَّل من كان
+            خارج مدّة خدمته.
+          </p>
+          <Field
+            label="من يُسجَّل"
+            hint={
+              todayWho.length === 0
+                ? `الكل — ${active.length} موظفاً على رأس العمل`
+                : `${todayWho.length} مختارين`
+            }
+          >
+            <div className="flex flex-wrap gap-2 rounded-lg border border-slate-300 bg-white p-2">
+              <button
+                onClick={() => setTodayWho([])}
+                className={`rounded-lg px-3 py-1 text-sm ${
+                  todayWho.length === 0
+                    ? "bg-emerald-600 font-bold text-white"
+                    : "bg-slate-100"
+                }`}
+              >
+                الكل
+              </button>
+              {active.map((e) => (
+                <button
+                  key={e.id}
+                  onClick={() =>
+                    setTodayWho((prev) =>
+                      prev.includes(e.id)
+                        ? prev.filter((x) => x !== e.id)
+                        : [...prev, e.id]
+                    )
+                  }
+                  className={`rounded-lg px-3 py-1 text-sm ${
+                    todayWho.includes(e.id)
+                      ? "bg-emerald-600 font-bold text-white"
+                      : "bg-slate-100"
+                  }`}
+                >
+                  {e.name}
+                </button>
+              ))}
+            </div>
+          </Field>
+          <button
+            onClick={fillToday}
+            className="mt-3 rounded-lg bg-emerald-600 px-6 py-3 font-bold text-white"
+          >
+            سجّل حضور اليوم
+          </button>
+        </div>
 
         {/* تعبئة فترة ماضية — قبل أن يبدأ التسجيل اليومي */}
         <div className="mb-5 rounded-xl border border-blue-200 bg-blue-50 p-4">

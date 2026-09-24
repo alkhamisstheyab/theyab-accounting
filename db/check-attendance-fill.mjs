@@ -203,12 +203,104 @@ check(
   !cleaned.some((r) => r.employeeId === late.id && r.date < late.hireDate)
 );
 
+console.log("\nوحضور اليوم بضغطة:\n");
+
+/** تسجيل اليوم كما تفعله الشاشة: من على رأس العمل، ولا يُمسّ من سُجّل */
+const fillDay = (existing, chosen, day) => {
+  const taken = new Set(existing.map((r) => `${r.employeeId}|${r.date}`));
+  const out = [];
+  for (const employee of chosen) {
+    if (employee.hireDate && day < employee.hireDate) continue;
+    if (employee.endDate && day > employee.endDate) continue;
+    if (taken.has(`${employee.id}|${day}`)) continue;
+    const rest = dayName(day) === employee.restDay;
+    out.push({
+      id: `${employee.id}|${day}`,
+      employeeId: employee.id,
+      date: day,
+      status: rest ? "راحة أسبوعية" : "حاضر",
+      hours: rest ? 0 : settings.dailyHours,
+      overtimeHours: 0,
+      restDayHours: 0,
+      holidayHours: 0,
+      note: "",
+    });
+  }
+  return out;
+};
+
+/* من غاب اليوم وسُجّل غيابه قبل الضغطة */
+const absentToday = {
+  id: "t",
+  employeeId: one.id,
+  date: TODAY,
+  status: "غياب بدون عذر",
+  hours: 0,
+  overtimeHours: 0,
+  restDayHours: 0,
+  holidayHours: 0,
+  note: "",
+};
+
+const inService = employees.filter(
+  (e) => (!e.hireDate || e.hireDate <= TODAY) && (!e.endDate || e.endDate >= TODAY)
+);
+const dayAdds = fillDay([absentToday], employees, TODAY);
+
+check(
+  "ضغطةٌ واحدة تسجّل من على رأس العمل",
+  dayAdds.length === inService.length - 1,
+  `${dayAdds.length} من ${inService.length} — والغائب مسجَّل قبلها`
+);
+check(
+  "ولا يومَ إلا اليوم",
+  dayAdds.every((r) => r.date === TODAY)
+);
+check(
+  "ومن سُجّل غيابه اليوم يبقى غائباً",
+  !dayAdds.some((r) => r.employeeId === one.id)
+);
+check(
+  "ومن يوم راحته اليوم يُعلَّم راحةً",
+  dayAdds
+    .filter((r) => {
+      const e = employees.find((x) => x.id === r.employeeId);
+      return dayName(TODAY) === e.restDay;
+    })
+    .every((r) => r.status === "راحة أسبوعية" && r.hours === 0)
+);
+check(
+  "والضغطة الثانية لا تضيف شيئاً",
+  fillDay([absentToday, ...dayAdds], employees, TODAY).length === 0
+);
+
+const two = inService.filter((e) => e.id !== one.id).slice(0, 2);
+check(
+  "واختيار عددٍ بعينه يسجّلهم وحدهم",
+  (() => {
+    const some = fillDay([], two, TODAY);
+    return some.length === two.length && some.every((r) => two.some((e) => e.id === r.employeeId));
+  })(),
+  two.map((e) => e.name).join("، ")
+);
+
+check(
+  "ومن لم يلتحق بعد لا يُسجَّل",
+  fillDay([], [{ ...one, hireDate: "2027-01-01" }], TODAY).length === 0
+);
+
 /* والشاشة */
 const page = fs.readFileSync("app/page.tsx", "utf8");
 check("وللشاشة زرّ «املأ الفترة حضوراً»", page.includes("املأ الفترة حضوراً"));
 check("ويُختار فيها الموظفون أو الكل", page.includes("setFillWho"));
 check("ولا تمسّ المسجَّل", page.includes("if (taken.has(`${employee.id}|${date}`)) continue;"));
 check("ولافتةٌ تكشف الحضور خارج مدّة الخدمة", page.includes("outsideService"));
+check("وزرّ «سجّل حضور اليوم»", page.includes("سجّل حضور اليوم"));
+check("يُختار فيه الموظفون أو الكل", page.includes("setTodayWho"));
+check(
+  "وتعبئة الشهر لا تسبق اليوم",
+  page.includes("if (date > today) continue;")
+);
 
 console.log(
   bad === 0
