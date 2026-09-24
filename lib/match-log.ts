@@ -13,6 +13,8 @@
  * بانتهائها، لا بياناتٌ للشركة تُحفظ وتُنقل.
  */
 
+import { dayOf } from "./today";
+
 const KEY = "theyab:match-log";
 /** يكفي لعدّة أشهر من مقارنةٍ يومية، ولا يُثقل التخزين */
 const MAX_ENTRIES = 200;
@@ -57,7 +59,8 @@ export const matchRuns = (): MatchRun[] => read();
  * فاختلفتا ثم أصلح وقارن مساءً فتطابقتا، فيومُه يومُ تطابق.
  */
 export function recordMatch(run: Omit<MatchRun, "day">): MatchRun[] {
-  const day = run.at.slice(0, 10);
+  /* اليوم بتوقيت الكويت لا غرينتش: مقارنةُ الواحدة ليلاً يومُها يومها */
+  const day = dayOf(run.at);
   const runs = read().filter((r) => r.day !== day);
   runs.push({ ...run, day });
   runs.sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0));

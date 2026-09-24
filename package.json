@@ -30,6 +30,7 @@
     "check:pull": "node db/check-pull.mjs",
     "check:entry-collision": "node db/check-entry-collision.mjs",
     "check:permissions": "node db/check-server-permissions.mjs",
+    "check:kuwait-day": "node db/check-kuwait-day.mjs",
     "render:print": "node db/render-print.mjs",
     "check:login": "node db/check-login.mjs",
     "verify:live": "node db/verify-live.mjs",

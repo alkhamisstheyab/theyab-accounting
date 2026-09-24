@@ -228,6 +228,7 @@ import {
   verdict,
   type MatchRun,
 } from "@/lib/match-log";
+import { todayISO } from "@/lib/today";
 import type { AppState } from "@/lib/storage";
 import {
   COST_STALE_DAYS,
@@ -2447,8 +2448,6 @@ const Empty = ({ children }: { children: ReactNode }) => (
 
 const accountLabel = (code: string) =>
   code ? `${code} — ${getAccount(code)?.name ?? "?"}` : "—";
-
-const todayISO = () => new Date().toISOString().slice(0, 10);
 
 /* ================================================================== */
 /* شريط الفترة                                                         */
@@ -11268,7 +11267,7 @@ function QuotationsPage({
       ...source,
       id: newId(),
       number: nextQuotationNumber(quotations, year),
-      date: new Date().toISOString().slice(0, 10),
+      date: todayISO(),
       status: "مسودة",
       contractNumber: "",
       lines: source.lines.map((l) => ({ ...l })),
@@ -11289,7 +11288,7 @@ function QuotationsPage({
     const quotation: Quotation = {
       id: newId(),
       number: nextQuotationNumber(quotations, year),
-      date: new Date().toISOString().slice(0, 10),
+      date: todayISO(),
       status: "مسودة",
       clientName: "",
       clientPhone: "",
