@@ -188,6 +188,7 @@ import {
 } from "@/lib/storage";
 import {
   fetchServerState,
+  pushDeletions,
   record as recordForSync,
   rememberLoaded,
   setSyncEnabled,
@@ -14761,6 +14762,43 @@ function ServerMatchPage({
     }
   };
 
+  /*
+    الزائد على الخادم: صفوفٌ حُذفت من الجهاز ولم يبلغه حذفها — يقع حين
+    يُغلق المتصفّح قبل أن تُرسل. وسجلّ التدقيق ليس منها: لا يُحذف منه
+    شيء، بل يُستردّ.
+  */
+  const staleOnServer = (fields ?? []).filter(
+    (f) => f.field !== "audit" && f.extra.length > 0
+  );
+  const staleCount = staleOnServer.reduce((n, f) => n + f.extra.length, 0);
+  const [purging, setPurging] = useState(false);
+
+  const purgeStale = async () => {
+    const where = staleOnServer
+      .map((f) => `${FIELD_LABELS[f.field] ?? f.field}: ${f.extra.length}`)
+      .join(" · ");
+    if (
+      !window.confirm(
+        `حذف ${staleCount} صفاً من الخادم؟\n\n${where}\n\nهي صفوفٌ حذفتها من جهازك ولم يبلغ الخادم حذفها. ولا يُحذف من الخادم غيرها، ولا يُمسّ جهازك.`
+      )
+    ) {
+      return;
+    }
+    setPurging(true);
+    setProblem("");
+    try {
+      const deletes: Record<string, string[]> = {};
+      for (const f of staleOnServer) deletes[f.field] = f.extra;
+      const done = await pushDeletions(deletes);
+      setFields(null);
+      setNote(`حُذف ${done} صفاً من الخادم — اضغط «قارن الآن»`);
+    } catch (error) {
+      setProblem(error instanceof Error ? error.message : "تعذّر الحذف");
+    } finally {
+      setPurging(false);
+    }
+  };
+
   const judgement = verdict(runs);
   const today = todayISO();
   const doneToday = comparedToday(today, runs);
@@ -14918,6 +14956,29 @@ function ServerMatchPage({
           title="تقرير المقارنة"
           subtitle={`قُورن في ${new Date(comparedAt).toLocaleString("ar-KW")}`}
         >
+          {staleCount > 0 ? (
+            <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-4">
+              <p className="mb-2 font-bold text-amber-900">
+                في الخادم {staleCount} صفاً حذفتَه من جهازك
+              </p>
+              <p className="mb-3 text-sm text-amber-900">
+                {staleOnServer
+                  .map((f) => `${FIELD_LABELS[f.field] ?? f.field}: ${f.extra.length}`)
+                  .join(" · ")}
+                . حُذفت من الجهاز ولم يبلغ الخادمَ حذفُها — يقع ذلك إن أُغلق
+                المتصفّح قبل أن تُرسل. والجهاز هو المرجع، فتُحذف من الخادم.
+              </p>
+              <button
+                type="button"
+                onClick={purgeStale}
+                disabled={purging}
+                className="rounded-lg bg-amber-700 px-5 py-2 font-bold text-white disabled:cursor-not-allowed disabled:bg-slate-300"
+              >
+                {purging ? "يحذف…" : `احذفها من الخادم (${staleCount})`}
+              </button>
+            </div>
+          ) : null}
+
           {auditExtra > 0 ? (
             <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-4">
               <p className="mb-2 font-bold text-amber-900">
