@@ -28,6 +28,7 @@
     "check:attendance-fill": "node db/check-attendance-fill.mjs",
     "check:pending-deletes": "node db/check-pending-deletes.mjs",
     "check:pull": "node db/check-pull.mjs",
+    "check:entry-collision": "node db/check-entry-collision.mjs",
     "render:print": "node db/render-print.mjs",
     "check:login": "node db/check-login.mjs",
     "verify:live": "node db/verify-live.mjs",

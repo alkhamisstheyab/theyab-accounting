@@ -61,6 +61,12 @@ export type SyncStatus = {
   pending: number;
   lastSyncAt: string;
   lastError: string;
+  /**
+   * حركاتٌ غيّر الخادم أرقام قيودها لأنها كانت مأخوذة.
+   *
+   * تُعرض لصاحبها: فقد يكون طبع سنداً بالرقم القديم، أو كتبه في ورقة.
+   */
+  renumbered: { id: string; from: number; to: number }[];
 };
 
 let status: SyncStatus = {
@@ -69,6 +75,7 @@ let status: SyncStatus = {
   rev: 0,
   pending: 0,
   lastSyncAt: "",
+  renumbered: [],
   lastError: "",
 };
 
@@ -416,6 +423,9 @@ async function flush(): Promise<void> {
       pending: 0,
       lastError: "",
       lastSyncAt: new Date().toISOString(),
+      renumbered: Array.isArray(body?.renumbered)
+        ? (body.renumbered as SyncStatus["renumbered"])
+        : [],
     });
 
     /* تغيّر شيءٌ أثناء الإرسال؟ يُرسل في الدورة التالية */

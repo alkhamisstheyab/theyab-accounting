@@ -14900,6 +14900,19 @@ function ServerMatchPage({
                 ? ` · آخر إرسال ${new Date(status.lastSyncAt).toLocaleTimeString("ar-KW")}`
                 : ""}
               {status?.lastError ? ` · ${status.lastError}` : ""}
+              {/*
+                رقمٌ غيّره الخادم يُقال لصاحبه: قد يكون طبع سنداً بالرقم
+                القديم أو كتبه في ورقة، فلا يُترك ليكتشفه بعد أسبوع.
+              */}
+              {status?.renumbered?.length ? (
+                <div className="mt-2 font-bold">
+                  تصادم رقم قيد — غيّره الخادم:{" "}
+                  {status.renumbered
+                    .map((r) => `${r.from} ← ${r.to}`)
+                    .join("، ")}
+                  . والسبب أن الرقم كان مأخوذاً، فأُعطيت الحركة التالي الحرّ.
+                </div>
+              ) : null}
             </>
           ) : (
             <>

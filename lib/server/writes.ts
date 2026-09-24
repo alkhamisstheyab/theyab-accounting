@@ -41,12 +41,82 @@ export type ApplyResult = {
   rev: number;
   written: number;
   deleted: number;
+  /** حركاتٌ أُعطيت أرقام قيودٍ جديدة لأن أرقامها كانت مأخوذة */
+  renumbered?: { id: string; from: number; to: number }[];
 };
 
 /** أعلى رقم تغيير في القاعدة الآن */
 export async function currentRev(db: Queryable): Promise<number> {
   const { rows } = await db.query("SELECT last_value::bigint AS v FROM change_seq");
   return Number(rows[0]?.v ?? 0);
+}
+
+/**
+ * يمنع تصادم أرقام القيود.
+ *
+ * رقم القيد مفتاحٌ فريد في سنته. والمتصفّح يحسبه من عنده — «أعلى رقمٍ
+ * يعرفه زائد واحد» — فإن أدخل اثنان في اللحظة نفسها أخذا الرقم نفسه،
+ * فيرفض الخادم الثانية ويقف العمل على من لا ذنب له.
+ *
+ * فبدل الرفض يُعطى التالي الحرّ: الحركة تُحفظ، ورقمها يتغيّر وحده،
+ * ويُخبَر المتصفّح بما جرى ليعرضه على صاحبه.
+ *
+ * والقفل يُؤخذ على السنة وحدها ويُفكّ بانتهاء المعاملة، فكاتبان في
+ * سنتين لا ينتظر أحدهما الآخر، وكاتبان في سنةٍ واحدة لا يأخذان رقماً
+ * واحداً.
+ */
+async function resolveEntryNumbers(
+  db: Queryable,
+  rows: Row[]
+): Promise<{ id: string; from: number; to: number }[]> {
+  const renumbered: { id: string; from: number; to: number }[] = [];
+  const years = [
+    ...new Set(rows.map((r) => Number(r.fiscalYear) || 0).filter(Boolean)),
+  ];
+  if (years.length === 0) return renumbered;
+
+  for (const year of years) {
+    await db.query("SELECT pg_advisory_xact_lock(872001, $1)", [year]);
+  }
+
+  /* المأخوذ في القاعدة: الرقم وصاحبه، فلا يُزاحم الصفُّ نفسَه */
+  const taken = new Map<string, string>();
+  const top = new Map<number, number>();
+  for (const year of years) {
+    const { rows: used } = await db.query(
+      "SELECT id, entry_no FROM movements WHERE fiscal_year = $1",
+      [year]
+    );
+    let highest = 1000;
+    for (const r of used) {
+      const no = Number(r.entry_no) || 0;
+      taken.set(`${year}|${no}`, String(r.id));
+      if (no > highest) highest = no;
+    }
+    top.set(year, highest);
+  }
+
+  for (const row of rows) {
+    const year = Number(row.fiscalYear) || 0;
+    if (!year) continue;
+    const id = uuid(String(row.id ?? ""));
+    const wanted = Number(row.entryNo) || 0;
+    const owner = taken.get(`${year}|${wanted}`);
+
+    /* الرقم حرٌّ أو هو رقم هذا الصفّ نفسه — يُترك كما هو */
+    if (wanted > 0 && (!owner || owner === id)) {
+      taken.set(`${year}|${wanted}`, id);
+      continue;
+    }
+
+    const next = (top.get(year) ?? 1000) + 1;
+    top.set(year, next);
+    taken.set(`${year}|${next}`, id);
+    renumbered.push({ id: String(row.id ?? ""), from: wanted, to: next });
+    row.entryNo = next;
+  }
+
+  return renumbered;
 }
 
 /**
@@ -282,11 +352,19 @@ export async function applyChangesIn(
   db: Queryable,
   changes: ChangeSet,
   actor: string
-): Promise<{ written: number; deleted: number }> {
+): Promise<{
+  written: number;
+  deleted: number;
+  renumbered: { id: string; from: number; to: number }[];
+}> {
   let written = 0;
   let deleted = 0;
 
+  const renumbered: { id: string; from: number; to: number }[] = [];
   for (const [field, rows] of Object.entries(changes.upserts ?? {})) {
+    if (field === "movements") {
+      renumbered.push(...(await resolveEntryNumbers(db, rows)));
+    }
     written += await upsert(db, field, rows, actor);
   }
   for (const [field, ids] of Object.entries(changes.deletes ?? {})) {
@@ -297,7 +375,7 @@ export async function applyChangesIn(
     written += await writeWhole(db, field, value);
   }
 
-  return { written, deleted };
+  return { written, deleted, renumbered };
 }
 
 /**
@@ -316,7 +394,7 @@ export async function applyChanges(
   actor: string
 ): Promise<ApplyResult> {
   await db.query("BEGIN");
-  let counts: { written: number; deleted: number };
+  let counts: Awaited<ReturnType<typeof applyChangesIn>>;
   try {
     counts = await applyChangesIn(db, changes, actor);
     await db.query("COMMIT");
