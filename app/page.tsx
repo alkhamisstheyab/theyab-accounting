@@ -181,6 +181,7 @@ import {
   loadState,
   newId,
   parseBackup,
+  normalizeState,
   receiptCost,
   saveState,
   COUNTERPARTY_TYPES,
@@ -189,6 +190,8 @@ import {
 import {
   fetchServerState,
   pushDeletions,
+  onIncoming,
+  type Incoming,
   record as recordForSync,
   rememberLoaded,
   setSyncEnabled,
@@ -198,6 +201,7 @@ import {
   type SyncStatus,
 } from "@/lib/sync";
 import { compareStates, type FieldComparison } from "@/lib/changes";
+import { ROW_COLLECTIONS } from "@/lib/collections";
 import { isAdminExpenseToGeneral } from "@/lib/admin-to-general";
 import {
   findDuplicateMovements,
@@ -761,6 +765,64 @@ export default function HomeV2() {
     } · مدين ${m.debitCode} / دائن ${m.creditCode}`;
 
   /** الإشعارات — محسوبة لحظة العرض، ومصفّاة على صلاحيات صاحبها */
+  /*
+    ما يصل من الخادم — عملُ غيرك.
+
+    يُدخَل في الشاشة صفّاً صفّاً: ما كُتب عندهم يحلّ محلّ نظيره، وما
+    حُذف يزول. ولا يصل إلى هنا صفٌّ مسّه هذا الجهاز ولم يُرسل بعد —
+    تلك تُسقطها المزامنة قبل التسليم، فلا يُمحى عملٌ تحت يد صاحبه.
+
+    والصفوف تمرّ على المُرحِّل نفسه الذي يمرّ عليه الملف المستورد، فلا
+    يدخل الشاشةَ صفٌّ بصورةٍ قديمة.
+  */
+  useEffect(
+    () =>
+      onIncoming((incoming: Incoming) => {
+        const normalized = normalizeState({
+          ...incoming.upserts,
+        } as Record<string, unknown>);
+
+        const setters: Partial<
+          Record<string, Dispatch<SetStateAction<Record<string, unknown>[]>>>
+        > = {
+          movements: setMovements as never,
+          projects: setProjects as never,
+          contractors: setContractors as never,
+          materials: setMaterials as never,
+          materialReceipts: setMaterialReceipts as never,
+          users: setUsers as never,
+          employees: setEmployees as never,
+          attendance: setAttendance as never,
+          payrollRuns: setPayrollRuns as never,
+          workItems: setWorkItems as never,
+          quotations: setQuotations as never,
+          invoices: setInvoices as never,
+          audit: setAudit as never,
+        };
+
+        for (const collection of ROW_COLLECTIONS) {
+          const field = collection.field as string;
+          const set = setters[field];
+          if (!set) continue;
+
+          const ups = (normalized[collection.field] ??
+            []) as Record<string, unknown>[];
+          const dels = new Set(incoming.deletes[field] ?? []);
+          if (ups.length === 0 && dels.size === 0) continue;
+
+          set((prev) => {
+            const rows = new Map(
+              prev.map((row) => [collection.keyOf(row), row] as const)
+            );
+            for (const row of ups) rows.set(collection.keyOf(row), row);
+            for (const key of dels) rows.delete(key);
+            return [...rows.values()];
+          });
+        }
+      }),
+    []
+  );
+
   const notices = useMemo(
     () =>
       buildNotices({

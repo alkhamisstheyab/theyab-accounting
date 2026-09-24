@@ -13,7 +13,13 @@
  * التطابق أياماً متتالية.
  */
 
-import { diffStates, isEmpty, countChanges, snapshotForServer } from "./changes";
+import {
+  diffStates,
+  isEmpty,
+  countChanges,
+  same,
+  snapshotForServer,
+} from "./changes";
 import { ROW_COLLECTIONS } from "./collections";
 import type { AppState } from "./storage";
 
@@ -33,6 +39,11 @@ const QUIET_MS = 3000;
 /** بعد الإخفاق يُنتظر، ويُضاعَف الانتظار حتى حدّ — فلا يُرهق خادمٌ ساقط */
 const RETRY_MIN_MS = 5000;
 const RETRY_MAX_MS = 300_000;
+/*
+  القراءة من الخادم: كل ثماني ثوانٍ يُسأل عمّا استجدّ بعد آخر رقمٍ وصل.
+  ولا تُطلب الحالة كلها، بل ما تغيّر وحده — فلا يثقل الخادم ولا الشبكة.
+*/
+const PULL_MS = 8000;
 
 export type SyncPhase =
   | "مطفأة"
@@ -82,6 +93,32 @@ let sending = false;
 let backoff = RETRY_MIN_MS;
 
 const listeners = new Set<(s: SyncStatus) => void>();
+
+/** ما وصل من الخادم: صفوفٌ كُتبت أو حُذفت عند غيرك */
+export type Incoming = {
+  upserts: Record<string, Record<string, unknown>[]>;
+  deletes: Record<string, string[]>;
+  rev: number;
+};
+
+let applier: ((incoming: Incoming) => void) | null = null;
+let pullTimer: ReturnType<typeof setTimeout> | null = null;
+let pulling = false;
+
+/**
+ * يشترك في ما يصل من الخادم.
+ *
+ * الشاشة وحدها تعرف كيف تُدخل صفّاً في حالتها، فتُعطى ما وصل وتتولّاه.
+ * ولا يُسلَّم إليها إلا ما لم تمسّه: الصفّ الذي عُدّل هنا ولم يُرسل بعدُ
+ * يبقى كما هو — فالجهاز مرجعٌ فيما أدخله صاحبه، ويأخذ من غيره ما لم
+ * يمسّه.
+ */
+export function onIncoming(fn: (incoming: Incoming) => void): () => void {
+  applier = fn;
+  return () => {
+    if (applier === fn) applier = null;
+  };
+}
 
 /** الحذف المعلّق كما هو محفوظ: الحقل ← مفاتيح */
 function readTombs(): Record<string, string[]> {
@@ -168,7 +205,10 @@ export function setSyncEnabled(on: boolean): void {
   if (on) {
     publish({ enabled: true, phase: "تتّصل", lastError: "" });
     void connect();
+    schedulePull();
   } else {
+    if (pullTimer) clearTimeout(pullTimer);
+    pullTimer = null;
     if (timer) clearTimeout(timer);
     timer = null;
     /*
@@ -371,7 +411,8 @@ async function flush(): Promise<void> {
     backoff = RETRY_MIN_MS;
     publish({
       phase: "متزامنة",
-      rev: Number(body?.rev) || status.rev,
+      /* الرقم لا يتراجع: ردٌّ متأخّر قد يحمل رقماً أقدم مما سُحب */
+      rev: Math.max(Number(body?.rev) || 0, status.rev),
       pending: 0,
       lastError: "",
       lastSyncAt: new Date().toISOString(),
@@ -386,6 +427,112 @@ async function flush(): Promise<void> {
   } finally {
     sending = false;
   }
+}
+
+/** الصفّ المعدَّل هنا ولم يُرسل بعد — لا يُكتب فوقه ما وصل */
+function pendingKeys(field: string): Set<string> {
+  const keys = new Set<string>();
+  if (!snapshot || !latest) return keys;
+  const collection = ROW_COLLECTIONS.find((c) => c.field === field);
+  if (!collection) return keys;
+
+  const before = new Map(
+    ((snapshot[collection.field] ?? []) as Record<string, unknown>[]).map((r) => [
+      collection.keyOf(r),
+      r,
+    ])
+  );
+  /* يُقارَن بصورة التخزين لا بالخام، وإلا بدا كل صفٍّ معدَّلاً */
+  const stored = snapshotForServer(latest);
+  const after = new Map(
+    ((stored[collection.field] ?? []) as Record<string, unknown>[]).map((r) => [
+      collection.keyOf(r),
+      r,
+    ])
+  );
+  for (const [key, row] of after) {
+    if (!before.has(key) || !same(before.get(key), row)) keys.add(key);
+  }
+  for (const key of before.keys()) if (!after.has(key)) keys.add(key);
+  return keys;
+}
+
+/** يُدخل ما وصل في صورة الخادم، فلا يُعاد إرساله إليه */
+function absorb(incoming: Incoming): void {
+  if (!snapshot) return;
+  const next = { ...snapshot } as Record<string, unknown>;
+  for (const collection of ROW_COLLECTIONS) {
+    const field = collection.field as string;
+    const ups = incoming.upserts[field] ?? [];
+    const dels = new Set(incoming.deletes[field] ?? []);
+    if (ups.length === 0 && dels.size === 0) continue;
+
+    const rows = new Map(
+      ((snapshot[collection.field] ?? []) as Record<string, unknown>[]).map((r) => [
+        collection.keyOf(r),
+        r,
+      ])
+    );
+    for (const row of ups) rows.set(collection.keyOf(row), row);
+    for (const key of dels) rows.delete(key);
+    next[field] = [...rows.values()];
+  }
+  /* بصورة التخزين نفسها، وإلا عُدّ الوارد جديداً فأُعيد إرساله */
+  snapshot = snapshotForServer(next as unknown as AppState);
+}
+
+/**
+ * يسأل الخادم عمّا استجدّ ويسلّمه للشاشة.
+ *
+ * ويُسقط ما مسّه هذا الجهاز ولم يُرسل بعد: فلو كتب اثنان الصفّ نفسه
+ * بقي ما هنا حتى يُرسل، ثم يفصل الخادم بينهما برقم الإصدار.
+ */
+async function pull(): Promise<void> {
+  if (pulling || !status.enabled || !snapshot) return;
+  pulling = true;
+  try {
+    const res = await fetch(`/api/data/changes?since=${status.rev || 0}`);
+    if (!res.ok) {
+      if (res.status === 401) publish({ lastError: "يلزم تسجيل الدخول في الخادم" });
+      return;
+    }
+    const body = (await readJson(res)) as Incoming | null;
+    if (!body) return;
+
+    const upserts: Record<string, Record<string, unknown>[]> = {};
+    const deletes: Record<string, string[]> = {};
+    let rows = 0;
+    for (const collection of ROW_COLLECTIONS) {
+      const field = collection.field as string;
+      const mine = pendingKeys(field);
+      const ups = (body.upserts?.[field] ?? []).filter(
+        (row) => !mine.has(collection.keyOf(row))
+      );
+      const dels = (body.deletes?.[field] ?? []).filter((key) => !mine.has(key));
+      if (ups.length) upserts[field] = ups;
+      if (dels.length) deletes[field] = dels;
+      rows += ups.length + dels.length;
+    }
+
+    const incoming: Incoming = { upserts, deletes, rev: Number(body.rev) || 0 };
+    if (rows > 0) {
+      absorb(incoming);
+      applier?.(incoming);
+    }
+    if (incoming.rev > status.rev) publish({ rev: incoming.rev });
+  } catch {
+    /* انقطاعٌ عابر — تُعاد المحاولة في الدورة التالية */
+  } finally {
+    pulling = false;
+  }
+}
+
+function schedulePull(): void {
+  if (pullTimer) clearTimeout(pullTimer);
+  pullTimer = setTimeout(() => {
+    pullTimer = null;
+    void pull().finally(schedulePull);
+  }, PULL_MS);
 }
 
 /**
@@ -428,4 +575,5 @@ export function startSync(): void {
   }
   publish({ enabled: true });
   void connect();
+  schedulePull();
 }
