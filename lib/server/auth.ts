@@ -241,7 +241,15 @@ export async function login(
   }>(
     `SELECT id, name, job_title, role, permissions, password_hash,
             must_change_pin, failed_attempts, locked_until
-     FROM users WHERE name = $1 AND active`,
+     FROM users
+     /*
+       الاسم يُكتب الآن ولا يُختار من قائمة، فالمسافة الزائدة بين
+       كلمتيه خطأٌ مطبعيٌّ لا حسابٌ آخر. وكلمة المرور تبقى كما هي
+       تُقارَن حرفاً حرفاً.
+     */
+     WHERE regexp_replace(btrim(name), '[[:space:]]+', ' ', 'g')
+         = regexp_replace(btrim($1), '[[:space:]]+', ' ', 'g')
+       AND active`,
     [name.trim()]
   );
 

@@ -221,6 +221,13 @@ import {
   type ServerUser,
 } from "@/lib/server-session";
 import {
+  HIDDEN_LOCK_MS,
+  IDLE_LOCK_MS,
+  forgetUser,
+  lastUser,
+  rememberUser,
+} from "@/lib/session";
+import {
   REQUIRED_STREAK,
   comparedToday,
   matchRuns,
@@ -345,7 +352,7 @@ const MOVEMENT_TYPES = [
 export default function HomeV2() {
   const [page, setPage] = useState("الرئيسية");
   /** لوحة تغيير رقم الدخول مفتوحة؟ */
-  const [changingPin, setChangingPin] = useState(false);
+  const [changingPassword, setChangingPassword] = useState(false);
   /** وقت الدخول السابق، مثبَّت عند الدخول — مرجع «ما جرى في غيابك» */
   const [sessionLastSeen, setSessionLastSeen] = useState("");
   const [loaded, setLoaded] = useState(false);
@@ -376,7 +383,11 @@ export default function HomeV2() {
   const [linkedFile, setLinkedFile] = useState<string | null>(null);
   const [backupNotice, setBackupNotice] = useState("");
   const [users, setUsers] = useState<User[]>([]);
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  /* من دخل الخادم: هويّته وصلاحيته معاً، ولا شيء منهما من الجهاز */
+  const [session, setSession] = useState<ServerUser | null>(null);
+  const [askingSession, setAskingSession] = useState(true);
+  /* الشاشة مقفلة والعمل تحتها باقٍ كما هو */
+  const [locked, setLocked] = useState(false);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [yearLocks, setYearLocks] = useState<YearLocks>({});
   const [chart, setChart] = useState<Account[]>(GENERATED_CHART);
@@ -684,26 +695,34 @@ export default function HomeV2() {
     invoices,
   };
 
-  /**
-   * ما دام لا يوجد مستخدمون بعد، يعمل النظام بكامل الصلاحيات بلا تسجيل دخول.
-   * أول مستخدم يُسجَّل يفعّل شاشة الدخول تلقائياً.
-   */
   const activeUsers = users.filter((u) => u.active);
-  const currentUser =
-    activeUsers.length === 0
-      ? { name: "المالك", permissions: ALL_PERMISSIONS, role: "owner" as const }
-      : activeUsers.find((u) => u.id === currentUserId) ?? null;
 
   /**
-   * الحساب المسجَّل للمستخدم الحالي.
+   * من أنت وما صلاحيتك — من الخادم لا من الجهاز.
    *
-   * `currentUser` قد يكون المالك الضمني قبل تسجيل أول مستخدم، ولا رقم
-   * دخول له ولا سجلّ يُعدَّل — فما يمسّ الحساب نفسه يمرّ من هنا.
+   * كان الحارس يجلس في المتصفّح: يقارن ما تكتبه بقائمةٍ في جهازك، ومن
+   * فتح أدوات المطوّر قال له «أنا المالك» فصدّقه. فصار الجواب من
+   * الخادم، والشاشة تُبنى على قوله، ويُفحص كل طلبٍ عنده مرةً أخرى.
    */
-  const currentAccount: User | null =
-    activeUsers.length === 0
-      ? null
-      : activeUsers.find((u) => u.id === currentUserId) ?? null;
+  const currentUser = session
+    ? {
+        name: session.name,
+        jobTitle: session.jobTitle,
+        role: session.role as RoleKey,
+        permissions: session.permissions as Permission[],
+      }
+    : null;
+
+  /**
+   * صفّ المستخدم في بيانات الشركة — يُطابَق بالاسم.
+   *
+   * معرّف الخادم غير معرّف الجهاز، والاسم فريدٌ في الموضعين. وهذا الصفّ
+   * لما يخصّ ملفّه هنا: آخر دخولٍ له، وتمييزه في شاشة المستخدمين.
+   */
+  const currentAccount: User | null = session
+    ? activeUsers.find((u) => u.name === session.name) ?? null
+    : null;
+  const currentUserId = currentAccount?.id ?? null;
 
   const allow = (permission: Permission) => can(currentUser, permission);
 
@@ -776,6 +795,64 @@ export default function HomeV2() {
     والصفوف تمرّ على المُرحِّل نفسه الذي يمرّ عليه الملف المستورد، فلا
     يدخل الشاشةَ صفٌّ بصورةٍ قديمة.
   */
+  /*
+    أمِن الداخلين أنت؟ يُسأل الخادم عند الإقلاع، فالتصريح عنده لا عندنا.
+    ولو كان الخطّ منقطعاً لم يدخل أحد — وذلك ثمن أن تكون الصلاحية منعاً
+    لا إخفاءً، وقد أقرّه صاحب الشركة: الأجهزة تحمل إنترنتها.
+  */
+  useEffect(() => {
+    void whoAmI().then((who) => {
+      setSession(who);
+      setAskingSession(false);
+    });
+  }, []);
+
+  /*
+    السكون يَقفل ولا يُخرج.
+    
+    الخروج يمحو ما في الشاشة، فمن كان يكتب حركةً ضاع ما كتب. والقفل
+    ستارةٌ تُسدَل: ما تحتها باقٍ، ومن عاد أكمل من حيث وقف.
+  */
+  useEffect(() => {
+    if (!session || locked) return;
+    let last = Date.now();
+    const bump = () => {
+      last = Date.now();
+    };
+    const watched = ["mousedown", "keydown", "touchstart", "wheel", "scroll"];
+    for (const name of watched) {
+      window.addEventListener(name, bump, { passive: true });
+    }
+    const timer = window.setInterval(() => {
+      if (Date.now() - last >= IDLE_LOCK_MS) setLocked(true);
+    }, 20_000);
+    return () => {
+      for (const name of watched) window.removeEventListener(name, bump);
+      window.clearInterval(timer);
+    };
+  }, [session, locked]);
+
+  /*
+    الهاتف: الصفحة تغيب حين تُقفل شاشته أو يخرج إلى تطبيقٍ آخر.
+    
+    فإن طالت غيبتها قُفلت. ولا تُقفل للحظةٍ يخرج فيها إلى الحاسبة
+    ليقرأ رقماً ثم يعود — ومن أطفأ هاتفه ووضعه في جيبه فقد ترك جهازه.
+  */
+  useEffect(() => {
+    if (!session) return;
+    let goneAt = 0;
+    const onVisibility = () => {
+      if (document.hidden) {
+        goneAt = Date.now();
+        return;
+      }
+      if (goneAt && Date.now() - goneAt >= HIDDEN_LOCK_MS) setLocked(true);
+      goneAt = 0;
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, [session]);
+
   useEffect(
     () =>
       onIncoming((incoming: Incoming) => {
@@ -999,33 +1076,46 @@ export default function HomeV2() {
     );
   }
 
-  if (!currentUser) {
+  if (askingSession) {
     return (
-      <LoginScreen
+      <main dir="rtl" className="p-8 text-slate-500">
+        جارٍ التحقّق من الدخول…
+      </main>
+    );
+  }
+
+  if (!session || !currentUser) {
+    return (
+      <SignInScreen
         company={company}
-        users={activeUsers}
-        onLogin={(id) => {
-          setCurrentUserId(id);
-          const who = activeUsers.find((u) => u.id === id);
+        onIn={(who) => {
+          setSession(who);
+          /* الاسم وحده يُحفظ في الجهاز — والكلمة لا تُحفظ */
+          rememberUser(who.name);
+          const row = activeUsers.find((u) => u.name === who.name);
           /*
            * يُحتفظ بوقت دخوله السابق في الجلسة قبل استبداله في السجل،
            * فتُعرض عليه أفعال غيره التي جرت بينهما. ولو قرأناه من السجل
            * بعد التحديث لصار «الآن» ولما رأى شيئاً أبداً.
            */
-          setSessionLastSeen(who?.lastSeenAt ?? "");
-          setUsers((prev) =>
-            prev.map((u) =>
-              u.id === id ? { ...u, lastSeenAt: new Date().toISOString() } : u
-            )
-          );
+          setSessionLastSeen(row?.lastSeenAt ?? "");
+          if (row) {
+            setUsers((prev) =>
+              prev.map((u) =>
+                u.id === row.id
+                  ? { ...u, lastSeenAt: new Date().toISOString() }
+                  : u
+              )
+            );
+          }
           setAudit((prev) =>
             appendEntry(
               prev,
               makeEntry(
-                who?.name ?? "?",
+                who.name,
                 "دخول",
                 "جلسة",
-                `تسجيل دخول — ${who?.jobTitle || roleDefinition(who?.role ?? "custom").label}`
+                `تسجيل دخول — ${who.jobTitle || roleDefinition(who.role as RoleKey).label}`
               )
             )
           );
@@ -1034,28 +1124,24 @@ export default function HomeV2() {
     );
   }
 
-  /** يثبّت الرقم الجديد ويرفع إجبار التغيير، ويسجّل الفعل بلا ذكر الرقم */
-  const applyNewPin = (pinHash: string) => {
-    if (!currentAccount) return;
-    setUsers((prev) =>
-      prev.map((u) =>
-        u.id === currentAccount.id ? { ...u, pinHash, mustChangePin: false } : u
-      )
-    );
-    log("تعديل", "مستخدم", `${currentAccount.name} غيّر رقم دخوله`);
-    setChangingPin(false);
-  };
-
-  // المدير أعاد تعيين رقمه: لا يُفتح النظام قبل أن يضع رقماً يعرفه وحده
-  if (currentAccount?.mustChangePin) {
+  /*
+    من دخل بكلمةٍ أعطاه إياها المدير، أو برقمٍ من زمن المتصفّح، لا يرى
+    شيئاً حتى يضع كلمةً يعرفها وحده. فالكلمة التي يعرفها غيرُك ليست
+    كلمتك، وما يُفعل بها يُنسب إليك.
+  */
+  if (session.mustChangePassword) {
     return (
       <main dir="rtl" className="min-h-screen bg-slate-100 p-8 text-slate-900">
         <div className="mx-auto max-w-xl">
-          <ChangePinPanel
-            user={currentAccount}
+          <PasswordPanel
             forced
-            onDone={applyNewPin}
-            onCancel={() => setCurrentUserId(null)}
+            onDone={async () => {
+              setSession(await whoAmI());
+            }}
+            onCancel={async () => {
+              await serverSignOut();
+              setSession(null);
+            }}
           />
         </div>
       </main>
@@ -1064,6 +1150,19 @@ export default function HomeV2() {
 
   return (
     <main dir="rtl" className="min-h-screen bg-slate-100 text-slate-900">
+      {locked && (
+        <LockScreen
+          name={session.name}
+          onOpen={() => setLocked(false)}
+          onOther={async () => {
+            log("خروج", "جلسة", "تسجيل خروج من الشاشة المقفلة");
+            await serverSignOut();
+            setSession(null);
+            setLocked(false);
+          }}
+        />
+      )}
+
       {/* الإخفاء على الغلاف الداخلي لا على main، وإلا اختفى السند معه */}
       <div
         className={`flex min-h-screen ${
@@ -1088,25 +1187,33 @@ export default function HomeV2() {
                 ? currentUser.jobTitle
                 : roleDefinition(currentUser.role).label}
             </div>
-            {activeUsers.length > 0 && (
-              <>
-                <button
-                  onClick={() => setChangingPin(true)}
-                  className="mt-2 w-full rounded bg-slate-700 px-3 py-1 text-xs hover:bg-slate-600"
-                >
-                  تغيير رقم الدخول
-                </button>
-                <button
-                  onClick={() => {
-                    log("خروج", "جلسة", "تسجيل خروج");
-                    setCurrentUserId(null);
-                  }}
-                  className="mt-2 w-full rounded bg-slate-700 px-3 py-1 text-xs hover:bg-slate-600"
-                >
-                  تسجيل الخروج
-                </button>
-              </>
-            )}
+            {/*
+              «اقفل الآن» لمن يقوم عن مكتبه: ستارةٌ تُسدَل في الحال،
+              وعمله باقٍ تحتها فيعود ويكمل. وهو أنفع من مهلة السكون،
+              لأنه في يد صاحبه لا في انتظار وقت.
+            */}
+            <button
+              onClick={() => setLocked(true)}
+              className="mt-2 w-full rounded bg-amber-600 px-3 py-1 text-xs font-bold hover:bg-amber-500"
+            >
+              اقفل الآن
+            </button>
+            <button
+              onClick={() => setChangingPassword(true)}
+              className="mt-2 w-full rounded bg-slate-700 px-3 py-1 text-xs hover:bg-slate-600"
+            >
+              تغيير كلمة المرور
+            </button>
+            <button
+              onClick={async () => {
+                log("خروج", "جلسة", "تسجيل خروج");
+                await serverSignOut();
+                setSession(null);
+              }}
+              className="mt-2 w-full rounded bg-slate-700 px-3 py-1 text-xs hover:bg-slate-600"
+            >
+              تسجيل الخروج
+            </button>
           </div>
 
           <nav className="space-y-1">
@@ -1146,13 +1253,15 @@ export default function HomeV2() {
             period={describePeriod(period, year)}
           />
 
-          {changingPin && currentAccount && (
+          {changingPassword && (
             <div className="mb-6 max-w-xl">
-              <ChangePinPanel
-                user={currentAccount}
+              <PasswordPanel
                 forced={false}
-                onDone={applyNewPin}
-                onCancel={() => setChangingPin(false)}
+                onDone={async () => {
+                  log("تعديل", "مستخدم", `${session.name} غيّر كلمة مروره`);
+                  setChangingPassword(false);
+                }}
+                onCancel={async () => setChangingPassword(false)}
               />
             </div>
           )}
@@ -13277,164 +13386,46 @@ function NoticesPanel({
 }
 
 /* ================================================================== */
-/* تغيير رقم الدخول                                                    */
+/* الدخول والقفل                                                       */
 /* ================================================================== */
 
 /**
- * يغيّر المستخدم رقمه بنفسه.
+ * شاشة الدخول.
  *
- * لا تلزمه صلاحية، لأنه يغيّر رقمه هو لا رقم غيره. ويُطلب الرقم الحالي
- * أولاً حتى لا يغيّره من وجد الجهاز مفتوحاً وصاحبه غائب.
+ * كانت تعرض أسماء الموظفين ليُختار منها، فوجب أن تصل قائمة المستخدمين
+ * كلَّ جهاز. وكان التحقّق يجري في المتصفّح، فمن فتح أدوات المطوّر
+ * تجاوزه. فصار الاسم يُكتب، والتحقّق على الخادم.
  *
- * `forced` تعني أن المدير أعاد تعيين رقمه، فلا يُفتح له النظام قبل
- * أن يضع رقماً يعرفه وحده.
+ * والاسم يُحفظ في الجهاز وحده فيجده صاحبه مكتوباً، وكلمة المرور لا
+ * تُحفظ أبداً. ورسالة الخطأ واحدة سواء أخطأ في الاسم أو في الكلمة —
+ * فلا يُستدلّ منها على وجود حسابٍ من عدمه.
  */
-function ChangePinPanel({
-  user,
-  forced,
-  onDone,
-  onCancel,
-}: {
-  user: User;
-  forced: boolean;
-  onDone: (pinHash: string) => void;
-  onCancel: () => void;
-}) {
-  const [current, setCurrent] = useState("");
-  const [next, setNext] = useState("");
-  const [confirm, setConfirm] = useState("");
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  const submit = async () => {
-    setBusy(true);
-    try {
-      const currentHash = await hashPin(current);
-      if (currentHash !== user.pinHash) {
-        setError("الرقم الحالي غير صحيح");
-        setCurrent("");
-        return;
-      }
-      if (next.length < 4) {
-        setError("الرقم الجديد أربعة أرقام فأكثر");
-        return;
-      }
-      if (next !== confirm) {
-        setError("الرقمان الجديدان غير متطابقين");
-        return;
-      }
-      if (next === current) {
-        setError("الرقم الجديد مطابق للحالي");
-        return;
-      }
-      onDone(await hashPin(next));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Panel
-      title="تغيير رقم الدخول"
-      subtitle={`حساب ${user.name} — الرقم لا يظهر لأحد، ولا يُخزَّن إلا مجزّأً`}
-    >
-      {forced && (
-        <Banner tone="warn">
-          أُعيد تعيين رقمك، فلا بدّ من وضع رقم جديد تعرفه وحدك قبل متابعة
-          العمل.
-        </Banner>
-      )}
-      {error && (
-        <p className="mb-4 text-sm font-medium text-red-600">{error}</p>
-      )}
-
-      <div className="grid max-w-md grid-cols-1 gap-3">
-        <Field label="الرقم الحالي">
-          <input
-            type="password"
-            inputMode="numeric"
-            value={current}
-            onChange={(e) => setCurrent(e.target.value)}
-            className={inputClass}
-            autoFocus
-          />
-        </Field>
-        <Field label="الرقم الجديد">
-          <input
-            type="password"
-            inputMode="numeric"
-            value={next}
-            onChange={(e) => setNext(e.target.value)}
-            className={inputClass}
-          />
-        </Field>
-        <Field label="تأكيد الرقم الجديد">
-          <input
-            type="password"
-            inputMode="numeric"
-            value={confirm}
-            onChange={(e) => setConfirm(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") void submit();
-            }}
-            className={inputClass}
-          />
-        </Field>
-      </div>
-
-      <div className="mt-4 flex gap-2">
-        <button
-          disabled={busy}
-          onClick={() => void submit()}
-          className="rounded-lg bg-blue-600 px-6 py-2 font-bold text-white disabled:bg-slate-300"
-        >
-          حفظ الرقم الجديد
-        </button>
-        {!forced && (
-          <button
-            onClick={onCancel}
-            className="rounded-lg bg-slate-100 px-6 py-2 font-bold"
-          >
-            إلغاء
-          </button>
-        )}
-      </div>
-    </Panel>
-  );
-}
-
-/* ================================================================== */
-/* تسجيل الدخول                                                        */
-/* ================================================================== */
-
-function LoginScreen({
+function SignInScreen({
   company,
-  users,
-  onLogin,
+  onIn,
 }: {
   company: CompanyProfile;
-  users: User[];
-  onLogin: (id: string) => void;
+  onIn: (user: ServerUser) => void;
 }) {
-  const [selected, setSelected] = useState<User | null>(null);
-  const [pin, setPin] = useState("");
-  const [error, setError] = useState("");
+  const [remembered, setRemembered] = useState(() => lastUser());
+  const [name, setName] = useState(() => lastUser());
+  const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState("");
 
-  const submit = async () => {
-    if (!selected) return;
+  const enter = async () => {
+    if (!name.trim() || !password) return;
     setBusy(true);
-    try {
-      const hash = await hashPin(pin);
-      if (hash === selected.pinHash) {
-        onLogin(selected.id);
-      } else {
-        setError("رقم الدخول غير صحيح");
-        setPin("");
-      }
-    } finally {
-      setBusy(false);
+    setProblem("");
+    const outcome = await serverSignIn(name.trim(), password);
+    setBusy(false);
+    /* لا تبقى الكلمة في الذاكرة بعد استعمالها، نجح الدخول أو أخفق */
+    setPassword("");
+    if (!outcome.ok) {
+      setProblem(outcome.error);
+      return;
     }
+    onIn(outcome.user);
   };
 
   return (
@@ -13452,80 +13443,263 @@ function LoginScreen({
           <p className="mt-1 text-sm text-slate-500">النظام المالي والمحاسبي</p>
         </div>
 
-        {!selected ? (
-          <>
-            <p className="mb-4 text-sm font-bold">اختر المستخدم</p>
-            <div className="space-y-2">
-              {users.map((user) => (
-                <button
-                  key={user.id}
-                  onClick={() => {
-                    setSelected(user);
-                    setPin("");
-                    setError("");
-                  }}
-                  className="w-full rounded-xl border border-slate-200 px-4 py-3 text-right hover:border-blue-400 hover:bg-blue-50"
-                >
-                  <div className="font-bold">{user.name}</div>
-                  <div className="text-xs text-slate-500">
-                    {user.jobTitle || roleDefinition(user.role).label}
-                  </div>
-                </button>
-              ))}
-            </div>
-          </>
-        ) : (
-          <>
-            <button
-              onClick={() => setSelected(null)}
-              className="mb-4 text-sm text-slate-500 hover:underline"
-            >
-              → اختيار مستخدم آخر
-            </button>
+        <Field label="اسم المستخدم">
+          <input
+            type="text"
+            autoFocus={!remembered}
+            value={name}
+            onChange={(e) => {
+              setName(e.target.value);
+              setProblem("");
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void enter();
+            }}
+            className={inputClass}
+          />
+        </Field>
 
-            <div className="mb-4 rounded-xl bg-slate-50 p-4">
-              <div className="font-bold">{selected.name}</div>
-              <div className="text-xs text-slate-500">
-                {selected.jobTitle || roleDefinition(selected.role).label}
-              </div>
-            </div>
+        {remembered ? (
+          <button
+            onClick={() => {
+              forgetUser();
+              setRemembered("");
+              setName("");
+              setPassword("");
+              setProblem("");
+            }}
+            className="mt-1 text-xs text-slate-500 hover:underline"
+          >
+            لستَ {remembered}؟ غيّر المستخدم
+          </button>
+        ) : null}
 
-            <Field label="رقم الدخول">
-              <input
-                type="password"
-                inputMode="numeric"
-                autoFocus
-                value={pin}
-                onChange={(e) => {
-                  setPin(e.target.value);
-                  setError("");
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") submit();
-                }}
-                className={`${inputClass} text-center text-2xl tracking-[0.5em]`}
-              />
-            </Field>
+        <div className="mt-4">
+          <Field label="كلمة المرور">
+            <input
+              type="password"
+              autoFocus={Boolean(remembered)}
+              value={password}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                setProblem("");
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void enter();
+              }}
+              className={inputClass}
+            />
+          </Field>
+        </div>
 
-            {error && (
-              <p className="mt-3 text-sm font-medium text-red-600">{error}</p>
-            )}
-
-            <button
-              onClick={submit}
-              disabled={!pin || busy}
-              className="mt-5 w-full rounded-lg bg-slate-900 px-6 py-3 font-bold text-white disabled:bg-slate-300"
-            >
-              {busy ? "…" : "دخول"}
-            </button>
-          </>
+        {problem && (
+          <p className="mt-3 text-sm font-medium text-red-600">{problem}</p>
         )}
 
+        <button
+          onClick={() => void enter()}
+          disabled={!name.trim() || !password || busy}
+          className="mt-5 w-full rounded-lg bg-slate-900 px-6 py-3 font-bold text-white disabled:bg-slate-300"
+        >
+          {busy ? "…" : "دخول"}
+        </button>
+
         <p className="mt-8 text-center text-xs text-slate-400">
-          التحقق يجري داخل المتصفح — ليس بديلاً عن حماية الخادم
+          التحقّق على الخادم — وكلمة المرور لا تُحفظ في هذا الجهاز
         </p>
       </div>
     </main>
+  );
+}
+
+/**
+ * يغيّر المستخدم كلمته بنفسه.
+ *
+ * لا تلزمه صلاحية، لأنه يغيّر كلمته هو لا كلمة غيره. وتُطلب الحالية
+ * أولاً حتى لا يغيّرها من وجد الجهاز مفتوحاً وصاحبه غائب.
+ *
+ * و`forced` تعني أنها كلمةٌ أعطاه إياها المدير، أو رقمٌ من زمن
+ * المتصفّح، فلا يُفتح له النظام قبل أن يضع ما يعرفه وحده.
+ */
+function PasswordPanel({
+  forced,
+  onDone,
+  onCancel,
+}: {
+  forced: boolean;
+  onDone: () => void | Promise<void>;
+  onCancel: () => void | Promise<void>;
+}) {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [again, setAgain] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState("");
+
+  const save = async () => {
+    if (next !== again) {
+      setProblem("الكلمتان غير متطابقتين");
+      return;
+    }
+    setBusy(true);
+    setProblem("");
+    const outcome = await changePassword(current, next);
+    setBusy(false);
+    if (!outcome.ok) {
+      setProblem(outcome.error ?? "تعذّر التغيير");
+      return;
+    }
+    setCurrent("");
+    setNext("");
+    setAgain("");
+    await onDone();
+  };
+
+  return (
+    <Panel
+      title={forced ? "ضع كلمة مرورٍ تعرفها وحدك" : "تغيير كلمة المرور"}
+      subtitle={
+        forced
+          ? "كلمتك الحالية يعرفها غيرك — ولا يُفتح النظام قبل تغييرها"
+          : "تُطلب الحالية أولاً، فلا يغيّرها من وجد جهازك مفتوحاً"
+      }
+    >
+      {problem ? <Banner tone="error">{problem}</Banner> : null}
+
+      <div className="grid max-w-xl grid-cols-1 gap-3">
+        <Field label="كلمة المرور الحالية">
+          <input
+            type="password"
+            autoFocus
+            value={current}
+            onChange={(e) => setCurrent(e.target.value)}
+            className={inputClass}
+          />
+        </Field>
+        <Field label="الجديدة" hint="ثمانية محارف فأكثر، ولا تكون أرقاماً فقط">
+          <input
+            type="password"
+            value={next}
+            onChange={(e) => setNext(e.target.value)}
+            className={inputClass}
+          />
+        </Field>
+        <Field label="أعدها">
+          <input
+            type="password"
+            value={again}
+            onChange={(e) => setAgain(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void save();
+            }}
+            className={inputClass}
+          />
+        </Field>
+      </div>
+
+      <div className="mt-4 flex gap-3">
+        <button
+          onClick={() => void save()}
+          disabled={!current || !next || !again || busy}
+          className="rounded-lg bg-slate-900 px-6 py-3 font-bold text-white disabled:bg-slate-300"
+        >
+          {busy ? "…" : "احفظ"}
+        </button>
+        <button
+          onClick={() => void onCancel()}
+          className="rounded-lg bg-slate-100 px-6 py-3 font-bold text-slate-700"
+        >
+          {forced ? "خروج" : "إلغاء"}
+        </button>
+      </div>
+    </Panel>
+  );
+}
+
+/**
+ * الشاشة المقفلة.
+ *
+ * قفلٌ لا خروج: ما كان في الشاشة باقٍ تحتها، فمن عاد أكمل من حيث وقف
+ * ولم يضع ما كتب. وتُطلب كلمة المرور وحدها والاسم ظاهر — فمن قام
+ * لحظةً عاد بكلمةٍ واحدة، ومن ترك جهازه لغيره لم يترك له حسابه.
+ */
+function LockScreen({
+  name,
+  onOpen,
+  onOther,
+}: {
+  name: string;
+  onOpen: () => void;
+  onOther: () => void | Promise<void>;
+}) {
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState("");
+
+  const open = async () => {
+    if (!password) return;
+    setBusy(true);
+    setProblem("");
+    const outcome = await serverSignIn(name, password);
+    setBusy(false);
+    setPassword("");
+    if (!outcome.ok) {
+      setProblem(outcome.error);
+      return;
+    }
+    onOpen();
+  };
+
+  return (
+    <div
+      dir="rtl"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/95 p-6 no-print"
+    >
+      <div className="w-full max-w-sm rounded-2xl bg-white p-8 shadow-2xl">
+        <p className="text-sm text-slate-500">الشاشة مقفلة</p>
+        <p className="mt-1 text-xl font-bold">{name}</p>
+        <p className="mt-3 text-sm text-slate-600">
+          عملك باقٍ كما تركته — اكتب كلمة مرورك لتكمل.
+        </p>
+
+        <div className="mt-5">
+          <Field label="كلمة المرور">
+            <input
+              type="password"
+              autoFocus
+              value={password}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                setProblem("");
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void open();
+              }}
+              className={inputClass}
+            />
+          </Field>
+        </div>
+
+        {problem && (
+          <p className="mt-3 text-sm font-medium text-red-600">{problem}</p>
+        )}
+
+        <button
+          onClick={() => void open()}
+          disabled={!password || busy}
+          className="mt-5 w-full rounded-lg bg-slate-900 px-6 py-3 font-bold text-white disabled:bg-slate-300"
+        >
+          {busy ? "…" : "افتح"}
+        </button>
+
+        <button
+          onClick={() => void onOther()}
+          className="mt-3 w-full text-xs text-slate-500 hover:underline"
+        >
+          مستخدمٌ آخر — اخرج من هذا الحساب
+        </button>
+      </div>
+    </div>
   );
 }
 

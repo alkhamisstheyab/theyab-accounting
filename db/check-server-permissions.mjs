@@ -149,6 +149,7 @@ check("ولا حضورهم", forSecretary.attendance.length === 0);
 check("ولا مسيّر الرواتب", forSecretary.payrollRuns.length === 0);
 check("ولا إعداداته", Object.keys(forSecretary.payrollSettings ?? {}).length === 0);
 check("ولا سجل التدقيق", forSecretary.audit.length === 0);
+check("ولا قائمة المستخدمين — لا تُعرف الأسماء ولا الصلاحيات", forSecretary.users.length === 0);
 check(
   "وتصلها الأرصدة الافتتاحية — لها صلاحيتها",
   Object.keys(forSecretary.openingBalances).length === 1
@@ -199,6 +200,7 @@ check(
     forOwner.employees.length === 1 &&
     forOwner.audit.length === 1
 );
+check("وتصله قائمة المستخدمين — هو الذي يديرهم", forOwner.users.length === 1);
 check(
   "ولا تخرج تجزئة كلمة المرور — ولو إليه",
   forOwner.users.every((u) => !u.pinHash),
