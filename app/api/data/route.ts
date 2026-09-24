@@ -11,7 +11,11 @@ import { NextResponse } from "next/server";
 import { AuthError, requireUser } from "@/lib/server/auth";
 import { FROZEN_ADDRESS_REASON, isFrozenAddress } from "@/lib/server/frozen-address";
 import { inTransaction, readable } from "@/lib/server/db";
-import { refusalReason, type ChangeShape } from "@/lib/server/permits";
+import {
+  readableState,
+  refusalReason,
+  type ChangeShape,
+} from "@/lib/server/permits";
 import { readState } from "@/lib/server/state";
 import { applyChangesIn, currentRev, type ChangeSet } from "@/lib/server/writes";
 
@@ -32,14 +36,18 @@ function fail(error: unknown) {
 
 export async function GET() {
   try {
-    await requireUser();
+    const user = await requireUser();
     /*
       رقم التغيير يُقرأ قبل الحالة لا بعدها. فلو قُرئ بعدها وكُتب بينهما
       شيء لحمل الرقم كتابةً ليست في الحالة، فلا يسأل عنها المتصفّح أبداً
       ولا يراها. والعكس — رقمٌ أقدم من الحالة — يعيد ما عنده فحسب.
     */
     const rev = await currentRev(readable);
-    const state = await readState(readable);
+    /*
+      ولا يُرسَل إلا ما يقرؤه صاحبه: الإخفاء في الشاشة لا يمنع من يفتح
+      أدوات المطوّر، وما لم يخرج من القاعدة لا يُقرأ بحيلة.
+    */
+    const state = readableState(await readState(readable), user.permissions);
     return NextResponse.json({ rev, state });
   } catch (error) {
     return fail(error);

@@ -100,3 +100,145 @@ export function refusalReason(
 
   return null;
 }
+
+/* ------------------------------------------------------------------ */
+/* مَن يقرأ ماذا                                                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * منع الكتابة وحده لا يكفي.
+ *
+ * كان الخادم يُرسل الحالة كلها لكل من دخل، والشاشات تُخفي ما لا يعنيه.
+ * وذلك إخفاءٌ لا منع: ما وصل الجهاز صار عند صاحبه، يقرؤه من أدوات
+ * المطوّر متى شاء. فالسكرتيرة كانت تصلها الرواتب، والمهندس تصله
+ * أرصدة البنك — وإن لم تظهر لهما على الشاشة.
+ *
+ * فصار ما لا يُقرأ لا يُرسَل.
+ *
+ * والفارغ هنا مفتوحٌ لكل من دخل: دليل الحسابات وطرق الدفع وبيانات
+ * الشركة والأسماء — بها تُقرأ الحركات وتُطبع الأوراق، وليس فيها ما
+ * يُخفى.
+ */
+const READ_RULES: Record<string, Permission[]> = {
+  /*
+    الحركات تصل الجميع كما كانت — قرارُ صاحب الشركة. فالمهندس يرى
+    المدفوع على عقوده، والمدفوع يُحسب منها. ولو حُجبت عنه لرأى عقوده
+    بلا أرقام.
+  */
+  movements: [
+    "movements.view",
+    "journal.view",
+    "ledger.view",
+    "contractors.view",
+    "projects.view",
+  ],
+  projects: ["projects.view", "projects.manage"],
+  contractors: ["contractors.view", "contractors.manage"],
+  materials: ["materials.view", "materials.manage"],
+  materialReceipts: ["materials.view", "materials.manage"],
+  workItems: ["quotations.view", "quotations.pricing"],
+  quotations: ["quotations.view", "quotations.manage"],
+  invoices: ["invoices.view", "invoices.manage"],
+
+  /* ملفّ الموظف: راتبه وسلفه وحضوره — لا يخرج من دائرة من يليه */
+  employees: ["employees.view", "employees.manage", "payroll.run"],
+  attendance: ["employees.view", "attendance.manage", "payroll.run"],
+  payrollRuns: ["employees.view", "payroll.run"],
+  payrollSettings: ["employees.view", "payroll.run"],
+
+  audit: ["audit.view"],
+  openingBalances: ["opening.view", "opening.manage"],
+
+  /*
+    المستخدمون يصلون الجميع ما دام الدخول يقع في المتصفّح: شاشة الدخول
+    تقرأ منهم الأسماء، وصلاحيةُ الداخل تُقرأ من صفّه. ويُنزَع منهم ما
+    يَضرّ — تجزئة كلمة المرور أدناه. فإذا صار الدخول على الخادم وحده
+    أُغلقت هذه المجموعة على users.manage.
+  */
+  users: [],
+
+  chart: [],
+  items: [],
+  payments: [],
+  people: [],
+  company: [],
+  yearLocks: [],
+};
+
+/**
+ * ما لا يخرج من القاعدة إلى أي متصفّح، ولو كان المالك.
+ *
+ * تجزئة كلمة المرور لا يحتاجها المتصفّح لشيء: التحقق صار على الخادم.
+ * وهي تُكتب عند الإنشاء وحدها ويحرسها `guarded`، فنزعُها من المقروء
+ * لا يمحوها عند إعادة الإرسال.
+ */
+const SECRETS: Record<string, string[]> = {
+  users: ["pinHash"],
+};
+
+const holds = (permissions: readonly Permission[], needed: Permission[]) =>
+  needed.length === 0 || needed.some((p) => permissions.includes(p));
+
+/** أيقرأ صاحبُ هذه الصلاحيات هذه المجموعة؟ ومجهولُ الاسم لا يُقرأ */
+export function canRead(
+  field: string,
+  permissions: readonly Permission[]
+): boolean {
+  const rule = READ_RULES[field];
+  return rule ? holds(permissions, rule) : false;
+}
+
+/** ينزع من الصفّ ما لا يخرج من القاعدة */
+function clean(field: string, row: unknown): unknown {
+  const keys = SECRETS[field];
+  if (!keys || !row || typeof row !== "object") return row;
+  const copy = { ...(row as Record<string, unknown>) };
+  for (const key of keys) delete copy[key];
+  return copy;
+}
+
+/**
+ * الحالة كما يراها صاحبُ هذه الصلاحيات.
+ *
+ * وما لا يُقرأ يُفرَّغ ولا يُحذف مفتاحه: المتصفّح يتوقّع الشكل نفسه،
+ * ومجموعةٌ غائبة تصير عنده undefined فتتعطّل شاشةٌ لا علاقة لها بالأمر.
+ */
+export function readableState<T extends Record<string, unknown>>(
+  state: T,
+  permissions: readonly Permission[]
+): T {
+  const out: Record<string, unknown> = {};
+  for (const [field, value] of Object.entries(state)) {
+    if (!canRead(field, permissions)) {
+      out[field] = Array.isArray(value) ? [] : {};
+      continue;
+    }
+    out[field] = SECRETS[field] && Array.isArray(value)
+      ? value.map((row) => clean(field, row))
+      : value;
+  }
+  return out as T;
+}
+
+/**
+ * ما استجدّ، كما يراه صاحبُ هذه الصلاحيات.
+ *
+ * والحذف يُصفّى كما تُصفّى الإضافة: لو وصل «حُذف الموظف ١٢» من لا يقرأ
+ * الموظفين لعرف بوجوده ووقت رحيله.
+ */
+export function readableChanges<
+  T extends { upserts?: Record<string, unknown[]>; deletes?: Record<string, string[]> }
+>(changes: T, permissions: readonly Permission[]): T {
+  const upserts: Record<string, unknown[]> = {};
+  for (const [field, rows] of Object.entries(changes.upserts ?? {})) {
+    if (!canRead(field, permissions)) continue;
+    upserts[field] = SECRETS[field] ? rows.map((row) => clean(field, row)) : rows;
+  }
+
+  const deletes: Record<string, string[]> = {};
+  for (const [field, ids] of Object.entries(changes.deletes ?? {})) {
+    if (canRead(field, permissions)) deletes[field] = ids;
+  }
+
+  return { ...changes, upserts, deletes };
+}

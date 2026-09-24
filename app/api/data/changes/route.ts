@@ -13,13 +13,14 @@ import { NextResponse } from "next/server";
 
 import { AuthError, requireUser } from "@/lib/server/auth";
 import { readable } from "@/lib/server/db";
+import { readableChanges } from "@/lib/server/permits";
 import { changesSince } from "@/lib/server/writes";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   try {
-    await requireUser();
+    const user = await requireUser();
 
     const raw = new URL(request.url).searchParams.get("since");
     const since = Number(raw);
@@ -30,7 +31,9 @@ export async function GET(request: Request) {
       );
     }
 
-    return NextResponse.json(await changesSince(readable, since));
+    /* وما يصل بالسحب يُصفّى كما تُصفّى القراءة الأولى، وإلا دخل من الباب الآخر */
+    const changes = await changesSince(readable, since);
+    return NextResponse.json(readableChanges(changes, user.permissions));
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
