@@ -289,6 +289,65 @@ check(
   fillDay([], [{ ...one, hireDate: "2027-01-01" }], TODAY).length === 0
 );
 
+console.log("\nوعمود «غير مسجّل» لا يعدّ ما لا يُنتظر:\n");
+
+/** الملخّص كما تحسبه الشاشة */
+const summarize = (employee, month, records, today) => {
+  const all = monthDays(month);
+  const taken = new Set(
+    records.filter((r) => r.employeeId === employee.id).map((r) => r.date)
+  );
+  const due = all.filter(
+    (d) =>
+      d <= today &&
+      (!employee.hireDate || d >= employee.hireDate) &&
+      (!employee.endDate || d <= employee.endDate)
+  );
+  const idle =
+    due.length > 0
+      ? ""
+      : employee.hireDate && all[all.length - 1] < employee.hireDate
+        ? "قبل التعيين"
+        : employee.endDate && all[0] > employee.endDate
+          ? "بعد الخدمة"
+          : "لم يأتِ بعد";
+  return { due: due.length, idle, missing: due.filter((d) => !taken.has(d)).length };
+};
+
+/* من عُيّن هذا العام، في شهرٍ من السنة الماضية */
+const newcomers = employees.filter((e) => e.hireDate && e.hireDate >= "2026-01-01");
+check(
+  "من عُيّن هذا العام لا يُطلب منه حضور السنة الماضية",
+  newcomers.length > 0 &&
+    newcomers.every((e) => {
+      const s = summarize(e, "2025-01", state.attendance ?? [], TODAY);
+      return s.missing === 0 && s.idle === "قبل التعيين";
+    }),
+  newcomers.map((e) => e.name.split(" ")[0]).join("، ")
+);
+
+/* ومن عُيّن قبلها يُطلب منه */
+const older = employees.find((e) => e.hireDate && e.hireDate < "2025-01-01");
+check(
+  "ومن كان على رأس العمل يومها يُطلب منه",
+  summarize(older, "2025-01", [], TODAY).due === 31,
+  `${older.name.split(" ")[0]} · ٣١ يوماً`
+);
+
+/* والشهر الجاري يُحاسب إلى اليوم لا إلى آخره */
+check(
+  "والشهر الجاري لا يُطلب فيه غدٌ لم يأتِ",
+  summarize(older, TODAY.slice(0, 7), [], TODAY).due === Number(TODAY.slice(-2)),
+  `${TODAY.slice(0, 7)} · ${summarize(older, TODAY.slice(0, 7), [], TODAY).due} يوماً`
+);
+
+/* وشهرٌ مسجَّل بالكامل لا ينقصه شيء */
+check(
+  "وما سُجّل كاملاً لا ينقصه شيء",
+  summarize(one, "2026-08", [...(state.attendance ?? [])], TODAY).missing === 0,
+  one.name.split(" ")[0]
+);
+
 /* والشاشة */
 const page = fs.readFileSync("app/page.tsx", "utf8");
 check("وللشاشة زرّ «املأ الفترة حضوراً»", page.includes("املأ الفترة حضوراً"));
@@ -301,6 +360,11 @@ check(
   "وتعبئة الشهر لا تسبق اليوم",
   page.includes("if (date > today) continue;")
 );
+check(
+  "و«غير مسجّل» يُحسب على أيام الخدمة وحدها",
+  page.includes("const due = days.filter(")
+);
+check("ويُقال سببه لا يُترك رقماً", page.includes('"قبل التعيين"'));
 
 console.log(
   bad === 0

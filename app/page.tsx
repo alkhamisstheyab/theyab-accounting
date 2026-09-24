@@ -17419,7 +17419,30 @@ function AttendancePage({
       .map((d) => index.get(`${employee.id}|${d}`))
       .filter((r): r is AttendanceDay => !!r);
 
+    /*
+      «غير مسجّل» هو ما يُنتظر تسجيله، لا كلُّ يومٍ بلا سجل. فمن لم
+      يلتحق بعدُ لا يُنتظر حضوره، ومن انتهت خدمته كذلك، والغد لم يأتِ.
+      ولولا هذا لظهر لمن عُيّن هذا العام شهرٌ كاملٌ «غير مسجّل» في السنة
+      الماضية — فيُظنّ نقصاً وهو ليس بنقص.
+    */
+    const due = days.filter(
+      (d) =>
+        d <= today &&
+        (!employee.hireDate || d >= employee.hireDate) &&
+        (!employee.endDate || d <= employee.endDate)
+    );
+    const idle =
+      due.length > 0
+        ? ""
+        : employee.hireDate && days[days.length - 1] < employee.hireDate
+          ? "قبل التعيين"
+          : employee.endDate && days[0] > employee.endDate
+            ? "بعد الخدمة"
+            : "لم يأتِ بعد";
+
     return {
+      due: due.length,
+      idle,
       records,
       present: records.filter((r) => r.status === "حاضر").length,
       absent: records.filter((r) => r.status === "غياب بدون عذر").length,
@@ -17429,7 +17452,7 @@ function AttendancePage({
       overtime: round3(records.reduce((s, r) => s + r.overtimeHours, 0)),
       restDay: round3(records.reduce((s, r) => s + r.restDayHours, 0)),
       holiday: round3(records.reduce((s, r) => s + r.holidayHours, 0)),
-      missing: days.length - records.length,
+      missing: due.filter((d) => !index.has(`${employee.id}|${d}`)).length,
     };
   };
 
@@ -17785,7 +17808,11 @@ function AttendancePage({
                         s.missing ? "font-bold text-amber-700" : "text-slate-300"
                       }
                     >
-                      {s.missing || "—"}
+                      {s.idle ? (
+                        <span className="text-xs text-slate-400">{s.idle}</span>
+                      ) : (
+                        s.missing || "—"
+                      )}
                     </Td>
                   </tr>
                 );
