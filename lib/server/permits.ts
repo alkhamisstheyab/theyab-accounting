@@ -101,6 +101,70 @@ export function refusalReason(
   return null;
 }
 
+/** مجموعةٌ رُدّت، ولمَ رُدّت — تُعرض على صاحبها بلغته */
+export type Refusal = { field: string; reason: string };
+
+/**
+ * يفرز الطلب: ما يجوز يُكتب، وما لا يجوز يُردّ باسمه.
+ *
+ * كان الطلب يُرفض كلّه لصفٍّ واحدٍ فيه. وذلك سليمٌ ما دام الكاتب واحداً
+ * يرى الرسالة أمامه، وقاتلٌ يوم يعمل عليه عشرة: يكفي صفٌّ قديمٌ في
+ * جهاز السكرتيرة ليقف رفعُ عملها كلَّه — لا تُدخل حركةً إلا بقيت في
+ * جهازها، ولا تعلم لمَ.
+ *
+ * فصار المأذون يُكتب، والمردود يُردّ ومعه سببه، فيعرف صاحبه ما يطلبه من
+ * المدير. والفرز بالمجموعة لا بالصفّ: الصلاحية على المجموعة أصلاً، فلا
+ * معنى لتفصيلٍ أدقّ.
+ *
+ * والذرّية باقية فيما يُكتب: ما جاز يُكتب كلُّه أو لا يُكتب منه شيء.
+ */
+export function allowedChanges(
+  changes: ChangeShape,
+  permissions: readonly Permission[]
+): { allowed: ChangeShape; refused: Refusal[] } {
+  const has = (needed: Permission[]) =>
+    needed.length === 0 || needed.some((p) => permissions.includes(p));
+
+  const allowed: ChangeShape = {};
+  const refused: Refusal[] = [];
+  const seen = new Set<string>();
+  const refuse = (field: string, reason: string) => {
+    if (seen.has(field)) return;
+    seen.add(field);
+    refused.push({ field, reason });
+  };
+
+  for (const [field, rows] of Object.entries(changes.upserts ?? {})) {
+    const rule = RULES[field];
+    if (!rule) refuse(field, `مجموعة غير معروفة: ${field}`);
+    else if (!has(rule.write)) refuse(field, `ليست لديك صلاحية الكتابة في «${field}»`);
+    else (allowed.upserts ??= {})[field] = rows;
+  }
+
+  for (const [field, ids] of Object.entries(changes.deletes ?? {})) {
+    const rule = RULES[field];
+    if (NEVER_DELETED.has(field)) refuse(field, "سجل التدقيق لا يُحذف منه شيء");
+    else if (!rule) refuse(field, `مجموعة غير معروفة: ${field}`);
+    else if (!has(rule.remove)) refuse(field, `ليست لديك صلاحية الحذف من «${field}»`);
+    else (allowed.deletes ??= {})[field] = ids;
+  }
+
+  for (const [field, value] of Object.entries(changes.whole ?? {})) {
+    const rule = RULES[field];
+    if (!rule) refuse(field, `مجموعة غير معروفة: ${field}`);
+    else if (!has(rule.write)) refuse(field, `ليست لديك صلاحية تعديل «${field}»`);
+    else (allowed.whole ??= {})[field] = value;
+  }
+
+  return { allowed, refused };
+}
+
+/** أفي الطلب ما يُكتب؟ */
+export const nothingToWrite = (changes: ChangeShape): boolean =>
+  Object.keys(changes.upserts ?? {}).length === 0 &&
+  Object.keys(changes.deletes ?? {}).length === 0 &&
+  Object.keys(changes.whole ?? {}).length === 0;
+
 /* ------------------------------------------------------------------ */
 /* مَن يقرأ ماذا                                                       */
 /* ------------------------------------------------------------------ */
@@ -189,6 +253,15 @@ export function canRead(
   const rule = READ_RULES[field];
   return rule ? holds(permissions, rule) : false;
 }
+
+/**
+ * المجموعات التي لا يقرؤها صاحب هذه الصلاحيات.
+ *
+ * تُذكر للمتصفّح لا لعرضها، بل ليكفّ عن إرسالها: ما لا تراه لا تملك
+ * نسخته، فلو أرسلتَ ما عندك لمحوتَ ما لا تعلم. والصمت هنا هو الصواب.
+ */
+export const hiddenFields = (permissions: readonly Permission[]): string[] =>
+  Object.keys(READ_RULES).filter((field) => !canRead(field, permissions));
 
 /** ينزع من الصفّ ما لا يخرج من القاعدة */
 function clean(field: string, row: unknown): unknown {

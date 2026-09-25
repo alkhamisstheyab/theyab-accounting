@@ -61,6 +61,8 @@ const seed = new PGlite(dir);
 
 const hash = await bcrypt.hash(PASSWORD, 10);
 const PERMISSIONS = [
+  /* يقرأ المستخدمين ليُقاس عليه أن ما أُنشئ على الخادم لا يُمحى */
+  "users.manage",
   "movements.view",
   "movements.create",
   "movements.edit",
@@ -172,13 +174,29 @@ globalThis.localStorage = {
 let cookie = "";
 /** عدد ما أُرسل من طلبات الكتابة — به يُعرف أن التأجيل يجمع ولا يكرّر */
 let posts = 0;
+const sentFields = [];
 /** قطعُ الخطّ: يُحاكى بمنع الطلبات لا بإسقاط الخادم */
 let offline = false;
 
 const realFetch = globalThis.fetch;
 globalThis.fetch = async (url, options = {}) => {
   const target = String(url).startsWith("http") ? String(url) : BASE + String(url);
-  if (target.includes("/api/data") && options.method === "POST") posts++;
+  if (target.includes("/api/data") && options.method === "POST") {
+    posts++;
+    /* ما أُرسل: تُذكر مجموعاته في تفصيل الفحص، فيُعرف ما دُفع ولمَ */
+    try {
+      const body = JSON.parse(String(options.body ?? "{}"));
+      sentFields.push(
+        [
+          ...Object.keys(body.upserts ?? {}),
+          ...Object.keys(body.deletes ?? {}).map((f) => "حذف:" + f),
+          ...Object.keys(body.whole ?? {}).map((f) => "كامل:" + f),
+        ].join("،") || "فارغ"
+      );
+    } catch {
+      sentFields.push("غير مقروء");
+    }
+  }
   if (offline) throw new TypeError("fetch failed");
   return realFetch(target, {
     ...options,
@@ -226,14 +244,23 @@ try {
   /* ---- 2. الإشعال يتّصل ---- */
   sync.setSyncEnabled(true);
   const connected = await until((s) => s.phase === "متزامنة");
-  check("الإشعال يتّصل ويقرأ الحالة", connected, sync.syncStatus().phase);
+  check(
+    "الإشعال يتّصل ويقرأ الحالة",
+    connected,
+    sync.syncStatus().phase + " · " + (sync.syncStatus().lastError || "بلا خطأ")
+  );
   check("ورقم التغيير وصل", sync.syncStatus().rev > 0, String(sync.syncStatus().rev));
 
   /* ---- 3. حالةٌ لم تتغيّر لا تُرسَل ---- */
   const quiet = posts;
+  sentFields.length = 0;
   sync.record(local);
   await sleep(4500);
-  check("حالةٌ لم تتغيّر لا تُرسَل", posts === quiet, `${posts - quiet} طلباً`);
+  check(
+    "حالةٌ لم تتغيّر لا تُرسَل",
+    posts === quiet,
+    `${posts - quiet} طلباً` + (sentFields.length ? " — " + sentFields.join(" · ") : "")
+  );
 
   /* ---- 4. حركة تُدخل فتصل ---- */
   const movementLike = clone(local.movements[0]);
@@ -345,12 +372,30 @@ try {
   );
   check("حسابٌ أُنشئ على الخادم لا يمحوه الجهاز", survived[0].n === 1);
 
-  /* ---- 9. وما عدا ذلك سواء ---- */
+  /* ---- 9. وما عدا ذلك سواء — فيما يقرؤه هذا الحساب ---- */
+  /*
+    حسابُ الفاحص لا يقرأ ملفّ الموظفين ولا الرواتب ولا عروض الأسعار،
+    فلا تصله. والمجموعة المحجوبة تصل فارغةً لا ناقصة — فلو قيست بما في
+    الجهاز لظهرت «مفقودة عند الخادم»، ولدفع بها المتصفّح فمحا ما لا
+    يرى. فالخادم يسمّي ما حجبه، والمقارنة تتخطّاه.
+  */
+  const reply = await fetch(BASE + "/api/data", { cache: "no-store" });
+  const payload = await reply.json();
+  const hidden = new Set(payload.hidden ?? []);
+  check(
+    "الخادم يسمّي ما حجبه عن هذا الحساب",
+    hidden.size > 0,
+    [...hidden].join("، ")
+  );
+
   const server = await sync.fetchServerState();
   const report = compareStates(local, server);
-  const off = report.fields.filter((f) => !f.agree).map((f) => f.field);
+  const off = report.fields
+    .filter((f) => !f.agree)
+    .map((f) => f.field)
+    .filter((f) => !hidden.has(f));
   check(
-    "النسختان متطابقتان فيما عدا ذلك الحساب",
+    "وما يقرؤه متطابقٌ فيما عدا ذلك الحساب",
     off.length === 1 && off[0] === "users",
     off.join("، ") || "لا فرق"
   );
@@ -360,6 +405,17 @@ try {
     "والفرق في المستخدمين زيادةٌ عند الخادم لا نقص",
     users.extra.length === 1 && users.missing.length === 0 && users.different.length === 0,
     `زائد ${users.extra.length} · ناقص ${users.missing.length}`
+  );
+
+  /* ---- 9ب. والمحجوب لا يُدفع به ---- */
+  const beforeHidden = posts;
+  sentFields.length = 0;
+  sync.record(local);
+  await sleep(4500);
+  check(
+    "ولا يُرسل المتصفّح ما لا يقرأ — فلا يمحو ما لا يرى",
+    posts === beforeHidden,
+    `${posts - beforeHidden} طلباً` + (sentFields.length ? " — " + sentFields.join(" · ") : "")
   );
 
   /* ---- 10. الإطفاء يُسكتها ---- */

@@ -12,8 +12,10 @@ import { AuthError, requireUser } from "@/lib/server/auth";
 import { FROZEN_ADDRESS_REASON, isFrozenAddress } from "@/lib/server/frozen-address";
 import { inTransaction, readable } from "@/lib/server/db";
 import {
+  allowedChanges,
+  nothingToWrite,
+  hiddenFields,
   readableState,
-  refusalReason,
   type ChangeShape,
 } from "@/lib/server/permits";
 import { readState } from "@/lib/server/state";
@@ -48,7 +50,15 @@ export async function GET() {
       أدوات المطوّر، وما لم يخرج من القاعدة لا يُقرأ بحيلة.
     */
     const state = readableState(await readState(readable), user.permissions);
-    return NextResponse.json({ rev, state });
+    /*
+      وما لا يقرؤه يُسمّى له، فيكفّ متصفّحه عن إرساله. وإلا رأى مجموعةً
+      فارغةً عنده فحسبها ناقصةً عند الخادم فدفع بما في جهازه.
+    */
+    return NextResponse.json({
+      rev,
+      state,
+      hidden: hiddenFields(user.permissions),
+    });
   } catch (error) {
     return fail(error);
   }
@@ -67,18 +77,26 @@ export async function POST(request: Request) {
     const user = await requireUser();
     const changes = (await request.json()) as ChangeSet & ChangeShape;
 
-    const refused = refusalReason(changes, user.permissions);
-    if (refused) {
-      return NextResponse.json({ error: refused }, { status: 403 });
+    /*
+      ما جاز يُكتب، وما لا يجوز يُردّ باسمه. ولو رُدّ الطلب كلّه لصفٍّ
+      واحدٍ فيه لوقف رفعُ عمل صاحبه كلِّه، وهو لا يدري.
+    */
+    const { allowed, refused } = allowedChanges(changes, user.permissions);
+    if (nothingToWrite(allowed)) {
+      return NextResponse.json(
+        { error: refused[0]?.reason ?? "لا شيء في الطلب", refused },
+        { status: refused.length > 0 ? 403 : 200 }
+      );
     }
 
     /* الكاتب اسمه لا معرّفه: السجل يُقرأ بعد سنوات وقد زال الحساب */
     const result = await inTransaction(async (db) => {
-      const counts = await applyChangesIn(db, changes, user.name);
+      /* الفرز يختار مجموعاتٍ من الطلب ولا يمسّ صفوفها، فهي كما وصلت */
+      const counts = await applyChangesIn(db, allowed as ChangeSet, user.name);
       return { ...counts, rev: await currentRev(db) };
     });
 
-    return NextResponse.json(result);
+    return NextResponse.json({ ...result, refused });
   } catch (error) {
     return fail(error);
   }

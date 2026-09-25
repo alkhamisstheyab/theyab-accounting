@@ -196,6 +196,7 @@ import {
   rememberLoaded,
   setSyncEnabled,
   startSync,
+  stopSync,
   subscribe as subscribeSync,
   syncEnabled,
   type SyncStatus,
@@ -467,8 +468,6 @@ export default function HomeV2() {
     setBackupMeta(readBackupMeta());
     linkedFileName().then(setLinkedFile);
     setLoaded(true);
-    /* المزامنة مطفأة حتى تُشعَل من الإعدادات — وهذه توقظها إن كانت مشعلة */
-    startSync();
   }, []);
 
   // الشاشات تتبدّل داخل الصفحة نفسها، فيبقى موضع التمرير من الشاشة السابقة.
@@ -795,6 +794,23 @@ export default function HomeV2() {
     والصفوف تمرّ على المُرحِّل نفسه الذي يمرّ عليه الملف المستورد، فلا
     يدخل الشاشةَ صفٌّ بصورةٍ قديمة.
   */
+  /*
+    المزامنة تبدأ بعد الدخول لا قبله: الخادم لا يجيب من لا جلسة له،
+    فلو بدأت قبله لدارت على بابٍ مغلق.
+
+    وهي تعمل لكل من دخل بلا زرٍّ يُشعلها. ولو بقيت بزرٍّ — وهو في شاشةٍ
+    لا يفتحها إلا صاحب الإعدادات — لعمل الموظف يومه كلَّه على جهازه ولم
+    يصل عملُه إلى أحد، ولا مفتاح عنده ولا علم له.
+  */
+  useEffect(() => {
+    if (!session) return;
+    startSync();
+  }, [session]);
+
+  /* حالة الخادم تُعرض لكل من يعمل، لا في شاشة الإعدادات وحدها */
+  const [serverState, setServerState] = useState<SyncStatus | null>(null);
+  useEffect(() => subscribeSync(setServerState), []);
+
   /*
     أمِن الداخلين أنت؟ يُسأل الخادم عند الإقلاع، فالتصريح عنده لا عندنا.
     ولو كان الخطّ منقطعاً لم يدخل أحد — وذلك ثمن أن تكون الصلاحية منعاً
@@ -1156,6 +1172,7 @@ export default function HomeV2() {
           onOpen={() => setLocked(false)}
           onOther={async () => {
             log("خروج", "جلسة", "تسجيل خروج من الشاشة المقفلة");
+            stopSync();
             await serverSignOut();
             setSession(null);
             setLocked(false);
@@ -1192,6 +1209,40 @@ export default function HomeV2() {
               وعمله باقٍ تحتها فيعود ويكمل. وهو أنفع من مهلة السكون،
               لأنه في يد صاحبه لا في انتظار وقت.
             */}
+            {/*
+              حالة الخادم أمام عينه دائماً: من عمل ساعةً وهو منقطع
+              يحسب عمله محفوظاً وهو في جهازه وحده. والرقم أصدق من
+              كلمة: «٣ في الانتظار» تُفهم بلا شرح.
+            */}
+            {serverState && (
+              <div className="mt-2 rounded bg-slate-900 px-3 py-2 text-xs">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-slate-400">الخادم</span>
+                  <span
+                    className={
+                      serverState.phase === "متزامنة"
+                        ? "font-bold text-green-400"
+                        : serverState.phase === "منقطعة"
+                          ? "font-bold text-red-400"
+                          : "font-bold text-amber-300"
+                    }
+                  >
+                    {serverState.phase}
+                  </span>
+                </div>
+                {serverState.pending > 0 && (
+                  <div className="mt-1 text-amber-300">
+                    {serverState.pending} في الانتظار
+                  </div>
+                )}
+                {serverState.refused.length > 0 && (
+                  <div className="mt-1 leading-5 text-red-300">
+                    {serverState.refused[0].reason} — راجع المدير
+                  </div>
+                )}
+              </div>
+            )}
+
             <button
               onClick={() => setLocked(true)}
               className="mt-2 w-full rounded bg-amber-600 px-3 py-1 text-xs font-bold hover:bg-amber-500"
@@ -1207,6 +1258,7 @@ export default function HomeV2() {
             <button
               onClick={async () => {
                 log("خروج", "جلسة", "تسجيل خروج");
+                stopSync();
                 await serverSignOut();
                 setSession(null);
               }}

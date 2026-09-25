@@ -67,6 +67,13 @@ export type SyncStatus = {
    * تُعرض لصاحبها: فقد يكون طبع سنداً بالرقم القديم، أو كتبه في ورقة.
    */
   renumbered: { id: string; from: number; to: number }[];
+  /**
+   * مجموعاتٌ ردّها الخادم لانعدام الصلاحية، ومعها سببها.
+   *
+   * تُعرض لصاحبها: فالصمت هنا أسوأ من الرفض — يعمل يومه ويحسب عمله
+   * محفوظاً وهو في جهازه وحده.
+   */
+  refused: { field: string; reason: string }[];
 };
 
 let status: SyncStatus = {
@@ -76,6 +83,7 @@ let status: SyncStatus = {
   pending: 0,
   lastSyncAt: "",
   renumbered: [],
+  refused: [],
   lastError: "",
 };
 
@@ -94,6 +102,24 @@ let latest: AppState | null = null;
  * فالحذف لا يُرسل إلا لصفٍّ كان هنا ثم زال.
  */
 const seen = new Map<string, Set<string>>();
+
+/**
+ * ما ردّه الخادم، وصورةُ ما أُرسل منه.
+ *
+ * المردود لا يُحسب مرسَلاً — فيبقى في الفرق ظاهراً في المقارنة، ولا
+ * يُظنّ محفوظاً عند الخادم. ولا يُعاد إرساله ما دام كما هو، وإلا دار
+ * على الخادم كل ثوانٍ بلا فائدة. فإن غيّره صاحبه أو أُذن له، أُرسل.
+ */
+const refusedFields = new Map<string, string>();
+
+/**
+ * ما لا يقرؤه هذا الحساب — يقوله الخادم عند الاتصال.
+ *
+ * ولا يُرسل ما لا يُقرأ: المتصفّح يرى المجموعة فارغةً عنده لأنها حُجبت،
+ * لا لأنها خالية عند الخادم. فلو حسب الفرق حساباً مجرّداً لدفع بما في
+ * جهازه فوق ما لا يعلم، أو ظنّ نقصاً فأعاد إرسال ما لا يملك.
+ */
+let hidden = new Set<string>();
 
 let timer: ReturnType<typeof setTimeout> | null = null;
 let sending = false;
@@ -194,12 +220,23 @@ export const syncStatus = (): SyncStatus => status;
 /* الإشعال والإطفاء                                                    */
 /* ------------------------------------------------------------------ */
 
+/**
+ * المزامنة تعمل ما لم تُطفأ صراحةً.
+ *
+ * كانت مطفأةً حتى تُشعَل، ومفتاحها في شاشةٍ لا يفتحها إلا صاحب
+ * الإعدادات. وذلك موافقٌ لزمنٍ كان الجهاز فيه هو المرجع والمزامنة
+ * تجربة. فلمّا صار العمل على الخادم انقلب الحكم: من دخل بجهازٍ جديد
+ * عمل يومه كلَّه ولم يصل عملُه، ولا مفتاح عنده ولا علم له.
+ *
+ * فصارت تعمل لكل من دخل، ويبقى الإطفاء بقرارٍ صريح من صاحب الإعدادات.
+ */
 export function syncEnabled(): boolean {
   if (typeof window === "undefined") return false;
   try {
-    return localStorage.getItem(ENABLED_KEY) === "on";
+    return localStorage.getItem(ENABLED_KEY) !== "off";
   } catch {
-    return false;
+    /* لا تخزين — فلا إطفاء محفوظ، والأصل العمل */
+    return true;
   }
 }
 
@@ -265,6 +302,9 @@ export async function connect(): Promise<boolean> {
       return false;
     }
     snapshot = body?.state as AppState;
+    hidden = new Set(
+      Array.isArray(body?.hidden) ? (body.hidden as string[]).map(String) : []
+    );
     publish({
       phase: "متزامنة",
       rev: Number(body?.rev) || 0,
@@ -387,8 +427,35 @@ async function flush(): Promise<void> {
 
   const state = latest;
   const changes = sendable(snapshot, state);
+
+  /* ما لا يقرؤه صاحب الجهاز لا يُرسل — وليس نقصاً عنده بل حجاباً */
+  for (const part of ["upserts", "deletes", "whole"] as const) {
+    const group = changes[part];
+    if (!group) continue;
+    for (const field of Object.keys(group)) {
+      if (hidden.has(field)) delete (group as Record<string, unknown>)[field];
+    }
+    if (Object.keys(group).length === 0) delete changes[part];
+  }
+
+  /* ما رُدّ ولم يتغيّر لا يُعاد إرساله — ويبقى ظاهراً في المقارنة */
+  for (const part of ["upserts", "deletes", "whole"] as const) {
+    const group = changes[part];
+    if (!group) continue;
+    for (const field of Object.keys(group)) {
+      const sent = JSON.stringify((group as Record<string, unknown>)[field]);
+      if (refusedFields.get(field) === sent) {
+        delete (group as Record<string, unknown>)[field];
+      } else if (refusedFields.has(field)) {
+        refusedFields.delete(field);
+      }
+    }
+    /* القسم الفارغ يُحذف: وجوده وحده يُحسب إرسالاً فتُبعث دفعةٌ خاوية */
+    if (Object.keys(group).length === 0) delete changes[part];
+  }
+
   if (isEmpty(changes)) {
-    publish({ phase: "متزامنة", pending: 0 });
+    publish({ phase: "متزامنة", pending: countChanges(sendable(snapshot, state)) });
     return;
   }
 
@@ -413,19 +480,40 @@ async function flush(): Promise<void> {
       return;
     }
 
-    snapshot = snapshotForServer(state);
+    /*
+      الخادم يكتب ما جاز ويردّ ما لا يجوز. فالمردود يُستثنى من الصورة:
+      يبقى حقلُه كما كان عند الخادم، فيظهر في المقارنة ولا يُظنّ محفوظاً.
+    */
+    const refused = Array.isArray(body?.refused)
+      ? (body.refused as SyncStatus["refused"])
+      : [];
+    const next = snapshotForServer(state);
+    for (const item of refused) {
+      const sent =
+        changes.upserts?.[item.field] ??
+        changes.deletes?.[item.field] ??
+        changes.whole?.[item.field];
+      refusedFields.set(item.field, JSON.stringify(sent));
+      if (snapshot) {
+        (next as unknown as Record<string, unknown>)[item.field] = (
+          snapshot as unknown as Record<string, unknown>
+        )[item.field];
+      }
+    }
+    snapshot = next;
     forgetDeletes(changes.deletes);
     backoff = RETRY_MIN_MS;
     publish({
       phase: "متزامنة",
       /* الرقم لا يتراجع: ردٌّ متأخّر قد يحمل رقماً أقدم مما سُحب */
       rev: Math.max(Number(body?.rev) || 0, status.rev),
-      pending: 0,
+      pending: countChanges(sendable(snapshot, state)),
       lastError: "",
       lastSyncAt: new Date().toISOString(),
       renumbered: Array.isArray(body?.renumbered)
         ? (body.renumbered as SyncStatus["renumbered"])
         : [],
+      refused,
     });
 
     /* تغيّر شيءٌ أثناء الإرسال؟ يُرسل في الدورة التالية */
@@ -574,6 +662,21 @@ export async function pushDeletions(
   snapshot = null;
   publish({ lastSyncAt: new Date().toISOString(), lastError: "" });
   return count;
+}
+
+/**
+ * تُوقَف عند الخروج — بلا إطفاءٍ محفوظ.
+ *
+ * من خرج لا جلسة له، فكلُّ طلبٍ بعدها يُردّ. والفرق بين هذا وبين
+ * الإطفاء أن ذاك قرارٌ يبقى، وهذا وقفٌ إلى أن يدخل الداخل التالي.
+ */
+export function stopSync(): void {
+  if (pullTimer) clearTimeout(pullTimer);
+  pullTimer = null;
+  if (timer) clearTimeout(timer);
+  timer = null;
+  snapshot = null;
+  publish({ enabled: false, phase: "مطفأة", pending: 0, refused: [] });
 }
 
 /** يُنادى مرةً عند الإقلاع */
