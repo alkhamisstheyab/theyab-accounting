@@ -1260,13 +1260,42 @@ function readKey(key: string, errors: string[]): unknown {
  * افتراضية لا بياناتُ شركة. فلا يُقاس عليها، ولا يُدفع بها إلى الخادم:
  * الفراغ ليس رأياً في البيانات.
  */
+/**
+ * ما يدلّ على نسخةٍ حقيقية: صفٌّ واحدٌ من عمل الشركة.
+ *
+ * ولا يُسأل عن دليل الحسابات ولا طرق الدفع ولا الأسماء ولا بيانات
+ * الشركة — فتلك يملؤها النظام بقيمٍ افتراضية من عنده. ولا عن سجلّ
+ * التدقيق، فإن أول دخولٍ يكتب فيه قيداً. فلو قيس بها لقال جهازٌ لم
+ * يرَ من بيانات الشركة شيئاً: «عندي نسخة».
+ */
+const DATA_KEYS = [
+  KEYS.movements,
+  KEYS.projects,
+  KEYS.contractors,
+  KEYS.users,
+  KEYS.employees,
+  KEYS.attendance,
+  KEYS.materials,
+  KEYS.materialReceipts,
+  KEYS.payrollRuns,
+  KEYS.workItems,
+  KEYS.quotations,
+  KEYS.invoices,
+];
+
 export function hasStoredState(): boolean {
   if (typeof window === "undefined") return false;
-  try {
-    return Object.values(KEYS).some((key) => localStorage.getItem(key) != null);
-  } catch {
-    return false;
-  }
+  return DATA_KEYS.some((key) => {
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return false;
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) && parsed.length > 0;
+    } catch {
+      /* مفتاحٌ تالف: لا يُعدّ نسخة، ويُقرأ الخبر من غيره */
+      return false;
+    }
+  });
 }
 
 export function loadState(): LoadResult {

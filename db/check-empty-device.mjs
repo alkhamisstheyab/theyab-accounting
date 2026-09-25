@@ -52,9 +52,28 @@ check(
 console.log("\nوالجهاز يعرف أفيه نسخةٌ أم لا:\n");
 
 check("جهازٌ فارغ يقول لا", hasStoredState() === false);
+
+/*
+  وهذه هي التي أخطأ فيها الفحص الأول: الحفظ التلقائي يكتب في التخزين
+  مصفوفاتٍ فارغة وقيماً افتراضية أول ما تُفتح الصفحة. فلو قيس بوجود
+  المفاتيح لقال الهاتفُ «عندي نسخة» وهو لم يرَ من بيانات الشركة شيئاً —
+  فلا يأخذ نسخته، ويدفع بفراغه. ووقع ذلك فعلاً على هاتف صاحب الشركة.
+*/
 localStorage.setItem("movements", "[]");
-check("وجهازٌ فيه نسخة يقول نعم", hasStoredState() === true);
-localStorage.removeItem("movements");
+localStorage.setItem("employees", "[]");
+localStorage.setItem("company", JSON.stringify(defaultCompany()));
+localStorage.setItem("auditLog", JSON.stringify([{ id: "a", action: "دخول" }]));
+check(
+  "وجهازٌ فيه مصفوفاتٌ فارغة وقيدُ دخولٍ وحده يقول لا",
+  hasStoredState() === false
+);
+
+localStorage.setItem("movements", JSON.stringify([{ id: "m-1", entryNo: 1 }]));
+check("وجهازٌ فيه صفٌّ من عمل الشركة يقول نعم", hasStoredState() === true);
+
+for (const k of ["movements", "employees", "company", "auditLog"]) {
+  localStorage.removeItem(k);
+}
 
 console.log("\nوالفارغ لا يُرسل شيئاً — ولو اتّصل:\n");
 

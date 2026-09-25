@@ -1193,7 +1193,11 @@ export default function HomeV2() {
   if (!session || !currentUser) {
     return (
       <SignInScreen
-        company={company}
+        /*
+          جهازٌ بلا نسخة قد يحمل في تخزينه قيماً افتراضية قديمة — واسمُ
+          شركةٍ قديم منها. فيُعرض الاسم المسجَّل حتى تصل نسخة الخادم.
+        */
+        company={ownCopy === false ? defaultCompany() : company}
         onIn={(who) => {
           setSession(who);
           /* الاسم وحده يُحفظ في الجهاز — والكلمة لا تُحفظ */
