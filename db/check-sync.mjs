@@ -242,6 +242,7 @@ try {
   check("ومطفأةً لا ترسل شيئاً", posts === before, `${posts - before} طلباً`);
 
   /* ---- 2. الإشعال يتّصل ---- */
+  sync.markOwned();
   sync.setSyncEnabled(true);
   const connected = await until((s) => s.phase === "متزامنة");
   check(
@@ -436,6 +437,7 @@ try {
     الإشعال هنا. والمطلوب أن تصل.
   */
   const silentId = local.movements[local.movements.length - 1].id;
+  sync.markOwned();
   sync.setSyncEnabled(true);
   const flushed = await until((s) => s.phase === "متزامنة" && s.pending === 0, 30000);
 

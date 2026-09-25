@@ -121,6 +121,27 @@ const refusedFields = new Map<string, string>();
  */
 let hidden = new Set<string>();
 
+/**
+ * أَلِهذا الجهاز نسخةٌ يدفع بها؟
+ *
+ * الحارس القديم يمنع الجهاز الفارغ من محو **الصفوف**: لا يُرسل حذفُ
+ * صفٍّ لم يره. ولا يحمي ذلك المجموعات التي تُكتب كاملةً — دليل
+ * الحسابات وبيانات الشركة وطرق الدفع والأسماء والأرصدة الافتتاحية —
+ * فهذه تُرسل كما هي عند الجهاز. وعند جهازٍ فارغ هي قيمٌ افتراضية،
+ * فيكتب فراغَه فوق عمل الشركة كلِّه، ولا حذفَ في ذلك ولا تنبيه.
+ *
+ * فلا يُرسل شيءٌ حتى يُعلن الجهاز أن عنده نسخة: إمّا نسخته المحفوظة،
+ * وإمّا نسخةٌ أخذها من الخادم عند أول دخول.
+ */
+let owns = false;
+
+/** يُعلن أن في الجهاز نسخةً حقيقية — فيُؤذن له بالإرسال */
+export function markOwned(): void {
+  owns = true;
+}
+
+export const ownsData = (): boolean => owns;
+
 let timer: ReturnType<typeof setTimeout> | null = null;
 let sending = false;
 let backoff = RETRY_MIN_MS;
@@ -424,6 +445,14 @@ async function flush(): Promise<void> {
     return;
   }
   if (!latest) return;
+  /*
+    جهازٌ بلا نسخة لا يُرسل: ما عنده قيمٌ افتراضية لا بيانات، وإرسالها
+    كتابةٌ للفراغ فوق العمل. ويُرفع المنع متى أخذ نسخته من الخادم.
+  */
+  if (!owns) {
+    publish({ phase: "متزامنة", pending: 0 });
+    return;
+  }
 
   const state = latest;
   const changes = sendable(snapshot, state);

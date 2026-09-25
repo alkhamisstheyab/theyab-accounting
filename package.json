@@ -34,6 +34,7 @@
     "check:lock": "node db/check-lock.mjs",
     "check:sync-for-all": "node db/check-sync-for-all.mjs",
     "render:print": "node db/render-print.mjs",
+    "check:empty-device": "node db/check-empty-device.mjs",
     "check:login": "node db/check-login.mjs",
     "verify:live": "node db/verify-live.mjs",
     "check:import": "node db/check-import.mjs",

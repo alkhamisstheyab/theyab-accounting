@@ -184,6 +184,7 @@ import {
   normalizeState,
   receiptCost,
   saveState,
+  hasStoredState,
   COUNTERPARTY_TYPES,
   type CounterpartyType,
 } from "@/lib/storage";
@@ -193,6 +194,7 @@ import {
   onIncoming,
   type Incoming,
   record as recordForSync,
+  markOwned,
   rememberLoaded,
   setSyncEnabled,
   startSync,
@@ -413,7 +415,48 @@ export default function HomeV2() {
   /** الحركة قيد التعديل — فارغة يعني إدخال حركة جديدة */
   const [editing, setEditing] = useState<Movement | null>(null);
 
+  /**
+   * يُحلّ حالةً كاملة في الشاشة.
+   *
+   * تُستعمل عند الإقلاع، وعند استعادة نسخة، وعند أخذ الجهاز الفارغ
+   * نسختَه من الخادم. وموضعُها واحد لأن نسيان مجموعةٍ منها لا يظهر إلا
+   * حين يفتح صاحبها شاشتها فيجدها خاوية.
+   */
+  const applyWholeState = (state: AppState) => {
+    setMovements(state.movements);
+    setProjects(state.projects);
+    setContractors(state.contractors);
+    setOpeningBalances(state.openingBalances);
+    setMaterials(state.materials);
+    setMaterialReceipts(state.materialReceipts);
+    setCompany(state.company);
+    setUsers(state.users);
+    setAudit(state.audit);
+    setYearLocks(state.yearLocks);
+    setChart(state.chart);
+    setItems(state.items);
+    setPayments(state.payments);
+    setPeople(state.people);
+    setEmployees(state.employees);
+    setAttendance(state.attendance);
+    setPayrollRuns(state.payrollRuns);
+    setPayrollSettings(state.payrollSettings);
+    setWorkItems(state.workItems);
+    setQuotations(state.quotations);
+    setInvoices(state.invoices);
+  };
+
+  /**
+   * أَلِهذا الجهاز نسخةٌ من قبل؟
+   *
+   * تُقرأ عند الإقلاع قبل أي حفظ. فالحفظ التلقائي يكتب في التخزين أولَ
+   * ما تُحمَّل الشاشة، فلو سُئل التخزينُ بعده لقال «عندي نسخة» وهي
+   * الفراغ الذي كتبه هو.
+   */
+  const [ownCopy, setOwnCopy] = useState<boolean | null>(null);
+
   useEffect(() => {
+    setOwnCopy(hasStoredState());
     const { state, errors } = loadState();
     /* ما قُرئ من التخزين يُعلَم به المزامنة قبل أن يمسّه النظام */
     rememberLoaded(state);
@@ -802,10 +845,57 @@ export default function HomeV2() {
     لا يفتحها إلا صاحب الإعدادات — لعمل الموظف يومه كلَّه على جهازه ولم
     يصل عملُه إلى أحد، ولا مفتاح عنده ولا علم له.
   */
+  /** جهازٌ فارغ يأخذ نسخته من الخادم — ويُقال له ما يجري */
+  const [adopting, setAdopting] = useState("");
+  /* الأخذ مرةً واحدة في الجلسة: إعادته تكتب فوق عملٍ جرى بعده */
+  const started = useRef(false);
+
   useEffect(() => {
-    if (!session) return;
-    startSync();
-  }, [session]);
+    if (!session || ownCopy === null || started.current) return;
+    started.current = true;
+    let stopped = false;
+
+    void (async () => {
+      /*
+        جهازٌ فُتح لأول مرة لا نسخة فيه: يأخذها من الخادم كاملةً كما
+        يقرؤها صاحبه بصلاحيته، ثم يعمل عليها ويزامن كالمعتاد.
+
+        ولولا ذلك لوقع أمران: يرى الموظف نظاماً خاوياً فيظنّه معطّلاً،
+        ويدفع جهازه بفراغه فوق ما في الخادم من دليل حساباتٍ وبيانات
+        شركة — فتلك مجموعاتٌ تُكتب كاملةً ولا يحميها حارس الصفوف.
+      */
+      if (!ownCopy) {
+        setAdopting("جهازٌ جديد — يأخذ نسخته من الخادم…");
+        try {
+          const server = await fetchServerState();
+          if (stopped) return;
+          applyWholeState(server);
+          rememberLoaded(server);
+          setYear(availableYears(server.movements, server.openingBalances)[0]);
+          setAdopting("");
+        } catch {
+          /*
+            تعذّر الأخذ: لا يُؤذَن للجهاز بالإرسال، فيبقى فارغاً ولا
+            يكتب فراغه فوق عمل الشركة. ويُقال لصاحبه لا يُترك يحزر.
+          */
+          if (!stopped) {
+            setAdopting("تعذّر أخذ النسخة من الخادم — حدّث الصفحة");
+            started.current = false;
+          }
+          return;
+        }
+      }
+
+      if (stopped) return;
+      /* الآن للجهاز نسخة: يُؤذن له بالإرسال وتبدأ المزامنة */
+      markOwned();
+      startSync();
+    })();
+
+    return () => {
+      stopped = true;
+    };
+  }, [session, ownCopy]);
 
   /* حالة الخادم تُعرض لكل من يعمل، لا في شاشة الإعدادات وحدها */
   const [serverState, setServerState] = useState<SyncStatus | null>(null);
@@ -1172,6 +1262,7 @@ export default function HomeV2() {
           onOpen={() => setLocked(false)}
           onOther={async () => {
             log("خروج", "جلسة", "تسجيل خروج من الشاشة المقفلة");
+            started.current = false;
             stopSync();
             await serverSignOut();
             setSession(null);
@@ -1214,6 +1305,12 @@ export default function HomeV2() {
               يحسب عمله محفوظاً وهو في جهازه وحده. والرقم أصدق من
               كلمة: «٣ في الانتظار» تُفهم بلا شرح.
             */}
+            {adopting && (
+              <div className="mt-2 rounded bg-amber-900/60 px-3 py-2 text-xs leading-5 text-amber-100">
+                {adopting}
+              </div>
+            )}
+
             {serverState && (
               <div className="mt-2 rounded bg-slate-900 px-3 py-2 text-xs">
                 <div className="flex items-center justify-between gap-2">
@@ -1258,6 +1355,7 @@ export default function HomeV2() {
             <button
               onClick={async () => {
                 log("خروج", "جلسة", "تسجيل خروج");
+                started.current = false;
                 stopSync();
                 await serverSignOut();
                 setSession(null);

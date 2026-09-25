@@ -345,9 +345,15 @@ export type CompanyProfile = {
   backupEveryDays: number;
 };
 
+/*
+  الاسم المسجَّل للشركة، لا اسمٌ افتراضيٌّ من زمن التجربة.
+
+  فهذه القيم تظهر على كل جهازٍ لا نسخة فيه — شاشة الدخول أول ما تظهر
+  عليه — ورأى صاحب الشركة على هاتفه اسماً ليس اسم شركته.
+*/
 export const defaultCompany = (): CompanyProfile => ({
-  name: "شركة ذياب للمقاولات",
-  nameEn: "",
+  name: "شركة طارق الأسد لتشييد المباني",
+  nameEn: "Tariq Al-Assad building construction company",
   logo: "",
   address: "",
   phone: "",
@@ -1244,6 +1250,22 @@ function readKey(key: string, errors: string[]): unknown {
     // بيانات تالفة: لا نُسقط التطبيق ولا نمحو الأصل — نُبلغ فقط
     errors.push(`تعذّرت قراءة «${key}» من التخزين المحلي (بيانات تالفة).`);
     return null;
+  }
+}
+
+/**
+ * أفي هذا الجهاز نسخةٌ من بيانات الشركة؟
+ *
+ * جهازٌ فُتح لأول مرة لا نسخة فيه، وما يعرضه النظام حينئذٍ قيمٌ
+ * افتراضية لا بياناتُ شركة. فلا يُقاس عليها، ولا يُدفع بها إلى الخادم:
+ * الفراغ ليس رأياً في البيانات.
+ */
+export function hasStoredState(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return Object.values(KEYS).some((key) => localStorage.getItem(key) != null);
+  } catch {
+    return false;
   }
 }
 

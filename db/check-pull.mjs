@@ -87,6 +87,8 @@ sync.onIncoming((incoming) => {
 
 console.log("\nيصل عملُ غيرك:\n");
 
+/* الجهاز في هذا الفحص عامرٌ بنسخته، كما تُعلن الشاشة بعد التحميل */
+sync.markOwned();
 sync.setSyncEnabled(true);
 await wait(300);
 

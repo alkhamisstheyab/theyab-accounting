@@ -152,6 +152,7 @@ globalThis.fetch = async (url, init) => {
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
+sync.markOwned();
 sync.setSyncEnabled(true);
 await wait(300);
 
@@ -205,7 +206,14 @@ check(
 console.log("\nوالشاشة تُري كلَّ عاملٍ حاله:\n");
 
 const page = fs.readFileSync("app/page.tsx", "utf8");
-check("المزامنة تبدأ بعد الدخول", page.includes("if (!session) return;\n    startSync();"));
+check(
+  "المزامنة تبدأ بعد الدخول",
+  page.includes("if (!session || ownCopy === null || started.current) return;")
+);
+check(
+  "وبعد أن تكون للجهاز نسخة",
+  page.includes("markOwned();\n      startSync();")
+);
 check("وتقف عند الخروج", page.includes("stopSync();"));
 check("وحالة الخادم في شريط كل مستخدم", page.includes("{serverState.phase}"));
 check("ومعها ما ينتظر", page.includes("في الانتظار"));

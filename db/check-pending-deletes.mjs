@@ -88,6 +88,7 @@ const without = { ...emptyState(), contractors: [] };
 
 console.log("\nالحذف يُحفظ قبل إرساله:\n");
 
+sync.markOwned();
 sync.setSyncEnabled(true);
 await wait(200);
 sync.rememberLoaded(withContract);
@@ -114,6 +115,7 @@ const fresh = await createJiti(import.meta.url, { moduleCache: false }).import(
   "../lib/sync.ts"
 );
 posted.length = 0;
+fresh.markOwned();
 fresh.setSyncEnabled(true);
 await wait(200);
 fresh.rememberLoaded(without);
