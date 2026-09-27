@@ -83,6 +83,18 @@ export type Movement = {
    * على حدة، فلا يُدفع مرتين ولا يُنسى.
    */
   dueId?: string;
+
+  /**
+   * توزيع سدادٍ واحد على أكثر من استحقاق.
+   *
+   * فالمال يُدفع للرجل جملةً لا عن كل نقلةٍ على حدة: مئتان تُقفل نقلة
+   * خشبٍ وكريناً وبعضَ أجر يوم. وهو سندُ صرفٍ واحد ومالٌ خرج مرةً
+   * واحدة، فلا يُشطر إلى قيود.
+   *
+   * ومجموع التوزيع يساوي مبلغ الحركة تماماً. ومتى وُجد فهو المعتمد،
+   * ولا يُقرأ dueId معه.
+   */
+  dueSplits?: DueSplit[];
   /** excel = مستوردة من الملف، app = أُدخلت في النظام */
   source: "excel" | "app";
 
@@ -103,6 +115,9 @@ export type Movement = {
 
 /** حصّة دفعةٍ من مبلغ حركة */
 export type InstallmentSplit = { number: number; amount: number };
+
+/** حصّة استحقاقٍ من مبلغ سداد */
+export type DueSplit = { dueId: string; amount: number };
 
 export type ApprovalState = "بانتظار الاعتماد" | "معتمدة" | "مرفوضة";
 

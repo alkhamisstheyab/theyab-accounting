@@ -27,6 +27,8 @@ const check = (label, ok, detail = "") => {
 
 const {
   DUE_KINDS,
+  allocate,
+  allocationProblem,
   DUES_ACCOUNTS,
   buildDues,
   dueKind,
@@ -192,6 +194,88 @@ report = buildDues([first, loose], TODAY);
 check("يُعدّ في الشاذّة", report.loose.length === 1);
 check("ولا يُقفل استحقاقاً بعينه", report.dues[0].remaining === 100);
 
+console.log("\nوالسداد جملةً يُوزَّع بالأقدم فالأقدم:\n");
+
+/* لرجلٍ ثلاثة أعمال: ٥٠ ثم ١٠٠ ثم ٧٠ */
+const w1 = move({ id: "w-1", date: "2026-09-01", amount: 50, description: "نقل خشب" });
+const w2 = move({ id: "w-2", date: "2026-09-05", amount: 100, description: "كرين" });
+const w3 = move({
+  id: "w-3",
+  date: "2026-09-12",
+  amount: 70,
+  description: "أجر يومية",
+  creditCode: "2140",
+});
+
+let all = buildDues([w1, w2, w3], TODAY);
+let owedTo = all.people.find((x) => x.person === "أبو أحمد");
+check("له على الشركة ٢٢٠", owedTo.owed === 220, String(owedTo.owed));
+
+const plan = allocate(owedTo.rows, 180);
+check("يُوزَّع على ثلاثة أعمال", plan.lines.length === 3, String(plan.lines.length));
+check(
+  "الأقدم يُقفل أولاً",
+  plan.lines[0].row.movement.id === "w-1" && plan.lines[0].closes
+);
+check(
+  "ثم الذي يليه",
+  plan.lines[1].row.movement.id === "w-2" && plan.lines[1].closes
+);
+check(
+  "والأحدث يبقى بعضه",
+  plan.lines[2].amount === 30 && !plan.lines[2].closes,
+  `يُدفع منه ${plan.lines[2].amount} من 70`
+);
+check("ولا يفضل شيء", plan.extra === 0);
+check(
+  "ومجموع التوزيع هو المبلغ",
+  plan.splits.reduce((sum, x) => sum + x.amount, 0) === 180
+);
+check(
+  "وزيادةٌ على مجموع ما له تُردّ",
+  allocationProblem(owedTo.rows, 250) !== "",
+  allocationProblem(owedTo.rows, 250)
+);
+check("ومجموعه بعينه يُقبل", allocationProblem(owedTo.rows, 220) === "");
+
+/* والسداد الموزَّع يُقرأ في الذمّة كما يُقرأ المفرد */
+const paidBulk = move({
+  id: "pay-bulk",
+  date: "2026-09-25",
+  debitCode: "2120",
+  creditCode: "1111",
+  amount: 150,
+  dueSplits: [
+    { dueId: "w-1", amount: 50 },
+    { dueId: "w-2", amount: 100 },
+  ],
+});
+all = buildDues([w1, w2, w3, paidBulk], TODAY);
+check(
+  "ما أُقفل صار صفراً",
+  all.dues.find((r) => r.movement.id === "w-1").remaining === 0 &&
+    all.dues.find((r) => r.movement.id === "w-2").remaining === 0
+);
+check(
+  "وما لم يُمَسّ باقٍ",
+  all.dues.find((r) => r.movement.id === "w-3").remaining === 70
+);
+owedTo = all.people.find((x) => x.person === "أبو أحمد");
+check("والباقي له ٧٠", owedTo.owed === 70, String(owedTo.owed));
+
+const waitingBulk = {
+  ...paidBulk,
+  id: "pay-bulk-2",
+  approval: "بانتظار الاعتماد",
+  approvedBy: "",
+  approvedAt: "",
+};
+all = buildDues([w1, w2, w3, waitingBulk], TODAY);
+check(
+  "والموزَّع غير المعتمد لا يُنقص الذمّة",
+  all.people.find((x) => x.person === "أبو أحمد").owed === 220
+);
+
 console.log("\nوالشاشة والصلاحية:\n");
 
 const page = fs.readFileSync("app/page.tsx", "utf8");
@@ -206,6 +290,15 @@ check(
   page.includes('approval: "بانتظار الاعتماد",')
 );
 check("والسداد يُربط باستحقاقه", page.includes("dueId: row.movement.id,"));
+check(
+  "والسداد جملةً يُوزَّع ويُعاين قبل الحفظ",
+  page.includes("const plan = allocate(person.rows, payment.amount);") &&
+    page.includes("dueSplits: lines.map((l) => ({")
+);
+check(
+  "ويُشطر القيد بحساب المستحقات لا بالعمل",
+  page.includes("const byDuesAccount = new Map<string, typeof plan.lines>();")
+);
 check(
   "والاسم يُسوّى عند المصدر — فلا ينشطر رصيدٌ بفراغ",
   page.includes('form.person.trim().replace(/\\s+/g, " ")')

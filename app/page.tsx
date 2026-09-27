@@ -205,10 +205,13 @@ import {
 } from "@/lib/sync";
 import {
   DUE_KINDS,
+  allocate,
+  allocationProblem,
   buildDues,
   dueKind,
   payableDues,
   settlementProblem,
+  type DuePerson,
   type DueRow,
 } from "@/lib/dues";
 import { compareStates, type FieldComparison } from "@/lib/changes";
@@ -2213,6 +2216,84 @@ export default function HomeV2() {
                   "حركة",
                   `استحقاق ${draft.person} — ${fmt(draft.amount)} د.ك · ${kind.label}`,
                   { after: describeMovement(movement) }
+                );
+              }}
+              /*
+                السداد جملةً: يُدفع للرجل مبلغٌ واحد عن أعماله كلها،
+                فيُوزَّع بالأقدم فالأقدم ويبقى أثرُ كل عملٍ قائماً.
+
+                والقيد يُشطر بحساب المستحقات لا بالعمل: مستحقات
+                المقاولين حسابٌ والأجور المستحقة آخر، فلا يجمعهما قيدٌ
+                واحد. والغالب أن يكون حساباً واحداً فيكون سنداً واحداً.
+              */
+              onSettlePerson={(person, payment) => {
+                if (!allow("movements.create")) return;
+                const fiscalYear = fiscalYearOf(payment.date);
+                if (isYearClosed(yearLocks, fiscalYear)) {
+                  window.alert(`السنة ${fiscalYear} مقفلة — لا يُقيَّد فيها شيء`);
+                  return;
+                }
+                const plan = allocate(person.rows, payment.amount);
+                if (plan.lines.length === 0) return;
+
+                const account =
+                  payments.find((m) => m.label === payment.method)?.account ?? "1111";
+
+                const byDuesAccount = new Map<string, typeof plan.lines>();
+                for (const line of plan.lines) {
+                  const key = line.row.movement.creditCode;
+                  byDuesAccount.set(key, [...(byDuesAccount.get(key) ?? []), line]);
+                }
+
+                const created: Movement[] = [];
+                let no = nextEntryNoIn(fiscalYear);
+                for (const [duesAccount, lines] of byDuesAccount) {
+                  const amount = round3(
+                    lines.reduce((sum, l) => sum + l.amount, 0)
+                  );
+                  created.push({
+                    id: newId(),
+                    entryNo: no++,
+                    fiscalYear,
+                    date: payment.date,
+                    movementType: "مصروف",
+                    description: `سداد مستحقات ${person.person} — ${lines.length} عملاً`,
+                    itemCode: "",
+                    itemName: "سداد مستحقات",
+                    debitCode: duesAccount,
+                    creditCode: account,
+                    amount,
+                    project: lines[0].row.movement.project,
+                    person: person.person,
+                    paymentMethod: payment.method,
+                    party: person.person,
+                    dueSplits: lines.map((l) => ({
+                      dueId: l.row.movement.id,
+                      amount: l.amount,
+                    })),
+                    source: "app",
+                    approval: "بانتظار الاعتماد",
+                    approvedBy: "",
+                    approvedAt: "",
+                    approvalNote: "",
+                  });
+                }
+
+                setMovements((prev) => [...prev, ...created]);
+                log(
+                  "إنشاء",
+                  "حركة",
+                  `سداد مستحقات ${person.person} — ${fmt(payment.amount)} د.ك على ${plan.lines.length} عملاً`,
+                  {
+                    after: plan.lines
+                      .map(
+                        (l) =>
+                          `${l.row.movement.description}: ${fmt(l.amount)}${
+                            l.closes ? " (أُقفل)" : ""
+                          }`
+                      )
+                      .join(" · "),
+                  }
                 );
               }}
               onSettle={(row, payment) => {
@@ -13386,6 +13467,7 @@ function DuesPage({
   payments,
   onRegister,
   onSettle,
+  onSettlePerson,
 }: {
   movements: Movement[];
   projects: Project[];
@@ -13406,6 +13488,10 @@ function DuesPage({
     row: DueRow,
     payment: { amount: number; method: string; date: string }
   ) => void;
+  onSettlePerson: (
+    person: DuePerson,
+    payment: { amount: number; method: string; date: string }
+  ) => void;
 }) {
   const report = useMemo(() => buildDues(movements, today), [movements, today]);
 
@@ -13421,6 +13507,9 @@ function DuesPage({
   const [open, setOpen] = useState<string | null>(null);
   const [paying, setPaying] = useState<DueRow | null>(null);
   const [pay, setPay] = useState({ amount: "", method: "", date: today });
+  /* السداد جملةً: يُدفع للرجل مبلغٌ واحد عن أعماله كلها */
+  const [payingPerson, setPayingPerson] = useState<DuePerson | null>(null);
+  const [bulk, setBulk] = useState({ amount: "", method: "", date: today });
 
   /* الأسماء المعروفة: أهل النظام ومن سبق أن استحقّ */
   const known = [
@@ -13450,6 +13539,25 @@ function DuesPage({
       description: form.description.trim(),
     });
     setForm({ ...form, person: "", amount: "", description: "" });
+  };
+
+  const plan = payingPerson
+    ? allocate(payingPerson.rows, round3(Number(bulk.amount) || 0))
+    : null;
+
+  const settlePerson = () => {
+    if (!payingPerson) return;
+    const amount = round3(Number(bulk.amount) || 0);
+    const why = allocationProblem(payingPerson.rows, amount);
+    if (why) return setProblem(why);
+    if (!bulk.method) return setProblem("اختر طريقة الدفع");
+    setProblem("");
+    onSettlePerson(payingPerson, {
+      amount,
+      method: bulk.method,
+      date: bulk.date,
+    });
+    setPayingPerson(null);
   };
 
   const settle = () => {
@@ -13536,14 +13644,33 @@ function DuesPage({
                       {row.owed > 0 ? `${row.oldestDays} يوماً` : "—"}
                     </Td>
                     <Td>
-                      <button
-                        onClick={() =>
-                          setOpen(open === row.person ? null : row.person)
-                        }
-                        className="rounded-lg bg-slate-100 px-3 py-2"
-                      >
-                        {open === row.person ? "إخفاء" : "التفصيل"}
-                      </button>
+                      <div className="flex flex-wrap gap-2">
+                        {canSettle && row.owed > 0 && (
+                          <button
+                            onClick={() => {
+                              setPayingPerson(row);
+                              setPaying(null);
+                              setBulk({
+                                amount: String(row.owed),
+                                method: payments[0]?.label ?? "",
+                                date: today,
+                              });
+                              setProblem("");
+                            }}
+                            className="rounded-lg bg-slate-900 px-4 py-2 font-bold text-white"
+                          >
+                            سدّد له
+                          </button>
+                        )}
+                        <button
+                          onClick={() =>
+                            setOpen(open === row.person ? null : row.person)
+                          }
+                          className="rounded-lg bg-slate-100 px-3 py-2"
+                        >
+                          {open === row.person ? "إخفاء" : "التفصيل"}
+                        </button>
+                      </div>
                     </Td>
                   </tr>
                 ))}
@@ -13625,6 +13752,118 @@ function DuesPage({
               </tbody>
             </table>
           </div>
+        </Panel>
+      )}
+
+      {payingPerson && plan && (
+        <Panel
+          title={`سداد لـ ${payingPerson.person}`}
+          subtitle={`له على الشركة ${payingPerson.owed.toFixed(3)} د.ك من ${
+            payableDues(payingPerson.rows).length
+          } عملاً`}
+        >
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+            <Field
+              label="المبلغ المدفوع"
+              hint={`المستحقّ له ${payingPerson.owed.toFixed(3)} د.ك`}
+            >
+              <input
+                type="number"
+                step="0.001"
+                value={bulk.amount}
+                onChange={(e) => setBulk({ ...bulk, amount: e.target.value })}
+                className={inputClass}
+              />
+            </Field>
+            <Field label="طريقة الدفع">
+              <select
+                value={bulk.method}
+                onChange={(e) => setBulk({ ...bulk, method: e.target.value })}
+                className={inputClass}
+              >
+                <option value="">اختر</option>
+                {payments.map((m) => (
+                  <option key={m.label}>{m.label}</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="تاريخ الدفع">
+              <input
+                type="date"
+                value={bulk.date}
+                onChange={(e) => setBulk({ ...bulk, date: e.target.value })}
+                className={inputClass}
+              />
+            </Field>
+            <div className="flex items-end gap-2 pb-1">
+              <button
+                onClick={settlePerson}
+                className="rounded-lg bg-slate-900 px-6 py-3 font-bold text-white"
+              >
+                سجّل السداد
+              </button>
+              <button
+                onClick={() => setPayingPerson(null)}
+                className="rounded-lg bg-slate-100 px-5 py-3 font-bold"
+              >
+                إلغاء
+              </button>
+            </div>
+          </div>
+
+          {/*
+            المعاينة قبل الحفظ: يُرى على أي الأعمال وقع المال، وأيُّها
+            أُقفل وأيُّها بقي بعضه — فالجملة لا تُضيع التفصيل.
+          */}
+          <div className="mt-5 overflow-x-auto">
+            <table className="w-full text-right text-sm">
+              <thead className="bg-slate-100">
+                <tr>
+                  <Th>يقع على</Th>
+                  <Th>تاريخه</Th>
+                  <Th>المستحقّ</Th>
+                  <Th>يُدفع منه</Th>
+                  <Th>يبقى</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {plan.lines.map((line) => (
+                  <tr
+                    key={line.row.movement.id}
+                    className="border-b border-slate-200"
+                  >
+                    <Td>{line.row.movement.description}</Td>
+                    <Td>{line.row.movement.date}</Td>
+                    <Td>
+                      <Money value={line.row.remaining} />
+                    </Td>
+                    <Td>
+                      <Money value={line.amount} bold />
+                    </Td>
+                    <Td>
+                      {line.closes ? (
+                        <span className="text-green-700">يُقفل</span>
+                      ) : (
+                        <Money value={round3(line.row.remaining - line.amount)} />
+                      )}
+                    </Td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {plan.extra > 0.0005 && (
+            <Banner tone="error">
+              فضل من المبلغ <b>{plan.extra.toFixed(3)}</b> د.ك لا يقابله
+              استحقاقٌ مُقرّ — أنقص المبلغ، أو أثبت الاستحقاق الناقص أولاً.
+            </Banner>
+          )}
+
+          <p className="mt-3 text-sm text-slate-600">
+            التوزيع بالأقدم فالأقدم، وأثرُ كل عملٍ يبقى قائماً. ويدخل السداد
+            الدفاتر بعد اعتماده.
+          </p>
         </Panel>
       )}
 

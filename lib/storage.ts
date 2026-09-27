@@ -13,6 +13,7 @@ import {
   GENERATED_CHART,
   GENERATED_ITEMS,
   GENERATED_PAYMENTS,
+  DueSplit,
   InstallmentSplit,
   ItemDefinition,
   Movement,
@@ -983,6 +984,17 @@ const str = (v: unknown, fallback = "") =>
 /* ------------------------------------------------------------------ */
 
 /** حصص الدفعات كما تُقرأ من ملفٍ أو من القاعدة — والفارغ ليس شيئاً */
+function dueSplitsOf(raw: unknown): DueSplit[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const list = raw
+    .map((x) => {
+      const o = (x ?? {}) as Record<string, unknown>;
+      return { dueId: str(o.dueId), amount: round3(Number(o.amount) || 0) };
+    })
+    .filter((x) => x.dueId && x.amount > 0);
+  return list.length > 0 ? list : undefined;
+}
+
 function splitsOf(raw: unknown): InstallmentSplit[] | undefined {
   if (!Array.isArray(raw)) return undefined;
   const list = raw
@@ -1045,6 +1057,8 @@ function migrateMovement(raw: unknown): Movement {
     installmentSplits: splitsOf(m.installmentSplits),
     /* ربط السداد باستحقاقه — فارغٌ في غير حركات المستحقات */
     dueId: str(m.dueId) || undefined,
+    /* توزيع السداد على المستحقات — يُقرأ كما كُتب، والفارغ undefined */
+    dueSplits: dueSplitsOf(m.dueSplits),
     source: m.source === "excel" ? "excel" : "app",
   };
 }

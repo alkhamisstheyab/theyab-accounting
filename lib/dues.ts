@@ -18,7 +18,7 @@
  * وحسابا دليلك موجودان منذ الإكسل ولم يُستعملا بعد.
  */
 
-import { Movement, isApproved, round3, validate } from "./accounting";
+import { DueSplit, Movement, isApproved, round3, validate } from "./accounting";
 
 /** 2120 مستحقات المقاولين · 2140 رواتب وأجور مستحقة */
 export const CONTRACTOR_DUES = "2120";
@@ -131,17 +131,44 @@ const daysBetween = (from: string, to: string): number => {
 export function buildDues(movements: Movement[], today: string) {
   const dues: DueRow[] = [];
   const settlementsByDue = new Map<string, Movement[]>();
+  /* ما خُصّص لكل استحقاق من سدادٍ موزَّع */
+  const shareByDue = new Map<string, number>();
   const loose: Movement[] = [];
 
   for (const m of movements) {
     if (!validate(m).valid) continue;
     if (!isDueSettlement(m)) continue;
+
+    /*
+      السداد الواحد قد يُقفل أعمالاً عدّة: يُدفع للرجل مبلغٌ جملةً لا
+      عن كل نقلةٍ على حدة. فيُقرأ توزيعه إن وُجد، وإلا فربطُه المفرد.
+    */
+    const splits = (m.dueSplits ?? []).filter((x) => x.dueId && x.amount > 0);
+    if (splits.length > 0) {
+      for (const split of splits) {
+        settlementsByDue.set(split.dueId, [
+          ...(settlementsByDue.get(split.dueId) ?? []),
+          m,
+        ]);
+        if (isApproved(m)) {
+          shareByDue.set(
+            split.dueId,
+            round3((shareByDue.get(split.dueId) ?? 0) + split.amount)
+          );
+        }
+      }
+      continue;
+    }
+
     const id = (m.dueId ?? "").trim();
     if (!id) {
       loose.push(m);
       continue;
     }
     settlementsByDue.set(id, [...(settlementsByDue.get(id) ?? []), m]);
+    if (isApproved(m)) {
+      shareByDue.set(id, round3((shareByDue.get(id) ?? 0) + m.amount));
+    }
   }
 
   for (const m of movements) {
@@ -150,9 +177,7 @@ export function buildDues(movements: Movement[], today: string) {
 
     const settlements = settlementsByDue.get(m.id) ?? [];
     /* السداد غير المعتمد لا يُنقص الذمّة: لم يخرج المال بعد */
-    const paid = round3(
-      settlements.filter(isApproved).reduce((s, x) => s + x.amount, 0)
-    );
+    const paid = shareByDue.get(m.id) ?? 0;
     dues.push({
       movement: m,
       amount: round3(m.amount),
@@ -200,12 +225,56 @@ export function buildDues(movements: Movement[], today: string) {
 export const payableDues = (rows: DueRow[]): DueRow[] =>
   rows.filter((r) => !r.pending && r.remaining > 0.0005);
 
+export type Allocation = {
+  splits: DueSplit[];
+  /** الأعمال التي يقفلها هذا المبلغ، للمعاينة قبل الحفظ */
+  lines: { row: DueRow; amount: number; closes: boolean }[];
+  /** ما فضل عن كل ما عليه — لا يُقبل سدادٌ بلا استحقاق */
+  extra: number;
+};
+
+/**
+ * يوزّع مبلغاً على ما للرجل من استحقاقات — الأقدم فالأقدم.
+ *
+ * فهو يُدفع جملةً: «خذ مئتين»، لا عن كل نقلةٍ على حدة. والتوزيع بالأقدم
+ * لأنه الأعدل: أطولُها انتظاراً أولى بالقضاء. ويبقى أثرُ كل عملٍ قائماً،
+ * فيُعرف ما قُضي منه وما بقي — ولا يضيع تفصيلٌ في جملة.
+ */
+export function allocate(rows: DueRow[], amount: number): Allocation {
+  const splits: DueSplit[] = [];
+  const lines: Allocation["lines"] = [];
+  let left = round3(amount);
+
+  for (const row of payableDues(rows).sort((a, b) =>
+    a.movement.date < b.movement.date ? -1 : 1
+  )) {
+    if (left <= 0.0005) break;
+    const share = round3(Math.min(left, row.remaining));
+    if (share <= 0) continue;
+    splits.push({ dueId: row.movement.id, amount: share });
+    lines.push({ row, amount: share, closes: share >= row.remaining - 0.0005 });
+    left = round3(left - share);
+  }
+
+  return { splits, lines, extra: left };
+}
+
 /**
  * سبب منع السداد، أو فارغ إن جاز.
  *
  * فلا يُدفع ما لم تُقرّه الإدارة، ولا يُدفع أكثر مما بقي — وهما العلّتان
  * اللتان من أجلهما طُلبت الشاشة.
  */
+export function allocationProblem(rows: DueRow[], amount: number): string {
+  if (!(amount > 0)) return "المبلغ غير صحيح";
+  const owed = round3(payableDues(rows).reduce((s, r) => s + r.remaining, 0));
+  if (owed <= 0) return "لا مستحقّ مُقرٌّ لهذا الشخص";
+  if (amount > owed + 0.0005) {
+    return `المستحقّ له ${owed.toFixed(3)} د.ك — لا يُدفع أكثر منه`;
+  }
+  return "";
+}
+
 export function settlementProblem(row: DueRow, amount: number): string {
   if (row.pending) return "لم تُقرّ الإدارة هذا الاستحقاق بعد";
   if (!(amount > 0)) return "المبلغ غير صحيح";
