@@ -9,6 +9,7 @@
  * جاز أن يُقبل بعضها لأمكن أن تُحفظ حركةٌ ويُرفض سجل تدقيقها.
  */
 
+import { DUES_ACCOUNTS } from "../dues";
 import type { Permission } from "../permissions";
 
 type Rule = {
@@ -55,6 +56,23 @@ const RULES: Record<string, Rule> = {
   payrollSettings: { write: ["payroll.run"], remove: ["payroll.run"] },
   openingBalances: { write: ["opening.manage"], remove: ["opening.manage"] },
   yearLocks: { write: ["year.close"], remove: ["year.close"] },
+};
+
+/**
+ * الاستحقاق: حركةٌ يكتبها من لا يملك إدخال الحركات.
+ *
+ * المهندس يشهد إتمام العمل فيُثبت ما وجب لصاحبه، ولا يملك سوى ذلك: لا
+ * يُدخل قيداً آخر، ولا يمسّ حساباً، ولا يعتمد شيئاً. فيُفحص الصفّ نفسه
+ * لا المجموعة — دائنُه حساب مستحقات، وحالُه بانتظار الإقرار.
+ *
+ * ولو أُعطي «إدخال الحركات» ليُثبت استحقاقاً لفُتح له باب الدفاتر كلّه.
+ */
+const isDueRow = (row: unknown): boolean => {
+  const m = (row ?? {}) as Record<string, unknown>;
+  return (
+    DUES_ACCOUNTS.includes(String(m.creditCode ?? "")) &&
+    String(m.approval ?? "") === "بانتظار الاعتماد"
+  );
 };
 
 /** الحذف من سجل التدقيق ممنوع على الجميع، ولو كان المالك */
@@ -136,9 +154,25 @@ export function allowedChanges(
 
   for (const [field, rows] of Object.entries(changes.upserts ?? {})) {
     const rule = RULES[field];
-    if (!rule) refuse(field, `مجموعة غير معروفة: ${field}`);
-    else if (!has(rule.write)) refuse(field, `ليست لديك صلاحية الكتابة في «${field}»`);
-    else (allowed.upserts ??= {})[field] = rows;
+    if (!rule) {
+      refuse(field, `مجموعة غير معروفة: ${field}`);
+      continue;
+    }
+    if (has(rule.write)) {
+      (allowed.upserts ??= {})[field] = rows;
+      continue;
+    }
+    /* من له تسجيل المستحقات يكتب استحقاقاً وحده — لا حركةً أخرى */
+    if (
+      field === "movements" &&
+      permissions.includes("dues.create") &&
+      rows.length > 0 &&
+      rows.every(isDueRow)
+    ) {
+      (allowed.upserts ??= {})[field] = rows;
+      continue;
+    }
+    refuse(field, `ليست لديك صلاحية الكتابة في «${field}»`);
   }
 
   for (const [field, ids] of Object.entries(changes.deletes ?? {})) {

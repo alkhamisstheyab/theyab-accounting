@@ -203,6 +203,14 @@ import {
   syncEnabled,
   type SyncStatus,
 } from "@/lib/sync";
+import {
+  DUE_KINDS,
+  buildDues,
+  dueKind,
+  payableDues,
+  settlementProblem,
+  type DueRow,
+} from "@/lib/dues";
 import { compareStates, type FieldComparison } from "@/lib/changes";
 import { ROW_COLLECTIONS } from "@/lib/collections";
 import { isAdminExpenseToGeneral } from "@/lib/admin-to-general";
@@ -328,6 +336,7 @@ const PAGES = [
   "اعتماد الحركات",
   "اعتماد المراحل",
   "متابعة السلف",
+  "المستحقات",
   "استلام المواد",
   "الموظفون",
   "الحضور والانصراف",
@@ -633,6 +642,17 @@ export default function HomeV2() {
         .reduce((max, m) => Math.max(max, m.entryNo), 1000) + 1,
     [movements, year]
   );
+
+  /**
+   * رقم القيد التالي في سنةٍ بعينها.
+   *
+   * والحركة تُرقَّم بسنة تاريخها لا بالسنة المعروضة على الشاشة — وقد
+   * وقع من ذلك قيدان بالرقم نفسه حين سُجّلت حركةٌ في سنةٍ والمعروض غيرها.
+   */
+  const nextEntryNoIn = (fiscalYear: number) =>
+    movements
+      .filter((m) => m.fiscalYear === fiscalYear)
+      .reduce((max, m) => Math.max(max, m.entryNo), 1000) + 1;
 
   /** أرقام قيود تكرّرت داخل سنتها — تمنع ترقيم السندات وتلبس على المدقّق */
   const duplicateEntries = useMemo(() => {
@@ -2138,6 +2158,104 @@ export default function HomeV2() {
               onEdit={(movement) => {
                 setEditing(movement);
                 setPage("إدخال حركة");
+              }}
+            />
+          )}
+
+          {page === "المستحقات" && (
+            <DuesPage
+              /* المستحقات تعبر السنوات: يُنجَز العمل في سنةٍ ويُسدَّد في التي بعدها */
+              movements={movements}
+              projects={projects}
+              people={people}
+              today={todayISO()}
+              canCreate={allow("dues.create")}
+              canSettle={allow("movements.create")}
+              payments={payments}
+              onRegister={(draft) => {
+                if (!allow("dues.create")) return;
+                const kind = dueKind(draft.kind);
+                const fiscalYear = fiscalYearOf(draft.date);
+                if (isYearClosed(yearLocks, fiscalYear)) {
+                  window.alert(`السنة ${fiscalYear} مقفلة — لا يُقيَّد فيها شيء`);
+                  return;
+                }
+                const movement: Movement = {
+                  id: newId(),
+                  entryNo: nextEntryNoIn(fiscalYear),
+                  fiscalYear,
+                  date: draft.date,
+                  movementType: "مصروف",
+                  description: draft.description,
+                  itemCode: "",
+                  itemName: kind.label,
+                  /* مدين المصروف / دائن المستحقات — التزامٌ نشأ ولم يُدفع */
+                  debitCode: kind.expense,
+                  creditCode: kind.dues,
+                  amount: draft.amount,
+                  project: draft.project,
+                  person: draft.person,
+                  paymentMethod: "آجل",
+                  party: draft.person,
+                  source: "app",
+                  /*
+                    لا يدخل الدفاتر حتى تُقرّه الإدارة — وهو عين ما طُلب:
+                    المهندس يشهد بالعمل، والإدارة تُقرّ المبلغ.
+                  */
+                  approval: "بانتظار الاعتماد",
+                  approvedBy: "",
+                  approvedAt: "",
+                  approvalNote: "",
+                };
+                setMovements((prev) => [...prev, movement]);
+                log(
+                  "إنشاء",
+                  "حركة",
+                  `استحقاق ${draft.person} — ${fmt(draft.amount)} د.ك · ${kind.label}`,
+                  { after: describeMovement(movement) }
+                );
+              }}
+              onSettle={(row, payment) => {
+                if (!allow("movements.create")) return;
+                const fiscalYear = fiscalYearOf(payment.date);
+                if (isYearClosed(yearLocks, fiscalYear)) {
+                  window.alert(`السنة ${fiscalYear} مقفلة — لا يُقيَّد فيها شيء`);
+                  return;
+                }
+                const account =
+                  payments.find((m) => m.label === payment.method)?.account ?? "1111";
+                const movement: Movement = {
+                  id: newId(),
+                  entryNo: nextEntryNoIn(fiscalYear),
+                  fiscalYear,
+                  date: payment.date,
+                  movementType: "مصروف",
+                  description: `سداد مستحق — ${row.movement.description}`,
+                  itemCode: "",
+                  itemName: "سداد مستحقات",
+                  /* مدين المستحقات / دائن الصندوق أو البنك — زال الالتزام */
+                  debitCode: row.movement.creditCode,
+                  creditCode: account,
+                  amount: payment.amount,
+                  project: row.movement.project,
+                  person: row.movement.person,
+                  paymentMethod: payment.method,
+                  party: row.movement.person,
+                  /* الربط الصريح: به يُعرف ما بقي لكل عملٍ على حدة */
+                  dueId: row.movement.id,
+                  source: "app",
+                  approval: "بانتظار الاعتماد",
+                  approvedBy: "",
+                  approvedAt: "",
+                  approvalNote: "",
+                };
+                setMovements((prev) => [...prev, movement]);
+                log(
+                  "إنشاء",
+                  "حركة",
+                  `سداد مستحق ${row.movement.person} — ${fmt(payment.amount)} د.ك`,
+                  { after: describeMovement(movement) }
+                );
               }}
             />
           )}
@@ -13242,6 +13360,421 @@ function InvoicesPage({
           </div>
         </div>
       </Panel>
+    </>
+  );
+}
+
+/* ================================================================== */
+/* المستحقات                                                           */
+/* ================================================================== */
+
+/**
+ * ما وجب للعامل والمقاول ولم يُدفع بعد.
+ *
+ * يُنجَز العمل فيستحقّ صاحبه أجره ساعتَه، ثم تُؤجَّل الدفعة بالتراضي.
+ * فإذا جاء السداد بعد أسابيع لم يُعرف المبلغ على وجهه فيزيد أو ينقص.
+ * فيُثبِت المهندسُ الاستحقاق يوم يقع — وهو الذي يشهد إتمام العمل —
+ * وتُقرّه الإدارة، ويبقى ظاهراً حتى يُسدَّد.
+ */
+function DuesPage({
+  movements,
+  projects,
+  people,
+  today,
+  canCreate,
+  canSettle,
+  payments,
+  onRegister,
+  onSettle,
+}: {
+  movements: Movement[];
+  projects: Project[];
+  people: string[];
+  today: string;
+  canCreate: boolean;
+  canSettle: boolean;
+  payments: PaymentMethod[];
+  onRegister: (draft: {
+    person: string;
+    kind: string;
+    project: string;
+    date: string;
+    amount: number;
+    description: string;
+  }) => void;
+  onSettle: (
+    row: DueRow,
+    payment: { amount: number; method: string; date: string }
+  ) => void;
+}) {
+  const report = useMemo(() => buildDues(movements, today), [movements, today]);
+
+  const [form, setForm] = useState({
+    person: "",
+    kind: DUE_KINDS[0].key,
+    project: "",
+    date: today,
+    amount: "",
+    description: "",
+  });
+  const [problem, setProblem] = useState("");
+  const [open, setOpen] = useState<string | null>(null);
+  const [paying, setPaying] = useState<DueRow | null>(null);
+  const [pay, setPay] = useState({ amount: "", method: "", date: today });
+
+  /* الأسماء المعروفة: أهل النظام ومن سبق أن استحقّ */
+  const known = [
+    ...new Set([...people, ...report.people.map((r) => r.person)]),
+  ].filter((n) => n && n !== "بلا اسم");
+
+  const register = () => {
+    /*
+      الاسم يُسوّى عند المصدر: الفراغات الزائدة تصنع شخصين من واحد،
+      وقد وقع ذلك فعلاً في عهدة المهندس فانشطر رصيده.
+    */
+    const person = form.person.trim().replace(/\s+/g, " ");
+    const amount = round3(Number(form.amount) || 0);
+    if (!person) return setProblem("اكتب اسم المستحقّ");
+    if (!(amount > 0)) return setProblem("اكتب المبلغ المستحقّ");
+    if (!form.description.trim()) return setProblem("صف العمل الذي أُنجز");
+    if (!form.date) return setProblem("اكتب تاريخ إتمام العمل");
+    if (form.date > today) return setProblem("لا يُثبَّت استحقاقٌ لعملٍ لم يقع بعد");
+
+    setProblem("");
+    onRegister({
+      person,
+      kind: form.kind,
+      project: form.project,
+      date: form.date,
+      amount,
+      description: form.description.trim(),
+    });
+    setForm({ ...form, person: "", amount: "", description: "" });
+  };
+
+  const settle = () => {
+    if (!paying) return;
+    const amount = round3(Number(pay.amount) || 0);
+    const why = settlementProblem(paying, amount);
+    if (why) return setProblem(why);
+    if (!pay.method) return setProblem("اختر طريقة الدفع");
+    setProblem("");
+    onSettle(paying, { amount, method: pay.method, date: pay.date });
+    setPaying(null);
+  };
+
+  return (
+    <>
+      <Panel
+        title="المستحقات"
+        subtitle="ما وجب للعمال والمقاولين بلا عقد ولم يُدفع بعد — يُثبَّت يوم العمل لا يوم الدفع"
+      >
+        <div className="mb-5 grid grid-cols-1 gap-3 md:grid-cols-3">
+          {[
+            ["المستحقّ على الشركة", report.totalOwed, "text-amber-700"],
+            ["بانتظار إقرار الإدارة", report.totalWaiting, "text-slate-600"],
+            ["أصحاب الحقوق", report.people.filter((r) => r.owed > 0).length, ""],
+          ].map(([label, value, cls], i) => (
+            <div key={String(label)} className="rounded-xl bg-slate-50 p-4">
+              <p className="text-sm text-slate-500">{label}</p>
+              <p className={`mt-1 text-2xl font-bold ${cls}`}>
+                {i === 2 ? value : <Money value={Number(value)} bold />}
+                {i === 2 ? "" : " د.ك"}
+              </p>
+            </div>
+          ))}
+        </div>
+
+        {problem && <Banner tone="error">{problem}</Banner>}
+
+        {report.loose.length > 0 && (
+          <Banner tone="warn">
+            <b>{report.loose.length}</b> سدادٌ على حساب المستحقات بلا ربطٍ
+            باستحقاقه — يُنقص الإجمالي ولا يُقفل عملاً بعينه. اربطه من «ربط
+            الحركات» أو سجّل الاستحقاق الذي يقابله.
+          </Banner>
+        )}
+
+        {report.people.length === 0 ? (
+          <Empty>لا مستحقات مسجَّلة بعد</Empty>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-right text-sm">
+              <thead className="bg-slate-100">
+                <tr>
+                  <Th>المستحقّ له</Th>
+                  <Th>له على الشركة</Th>
+                  <Th>بانتظار الإقرار</Th>
+                  <Th>أقدم استحقاق</Th>
+                  <Th>{""}</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.people.map((row) => (
+                  <tr key={row.person} className="border-b border-slate-200">
+                    <Td>
+                      <button
+                        onClick={() =>
+                          setOpen(open === row.person ? null : row.person)
+                        }
+                        className="font-bold text-blue-700 hover:underline"
+                      >
+                        {row.person}
+                      </button>
+                    </Td>
+                    <Td>
+                      <Money value={row.owed} bold={row.owed > 0} />
+                    </Td>
+                    <Td className="text-slate-500">
+                      {row.waiting > 0 ? <Money value={row.waiting} /> : "—"}
+                    </Td>
+                    <Td
+                      className={
+                        row.oldestDays >= 30 ? "font-bold text-red-700" : ""
+                      }
+                    >
+                      {row.owed > 0 ? `${row.oldestDays} يوماً` : "—"}
+                    </Td>
+                    <Td>
+                      <button
+                        onClick={() =>
+                          setOpen(open === row.person ? null : row.person)
+                        }
+                        className="rounded-lg bg-slate-100 px-3 py-2"
+                      >
+                        {open === row.person ? "إخفاء" : "التفصيل"}
+                      </button>
+                    </Td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Panel>
+
+      {open && (
+        <Panel title={`مستحقات ${open}`}>
+          <div className="overflow-x-auto">
+            <table className="w-full text-right text-sm">
+              <thead className="bg-slate-100">
+                <tr>
+                  <Th>التاريخ</Th>
+                  <Th>العمل</Th>
+                  <Th>المشروع</Th>
+                  <Th>المبلغ</Th>
+                  <Th>المدفوع</Th>
+                  <Th>المتبقي</Th>
+                  <Th>العمر</Th>
+                  <Th>الحال</Th>
+                  <Th>{""}</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {(report.people.find((r) => r.person === open)?.rows ?? []).map(
+                  (row) => (
+                    <tr
+                      key={row.movement.id}
+                      className={`border-b border-slate-200 ${
+                        row.pending ? "bg-amber-50" : ""
+                      }`}
+                    >
+                      <Td>{row.movement.date}</Td>
+                      <Td>{row.movement.description}</Td>
+                      <Td>{row.movement.project || "—"}</Td>
+                      <Td>
+                        <Money value={row.amount} />
+                      </Td>
+                      <Td>{row.paid > 0 ? <Money value={row.paid} /> : "—"}</Td>
+                      <Td>
+                        <Money value={row.remaining} bold={row.remaining > 0} />
+                      </Td>
+                      <Td>{row.ageDays} يوماً</Td>
+                      <Td>
+                        {row.pending ? (
+                          <span className="text-amber-700">بانتظار الإقرار</span>
+                        ) : row.remaining <= 0.0005 ? (
+                          <span className="text-green-700">سُدّد</span>
+                        ) : row.paid > 0 ? (
+                          <span className="text-blue-700">سُدّد بعضه</span>
+                        ) : (
+                          <span className="text-slate-600">مستحقّ</span>
+                        )}
+                      </Td>
+                      <Td>
+                        {canSettle && !row.pending && row.remaining > 0.0005 && (
+                          <button
+                            onClick={() => {
+                              setPaying(row);
+                              setPay({
+                                amount: String(row.remaining),
+                                method: payments[0]?.label ?? "",
+                                date: today,
+                              });
+                              setProblem("");
+                            }}
+                            className="rounded-lg bg-slate-900 px-4 py-2 font-bold text-white"
+                          >
+                            سدّد
+                          </button>
+                        )}
+                      </Td>
+                    </tr>
+                  )
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Panel>
+      )}
+
+      {paying && (
+        <Panel
+          title="سداد مستحق"
+          subtitle={`${paying.movement.person} — ${paying.movement.description}`}
+        >
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+            <Field label="المبلغ" hint={`المتبقّي ${paying.remaining.toFixed(3)} د.ك`}>
+              <input
+                type="number"
+                step="0.001"
+                value={pay.amount}
+                onChange={(e) => setPay({ ...pay, amount: e.target.value })}
+                className={inputClass}
+              />
+            </Field>
+            <Field label="طريقة الدفع">
+              <select
+                value={pay.method}
+                onChange={(e) => setPay({ ...pay, method: e.target.value })}
+                className={inputClass}
+              >
+                <option value="">اختر</option>
+                {payments.map((m) => (
+                  <option key={m.label}>{m.label}</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="تاريخ الدفع">
+              <input
+                type="date"
+                value={pay.date}
+                onChange={(e) => setPay({ ...pay, date: e.target.value })}
+                className={inputClass}
+              />
+            </Field>
+            <div className="flex items-end gap-2 pb-1">
+              <button
+                onClick={settle}
+                className="rounded-lg bg-slate-900 px-6 py-3 font-bold text-white"
+              >
+                سجّل السداد
+              </button>
+              <button
+                onClick={() => setPaying(null)}
+                className="rounded-lg bg-slate-100 px-5 py-3 font-bold"
+              >
+                إلغاء
+              </button>
+            </div>
+          </div>
+          <p className="mt-3 text-sm text-slate-600">
+            يُنشأ سند صرفٍ بهذا المبلغ مرتبطاً بهذا الاستحقاق، ويدخل الدفاتر
+            بعد اعتماده — فلا يُدفع مرتين ولا يزيد على ما بقي.
+          </p>
+        </Panel>
+      )}
+
+      {canCreate && (
+        <Panel
+          title="تسجيل استحقاق"
+          subtitle="يُثبَّت ساعة إتمام العمل — حفظاً لحقّ صاحبه وحقّ الشركة"
+        >
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+            <Field label="المستحقّ له" hint="العامل أو المقاول الذي أدّى العمل">
+              <input
+                type="text"
+                list="dues-people"
+                value={form.person}
+                onChange={(e) => setForm({ ...form, person: e.target.value })}
+                placeholder="اسمه كما يُعرف"
+                className={inputClass}
+              />
+              <datalist id="dues-people">
+                {known.map((n) => (
+                  <option key={n} value={n} />
+                ))}
+              </datalist>
+            </Field>
+            <Field label="نوع العمل">
+              <select
+                value={form.kind}
+                onChange={(e) => setForm({ ...form, kind: e.target.value })}
+                className={inputClass}
+              >
+                {DUE_KINDS.map((k) => (
+                  <option key={k.key} value={k.key}>
+                    {k.label} — {k.note}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="المشروع">
+              <select
+                value={form.project}
+                onChange={(e) => setForm({ ...form, project: e.target.value })}
+                className={inputClass}
+              >
+                <option value="">اختر المشروع</option>
+                {projects.map((pr) => (
+                  <option key={pr.id}>{pr.name}</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="تاريخ إتمام العمل">
+              <input
+                type="date"
+                value={form.date}
+                onChange={(e) => setForm({ ...form, date: e.target.value })}
+                className={inputClass}
+              />
+            </Field>
+            <Field label="المبلغ المستحقّ" hint="كما اتُّفق عليه">
+              <input
+                type="number"
+                step="0.001"
+                value={form.amount}
+                onChange={(e) => setForm({ ...form, amount: e.target.value })}
+                className={inputClass}
+              />
+            </Field>
+            <Field label="وصف العمل">
+              <input
+                type="text"
+                value={form.description}
+                onChange={(e) =>
+                  setForm({ ...form, description: e.target.value })
+                }
+                placeholder="نقل خشب من الشويخ إلى الموقع"
+                className={inputClass}
+              />
+            </Field>
+          </div>
+
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <button
+              onClick={register}
+              className="rounded-lg bg-slate-900 px-6 py-3 font-bold text-white"
+            >
+              أثبت الاستحقاق
+            </button>
+            <span className="text-sm text-slate-600">
+              يُقيَّد: مدين {dueKind(form.kind).expense} / دائن{" "}
+              {dueKind(form.kind).dues} — ولا يدخل الدفاتر حتى تُقرّه الإدارة.
+            </span>
+          </div>
+        </Panel>
+      )}
     </>
   );
 }

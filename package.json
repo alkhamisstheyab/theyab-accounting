@@ -39,6 +39,7 @@
     "check:person-unify": "node db/check-person-unify.mjs",
     "check:reject-delete": "node db/check-reject-delete.mjs",
     "verify:live": "node db/verify-live.mjs",
+    "check:dues": "node db/check-dues.mjs",
     "check:import": "node db/check-import.mjs",
     "check:merge-audit": "node db/check-merge-audit.mjs",
     "check:closed": "node db/check-closed-payments.mjs",

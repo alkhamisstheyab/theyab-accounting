@@ -36,6 +36,8 @@ export type Permission =
   | "invoices.view"
   | "invoices.manage"
   | "advances.view"
+  | "dues.view"
+  | "dues.create"
   | "materials.view"
   | "materials.manage"
   | "employees.view"
@@ -121,6 +123,15 @@ export const PERMISSION_CATALOGUE: PermissionGroup[] = [
       { key: "invoices.view", label: "الاطلاع على الفواتير وطباعتها" },
       { key: "invoices.manage", label: "إصدار فواتير العملاء" },
       { key: "advances.view", label: "متابعة السلف والعهد" },
+      {
+        key: "dues.view",
+        label: "متابعة المستحقات — ما وجب للعمال والمقاولين ولم يُدفع",
+      },
+      {
+        key: "dues.create",
+        label: "تسجيل استحقاق عند إتمام العمل",
+        note: "مهمة المهندس — لا تُخوّله إدخال قيدٍ آخر",
+      },
       { key: "materials.view", label: "الاطلاع على استلام المواد" },
       { key: "materials.manage", label: "تسجيل استلام المواد" },
       { key: "employees.view", label: "الاطلاع على ملف الموظفين" },
@@ -207,6 +218,7 @@ const SECRETARY: Permission[] = [
   "quotations.view",
   "invoices.view",
   "advances.view",
+  "dues.view",
   "materials.view",
   "chart.view",
   "opening.view",
@@ -252,6 +264,13 @@ export const ROLES: RoleDefinition[] = [
       "quotations.pricing",
       "materials.view",
       "materials.manage",
+      /*
+        المستحقات: المهندس يشهد إتمام العمل، فهو الذي يُثبت الاستحقاق
+        ساعته. ولا تُخوّله هذه الصلاحية إدخال قيدٍ آخر ولا مسَّ حساب —
+        يكتب اسم المستحقّ ونوع العمل ومبلغه، والإدارة تُقرّه.
+      */
+      "dues.view",
+      "dues.create",
       "print",
     ],
   },
@@ -288,6 +307,7 @@ export const PAGE_PERMISSION: Record<string, Permission> = {
   "اعتماد الحركات": "movements.approve",
   "اعتماد المراحل": "contracts.approve",
   "متابعة السلف": "advances.view",
+  المستحقات: "dues.view",
   "استلام المواد": "materials.view",
   "دليل الحسابات": "chart.view",
   "الأرصدة الافتتاحية": "opening.view",

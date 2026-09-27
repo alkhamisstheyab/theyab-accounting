@@ -34,8 +34,13 @@ const { ROLES, ALL_PERMISSIONS } = await jiti.import("../lib/permissions.ts");
 const { ROW_COLLECTIONS, WHOLE_FIELDS } = await jiti.import("../lib/collections.ts");
 const { readState } = await jiti.import("../lib/server/state.ts");
 const { applyChanges, changesSince } = await jiti.import("../lib/server/writes.ts");
-const { canRead, readableState, readableChanges, refusalReason } =
-  await jiti.import("../lib/server/permits.ts");
+const {
+  allowedChanges,
+  canRead,
+  readableState,
+  readableChanges,
+  refusalReason,
+} = await jiti.import("../lib/server/permits.ts");
 
 const of = (key) => ROLES.find((r) => r.key === key).permissions;
 const owner = of("owner");
@@ -188,6 +193,54 @@ check(
 check(
   "ولا يكتب حركة",
   refusalReason({ upserts: { movements: [{ id: "x" }] } }, engineer) !== null
+);
+
+/* ------------------------------------------------------------------ */
+console.log("\nوالمستحقّ يكتبه المهندس، ولا يكتب سواه:\n");
+
+const dueRow = {
+  id: "due-1",
+  entryNo: 1900,
+  fiscalYear: 2026,
+  date: "2026-09-27",
+  description: "نقل خشب",
+  debitCode: "5120",
+  creditCode: "2120",
+  amount: 25,
+  person: "أبو أحمد",
+  approval: "بانتظار الاعتماد",
+};
+
+check(
+  "يكتب استحقاقاً وحاله بانتظار الإقرار",
+  refusalReason({ upserts: { movements: [dueRow] } }, engineer) !== null &&
+    allowedChanges({ upserts: { movements: [dueRow] } }, engineer).refused.length === 0,
+  "يُؤذن له وإن كان لا يملك إدخال الحركات"
+);
+check(
+  "ولا يكتب حركةً على الصندوق",
+  allowedChanges(
+    { upserts: { movements: [{ ...dueRow, creditCode: "1111" }] } },
+    engineer
+  ).refused.length === 1
+);
+check(
+  "ولا يعتمد استحقاقه بنفسه",
+  allowedChanges(
+    { upserts: { movements: [{ ...dueRow, approval: "معتمدة" }] } },
+    engineer
+  ).refused.length === 1
+);
+check(
+  "ولا يُمرّر حركةً أخرى مع استحقاق",
+  allowedChanges(
+    { upserts: { movements: [dueRow, { ...dueRow, id: "x", creditCode: "1111" }] } },
+    engineer
+  ).refused.length === 1
+);
+check(
+  "ومن لا يملك التسجيل يُردّ استحقاقه",
+  allowedChanges({ upserts: { movements: [dueRow] } }, secretary).refused.length === 1
 );
 
 /* ------------------------------------------------------------------ */

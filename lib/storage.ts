@@ -910,12 +910,26 @@ function migrateUser(raw: unknown): User {
    * أما بقية الأدوار فلا تُمنح شيئاً لم يُقرَّر لها صراحةً — منح صلاحية
    * بلا قرار أخطر من حجبها.
    */
+  const kept = stored.filter((p): p is Permission =>
+    ALL_PERMISSIONS.includes(p as Permission)
+  );
+
+  /*
+   * والمستحقات استثناءٌ مقصود في دور المهندس: طلبها مجلس الإدارة
+   * والمهندسون معاً في ٢٧ سبتمبر ٢٠٢٦، فتُمنح لمن سُجّل قبلها — وإلا
+   * بقي كلُّ مهندسٍ قائم محروماً منها حتى تُؤشَّر له يدوياً.
+   */
+  const dues: Permission[] =
+    role === "engineer"
+      ? (["dues.view", "dues.create"] as Permission[]).filter(
+          (p) => !kept.includes(p)
+        )
+      : [];
+
   const permissions =
     role === "owner" || role === "manager"
       ? ALL_PERMISSIONS
-      : stored.filter((p): p is Permission =>
-          ALL_PERMISSIONS.includes(p as Permission)
-        );
+      : [...kept, ...dues];
 
   return {
     id: str(u.id) || newId(),
@@ -1029,6 +1043,8 @@ function migrateMovement(raw: unknown): Movement {
       المقارنة مع الخادم فأُرسلت بلا سبب.
     */
     installmentSplits: splitsOf(m.installmentSplits),
+    /* ربط السداد باستحقاقه — فارغٌ في غير حركات المستحقات */
+    dueId: str(m.dueId) || undefined,
     source: m.source === "excel" ? "excel" : "app",
   };
 }
