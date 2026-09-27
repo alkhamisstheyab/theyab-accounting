@@ -24,6 +24,18 @@ const NAME_KEY = "theyab:last-user";
   ولا يُرفع إلا بكلمة صاحبه.
 */
 const LOCK_KEY = "theyab:locked";
+/*
+  وقت آخر عملٍ لصاحب الجهاز.
+
+  ومهلة السكون كانت تُقاس في الصفحة المفتوحة وحدها، فمن أغلق الموقع
+  وعاد بعد ساعةٍ وجده مفتوحاً له: لا صفحةَ بقيت تعدّ غيبته، والتصريح
+  عند الخادم قائمٌ أسبوعين. وذلك ينقض المقصود — الغيبة ساعةٌ أطول من
+  ربع الساعة التي تُوجب القفل.
+
+  فيُكتب الوقت هنا، ويُقاس عند الإقلاع: إن طالت الغيبة أُسدلت الستارة
+  قبل أن يظهر شيء.
+*/
+const SEEN_KEY = "theyab:last-active";
 
 /**
  * مهلة السكون على الحاسوب.
@@ -79,6 +91,33 @@ export function rememberLock(on: boolean): void {
     else localStorage.removeItem(LOCK_KEY);
   } catch {
     /* لا تخزين — ويبقى القفل عاملاً في هذه الصفحة */
+  }
+}
+
+/** يُثبت أن صاحبه يعمل الآن — يُكتب كل نصف دقيقة لا مع كل ضغطة */
+export function touchActivity(): void {
+  try {
+    localStorage.setItem(SEEN_KEY, String(Date.now()));
+  } catch {
+    /* لا تخزين — فالقياس على الصفحة وحدها كما كان */
+  }
+}
+
+/**
+ * أطالت الغيبة حتى وجب القفل؟
+ *
+ * وأول فتحٍ للجهاز لا غيبة فيه — لا وقت محفوظ — فلا يُقفل، وصاحبه
+ * داخلٌ بكلمته أصلاً.
+ */
+export function idleTooLong(): boolean {
+  try {
+    const raw = localStorage.getItem(SEEN_KEY);
+    if (!raw) return false;
+    const last = Number(raw);
+    if (!Number.isFinite(last) || last <= 0) return false;
+    return Date.now() - last >= IDLE_LOCK_MS;
+  } catch {
+    return false;
   }
 }
 

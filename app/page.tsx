@@ -238,9 +238,11 @@ import {
   HIDDEN_LOCK_MS,
   IDLE_LOCK_MS,
   forgetUser,
+  idleTooLong,
   lastUser,
   rememberLock,
   rememberUser,
+  touchActivity,
   wasLocked,
 } from "@/lib/session";
 import {
@@ -943,8 +945,11 @@ export default function HomeV2() {
     لا إخفاءً، وقد أقرّه صاحب الشركة: الأجهزة تحمل إنترنتها.
   */
   useEffect(() => {
-    /* ما قُفل قبل التحديث يبقى مقفلاً — تُسدل الستارة قبل أن يظهر شيء */
-    if (wasLocked()) setLockedState(true);
+    /*
+      ما قُفل قبل التحديث يبقى مقفلاً، وكذلك من طالت غيبته: أغلق
+      الموقع وعاد بعد ساعة — والغيبة أطول من مهلة السكون.
+    */
+    if (wasLocked() || idleTooLong()) setLockedState(true);
     void whoAmI().then((who) => {
       setSession(who);
       setAskingSession(false);
@@ -960,9 +965,16 @@ export default function HomeV2() {
   useEffect(() => {
     if (!session || locked) return;
     let last = Date.now();
+    let written = 0;
     const bump = () => {
       last = Date.now();
+      /* يُكتب كل نصف دقيقة لا مع كل ضغطة — التخزين أبطأ من الذاكرة */
+      if (last - written >= 30_000) {
+        written = last;
+        touchActivity();
+      }
     };
+    touchActivity();
     const watched = ["mousedown", "keydown", "touchstart", "wheel", "scroll"];
     for (const name of watched) {
       window.addEventListener(name, bump, { passive: true });
@@ -1301,7 +1313,10 @@ export default function HomeV2() {
       {locked && (
         <LockScreen
           name={session.name}
-          onOpen={() => setLocked(false)}
+          onOpen={() => {
+            touchActivity();
+            setLocked(false);
+          }}
           onOther={async () => {
             log("خروج", "جلسة", "تسجيل خروج من الشاشة المقفلة");
             started.current = false;

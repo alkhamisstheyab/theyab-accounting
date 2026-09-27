@@ -42,6 +42,8 @@ const {
   forgetUser,
   wasLocked,
   rememberLock,
+  touchActivity,
+  idleTooLong,
   IDLE_LOCK_MS,
   HIDDEN_LOCK_MS,
 } = await jiti.import("../lib/session.ts");
@@ -107,8 +109,13 @@ check("و«لستَ أنت؟» تنساه", page.includes("forgetUser();"));
 
 check("وللشاشة قفلٌ بزرّه", page.includes("اقفل الآن"));
 check(
+  "والغيبة الطويلة تُقفل ولو أُغلق الموقع",
+  page.includes("if (wasLocked() || idleTooLong()) setLockedState(true);") &&
+    page.includes("touchActivity();")
+);
+check(
   "والقفل يعبر تحديث الصفحة",
-  page.includes("if (wasLocked()) setLockedState(true);") &&
+  page.includes("if (wasLocked() || idleTooLong()) setLockedState(true);") &&
     page.includes("rememberLock(on);")
 );
 check(
@@ -143,6 +150,27 @@ check("ويُرفع فيزول", (() => {
   rememberLock(false);
   return wasLocked() === false;
 })());
+
+/* الغيبة الطويلة تقفل ولو أُغلق الموقع */
+check("جهازٌ لم يُستعمل قطّ لا يُقفل", idleTooLong() === false);
+touchActivity();
+check("ومن يعمل الآن لا يُقفل", idleTooLong() === false);
+check(
+  "ومن غاب أكثر من مهلة السكون يُقفل",
+  (() => {
+    const old = Date.now() - IDLE_LOCK_MS - 60_000;
+    localStorage.setItem("theyab:last-active", String(old));
+    return idleTooLong() === true;
+  })(),
+  "ساعةٌ خارج الموقع أطول من ربع الساعة"
+);
+check(
+  "ووقتٌ تالف لا يُقفل ولا يُسقط شيئاً",
+  (() => {
+    localStorage.setItem("theyab:last-active", "ليس رقماً");
+    return idleTooLong() === false;
+  })()
+);
 
 /* وصلاحيات المالك والمدير من دورهما لا من صفّهما */
 const auth = fs.readFileSync("lib/server/auth.ts", "utf8");
