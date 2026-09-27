@@ -15,6 +15,15 @@
  */
 
 const NAME_KEY = "theyab:last-user";
+/*
+  القفل يعبر تحديث الصفحة.
+
+  كان في ذاكرة الصفحة وحدها، فمن وجد شاشةً مقفلة ضغط تحديثاً فدخل بلا
+  كلمة مرور — والتصريح عند الخادم قائم، والذاكرة تُمحى بالتحديث. فصار
+  يُكتب في الجهاز: يُقرأ عند الإقلاع فتُسدَل الستارة قبل أن يظهر شيء،
+  ولا يُرفع إلا بكلمة صاحبه.
+*/
+const LOCK_KEY = "theyab:locked";
 
 /**
  * مهلة السكون على الحاسوب.
@@ -50,6 +59,26 @@ export function rememberUser(name: string): void {
     localStorage.setItem(NAME_KEY, name);
   } catch {
     /* التخزين ممنوع — ويُكتب الاسم في كل مرة، ولا يمنع ذلك الدخول */
+  }
+}
+
+/** أَقُفلت الشاشة قبل أن تُحدَّث أو تُغلق؟ */
+export function wasLocked(): boolean {
+  try {
+    return localStorage.getItem(LOCK_KEY) === "on";
+  } catch {
+    /* لا تخزين — والقفل حينئذٍ لهذه الصفحة وحدها */
+    return false;
+  }
+}
+
+/** يُثبت القفل أو يرفعه — والإثبات قبل إسدال الستارة لا بعدها */
+export function rememberLock(on: boolean): void {
+  try {
+    if (on) localStorage.setItem(LOCK_KEY, "on");
+    else localStorage.removeItem(LOCK_KEY);
+  } catch {
+    /* لا تخزين — ويبقى القفل عاملاً في هذه الصفحة */
   }
 }
 

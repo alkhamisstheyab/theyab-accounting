@@ -36,8 +36,15 @@ const check = (label, ok, detail = "") => {
   console.log(`  ${ok ? "✓" : "✗"} ${label}${detail ? " — " + detail : ""}`);
 };
 
-const { lastUser, rememberUser, forgetUser, IDLE_LOCK_MS, HIDDEN_LOCK_MS } =
-  await jiti.import("../lib/session.ts");
+const {
+  lastUser,
+  rememberUser,
+  forgetUser,
+  wasLocked,
+  rememberLock,
+  IDLE_LOCK_MS,
+  HIDDEN_LOCK_MS,
+} = await jiti.import("../lib/session.ts");
 
 console.log("\nالاسم يُحفظ والكلمة لا تُحفظ:\n");
 
@@ -99,6 +106,15 @@ check("والاسم وحده يُحفظ", page.includes("rememberUser(who.name)"
 check("و«لستَ أنت؟» تنساه", page.includes("forgetUser();"));
 
 check("وللشاشة قفلٌ بزرّه", page.includes("اقفل الآن"));
+check(
+  "والقفل يعبر تحديث الصفحة",
+  page.includes("if (wasLocked()) setLockedState(true);") &&
+    page.includes("rememberLock(on);")
+);
+check(
+  "والخروج يرفعه — فلا يلقى الداخلُ بعده ستارةً ليست له",
+  page.includes("rememberLock(false);")
+);
 check("وقفلٌ عند السكون", page.includes("Date.now() - last >= IDLE_LOCK_MS"));
 check(
   "وقفلٌ إذا غابت الصفحة على الهاتف",
@@ -117,6 +133,27 @@ console.log("\nوقائمة المستخدمين لم تعد تخرج لمن ل�
 
 const permits = fs.readFileSync("lib/server/permits.ts", "utf8");
 check('users مقيَّدة بـ users.manage', permits.includes('users: ["users.manage"]'));
+
+/* القفل المحفوظ */
+check("القفل يُكتب في الجهاز", (() => {
+  rememberLock(true);
+  return wasLocked() === true;
+})());
+check("ويُرفع فيزول", (() => {
+  rememberLock(false);
+  return wasLocked() === false;
+})());
+
+/* وصلاحيات المالك والمدير من دورهما لا من صفّهما */
+const auth = fs.readFileSync("lib/server/auth.ts", "utf8");
+check(
+  "والمالك والمدير يأخذان كل صلاحية من دورهما",
+  auth.includes('role === "owner" || role === "manager" ? ALL_PERMISSIONS : kept')
+);
+check(
+  "وتُقرأ في كل جلسة لا عند الدخول وحده",
+  auth.split("sessionPermissions(row.role").length - 1 === 2
+);
 
 console.log(
   bad === 0

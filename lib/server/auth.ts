@@ -4,7 +4,7 @@ import { createHash, randomBytes, timingSafeEqual } from "crypto";
 import { cookies } from "next/headers";
 import bcrypt from "bcryptjs";
 
-import { Permission } from "../permissions";
+import { ALL_PERMISSIONS, Permission } from "../permissions";
 import { query, queryOne, transaction } from "./db";
 
 /**
@@ -26,6 +26,23 @@ export const MAX_ATTEMPTS = 5;
 export const LOCK_MINUTES = 15;
 
 export const MIN_PASSWORD_LENGTH = 8;
+
+/**
+ * صلاحيات الجلسة.
+ *
+ * دورا المالك والمدير العام معرَّفان بأنهما «كل الصلاحيات بلا استثناء»،
+ * فتُمنح لهما الصلاحية المضافة حديثاً بلا تأشير. ولولا ذلك لبقيت شاشةٌ
+ * جديدة محجوبةً عن صاحب الشركة حتى يُحدَّث صفُّه ويصل الخادم — وقد وقع
+ * ذلك يوم أُضيفت شاشة المستحقات.
+ *
+ * وما سواهما يُقرأ من صفّه كما هو: منح صلاحيةٍ بلا قرار أخطر من حجبها.
+ */
+const sessionPermissions = (role: string, stored: unknown): Permission[] => {
+  const kept = (Array.isArray(stored) ? stored : []).filter(
+    (p): p is Permission => ALL_PERMISSIONS.includes(p as Permission)
+  );
+  return role === "owner" || role === "manager" ? ALL_PERMISSIONS : kept;
+};
 
 export type SessionUser = {
   id: string;
@@ -169,7 +186,7 @@ export async function currentUser(): Promise<SessionUser | null> {
     name: row.name,
     jobTitle: row.job_title,
     role: row.role,
-    permissions: row.permissions as Permission[],
+    permissions: sessionPermissions(row.role, row.permissions),
     /* يُفحص في كل طلب لا عند الدخول وحده، وإلا تُخطّى بإعادة تحميل الصفحة */
     mustChangePassword:
       row.must_change_pin || needsRealPassword(row.password_hash),
@@ -298,7 +315,7 @@ export async function login(
       name: row.name,
       jobTitle: row.job_title,
       role: row.role,
-      permissions: row.permissions as Permission[],
+      permissions: sessionPermissions(row.role, row.permissions),
       /*
         من دخل برقمه السرّي القديم لا يمضي حتى يضع كلمة مرورٍ حقيقية:
         أربعة أرقام تكفي في المكتب ولا تكفي على الإنترنت.

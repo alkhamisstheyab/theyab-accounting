@@ -239,7 +239,9 @@ import {
   IDLE_LOCK_MS,
   forgetUser,
   lastUser,
+  rememberLock,
   rememberUser,
+  wasLocked,
 } from "@/lib/session";
 import {
   REQUIRED_STREAK,
@@ -401,8 +403,19 @@ export default function HomeV2() {
   /* من دخل الخادم: هويّته وصلاحيته معاً، ولا شيء منهما من الجهاز */
   const [session, setSession] = useState<ServerUser | null>(null);
   const [askingSession, setAskingSession] = useState(true);
-  /* الشاشة مقفلة والعمل تحتها باقٍ كما هو */
-  const [locked, setLocked] = useState(false);
+  /* الشاشة مقفلة والعمل تحتها باقٍ */
+  const [locked, setLockedState] = useState(false);
+
+  /**
+   * القفل يُثبَّت في الجهاز قبل أن يُعرض.
+   *
+   * وإلا زال بتحديث الصفحة: يضغط من وجدها مقفلةً تحديثاً فيدخل بلا
+   * كلمة مرور، والتصريح عند الخادم قائم لا يعلم بالقفل شيئاً.
+   */
+  const setLocked = (on: boolean) => {
+    rememberLock(on);
+    setLockedState(on);
+  };
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [yearLocks, setYearLocks] = useState<YearLocks>({});
   const [chart, setChart] = useState<Account[]>(GENERATED_CHART);
@@ -930,6 +943,8 @@ export default function HomeV2() {
     لا إخفاءً، وقد أقرّه صاحب الشركة: الأجهزة تحمل إنترنتها.
   */
   useEffect(() => {
+    /* ما قُفل قبل التحديث يبقى مقفلاً — تُسدل الستارة قبل أن يظهر شيء */
+    if (wasLocked()) setLockedState(true);
     void whoAmI().then((who) => {
       setSession(who);
       setAskingSession(false);
@@ -1290,6 +1305,7 @@ export default function HomeV2() {
           onOther={async () => {
             log("خروج", "جلسة", "تسجيل خروج من الشاشة المقفلة");
             started.current = false;
+            rememberLock(false);
             stopSync();
             await serverSignOut();
             setSession(null);
@@ -1383,6 +1399,7 @@ export default function HomeV2() {
               onClick={async () => {
                 log("خروج", "جلسة", "تسجيل خروج");
                 started.current = false;
+                rememberLock(false);
                 stopSync();
                 await serverSignOut();
                 setSession(null);
