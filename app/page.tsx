@@ -2059,10 +2059,36 @@ export default function HomeV2() {
               rejected={movements.filter((m) => m.approval === "مرفوضة")}
               approverName={currentUser.name}
               canApprove={allow("movements.approve")}
+              canDelete={allow("movements.delete")}
               threshold={company.approvalThreshold}
               onEdit={(movement) => {
                 setEditing(movement);
                 setPage("إدخال حركة");
+              }}
+              /*
+                حذف المرفوضة: هي خارج الحسابات أصلاً، فحذفها لا يمسّ
+                ميزاناً ولا تكلفة مشروع. ويبقى أثرها في سجل التدقيق —
+                إنشاؤها ورفضها وحذفها — فلا يُمحى خبرها وإن مُحيت هي.
+              */
+              onDelete={(movement) => {
+                if (!allow("movements.delete")) return;
+                if (!movementEditable(movement)) {
+                  window.alert("السنة مقفلة — لا يُحذف منها قيد");
+                  return;
+                }
+                if (
+                  !window.confirm(
+                    `حذف القيد ${movement.entryNo} نهائياً؟\n\n${describeMovement(
+                      movement
+                    )}\n\nسبب رفضها: ${movement.approvalNote || "—"}\n\nلا يمكن التراجع، ويبقى خبرها في سجل التدقيق.`
+                  )
+                ) {
+                  return;
+                }
+                setMovements((prev) => prev.filter((m) => m.id !== movement.id));
+                log("حذف", "حركة", `قيد ${movement.entryNo} — مرفوضة`, {
+                  before: describeMovement(movement),
+                });
               }}
               onDecide={(movement, state, note) => {
                 if (!allow("movements.approve")) return;
@@ -13236,17 +13262,21 @@ function MovementApprovalsPage({
   rejected,
   approverName,
   canApprove,
+  canDelete,
   threshold,
   onDecide,
   onEdit,
+  onDelete,
 }: {
   pending: Movement[];
   rejected: Movement[];
   approverName: string;
   canApprove: boolean;
+  canDelete: boolean;
   threshold: number;
   onDecide: (movement: Movement, state: ApprovalState, note: string) => void;
   onEdit: (movement: Movement) => void;
+  onDelete: (movement: Movement) => void;
 }) {
   const [note, setNote] = useState<Record<string, string>>({});
   const total = round3(pending.reduce((s, m) => s + m.amount, 0));
@@ -13407,14 +13437,29 @@ function MovementApprovalsPage({
                     <Td className="text-red-700">{m.approvalNote || "—"}</Td>
                     <Td className="text-slate-500">{m.approvedBy || "—"}</Td>
                     <Td>
-                      {canApprove && (
-                        <button
-                          onClick={() => onDecide(m, "بانتظار الاعتماد", "")}
-                          className="rounded-lg bg-slate-100 px-3 py-2"
-                        >
-                          إعادة للانتظار
-                        </button>
-                      )}
+                      <div className="flex flex-wrap gap-2">
+                        {canApprove && (
+                          <button
+                            onClick={() => onDecide(m, "بانتظار الاعتماد", "")}
+                            className="rounded-lg bg-slate-100 px-3 py-2"
+                          >
+                            إعادة للانتظار
+                          </button>
+                        )}
+                        {/*
+                          المرفوضة لا تظهر في جدول الحركات — والجدول لا
+                          يعرض إلا المعتمد — فلا باب لحذفها سواه. وقيدُ
+                          تجربةٍ عُرض على المجلس يبقى في النظام أبداً.
+                        */}
+                        {canDelete && (
+                          <button
+                            onClick={() => onDelete(m)}
+                            className="rounded-lg bg-red-50 px-3 py-2 font-bold text-red-700"
+                          >
+                            احذفها
+                          </button>
+                        )}
+                      </div>
                     </Td>
                   </tr>
                 ))}
