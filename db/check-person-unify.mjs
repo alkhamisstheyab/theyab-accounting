@@ -55,7 +55,16 @@ const after = state.movements.map((m) =>
 
 console.log("\nما يطاله التصحيح:\n");
 
-check("حركاتٌ مكتوبٌ فيها الاسم بلا مسافة", targets.length > 0, `${targets.length} حركة`);
+/*
+  التصحيح قد يكون مطبَّقاً سلفاً — وهو الغاية لا الإخفاق. فيُقال ذلك
+  ويُتخطّى ما لا معنى لفحصه بعده، ولا يُعدّ فشلاً فحصٌ نجح عمله.
+*/
+const done = targets.length === 0;
+if (done) {
+  console.log("  ✓ التصحيح مطبَّق سلفاً — لا «" + FROM + "» في هذه النسخة");
+} else {
+  check("حركاتٌ مكتوبٌ فيها الاسم بلا مسافة", targets.length > 0, `${targets.length} حركة`);
+}
 check(
   "ولا يطال اسماً آخر",
   after.filter((m) => m.person === TO).length ===
@@ -104,11 +113,17 @@ const balance = (list, who) =>
     );
 
 const beforeSplit = [balance(state.movements, FROM), balance(state.movements, TO)];
-check(
-  "قبله: شخصان ورصيدان",
-  beforeSplit[0] !== 0 && beforeSplit[1] !== 0,
-  `«${FROM}» ${beforeSplit[0].toFixed(3)} · «${TO}» ${beforeSplit[1].toFixed(3)}`
-);
+if (done) {
+  console.log(
+    "  ✓ الرصيد مجتمعٌ على اسمٍ واحد — «" + TO + "» " + beforeSplit[1].toFixed(3)
+  );
+} else {
+  check(
+    "قبله: شخصان ورصيدان",
+    beforeSplit[0] !== 0 && beforeSplit[1] !== 0,
+    `«${FROM}» ${beforeSplit[0].toFixed(3)} · «${TO}» ${beforeSplit[1].toFixed(3)}`
+  );
+}
 
 const merged = balance(after, TO);
 check(
@@ -143,6 +158,50 @@ check(
 /* واللوحة */
 const page = fs.readFileSync("app/page.tsx", "utf8");
 check("وللتصحيح موضعه في اللوحة", page.includes('id: "noah-name-unify"'));
+check(
+  "ولتوحيد الطرف موضعه أيضاً",
+  page.includes('id: "abdullatif-name-unify"') &&
+    page.includes('toParty: "عبداللطيف ابواحمد"')
+);
+check(
+  "ويُطبَّق على الطرف لا على الدافع",
+  page.includes("if (fix.toParty) next.party = fix.toParty;")
+);
+
+/* والصيغ الخمس تُجمع في واحدة على بيانات الشركة */
+const spellings = [
+  "ابو احمد",
+  "عبداللطيف",
+  "عبداللطيف أحمد (أبو أحمد النجار)",
+  "عبداللطيف أحمد عبداللطيف حسوب",
+  "بو احمد النجار",
+];
+const hits = state.movements.filter((m) => spellings.includes((m.party ?? "").trim()));
+check(
+  "وتطال كل صيغة كُتب بها اسمه",
+  hits.length > 0,
+  `${hits.length} حركة · ${[...new Set(hits.map((m) => m.party))].length} صيغة`
+);
+const unified = state.movements.map((m) =>
+  spellings.includes((m.party ?? "").trim())
+    ? { ...m, party: "عبداللطيف ابواحمد" }
+    : m
+);
+check(
+  "ولا يتغيّر بها مبلغٌ ولا حساب",
+  unified.every((m, i) => {
+    const before = state.movements[i];
+    return m.amount === before.amount && m.debitCode === before.debitCode &&
+      m.creditCode === before.creditCode && m.approval === before.approval &&
+      (m.contractNumber ?? "") === (before.contractNumber ?? "");
+  })
+);
+check(
+  "ويجتمع عمله تحت اسمٍ واحد",
+  unified.filter((m) => (m.party ?? "").trim() === "عبداللطيف ابواحمد").length ===
+    hits.length,
+  `${hits.length} حركة بمجموع ${hits.reduce((x, m) => x + m.amount, 0).toFixed(3)} د.ك`
+);
 check("ويُقال في المعاينة إلى أي اسمٍ تنتقل", page.includes("ويصير اسم صاحبها كلِّها"));
 check(
   "ولا يمسّ التطبيقُ حساباً ولا مبلغاً",

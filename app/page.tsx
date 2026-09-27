@@ -2588,6 +2588,7 @@ export default function HomeV2() {
                     }
                     if (fix.toProject) next.project = fix.toProject;
                     if (fix.toPerson) next.person = fix.toPerson;
+                    if (fix.toParty) next.party = fix.toParty;
                     return next;
                   })
                 );
@@ -2598,15 +2599,23 @@ export default function HomeV2() {
                     targets.reduce((s, m) => s + m.amount, 0)
                   )} د.ك`,
                   {
-                    before: fix.toPerson
-                      ? `الاسم «${targets[0]?.person ?? ""}» · القيود ${targets
+                    before: fix.toParty
+                      ? `الأطراف: ${[
+                          ...new Set(targets.map((m) => m.party || "بلا طرف")),
+                        ].join(" · ")} — القيود ${targets
                           .map((m) => m.entryNo)
                           .join("، ")}`
+                      : fix.toPerson
+                        ? `الاسم «${targets[0]?.person ?? ""}» · القيود ${targets
+                            .map((m) => m.entryNo)
+                            .join("، ")}`
                       : `الحساب ${before} · القيود ${targets
                           .map((m) => m.entryNo)
                           .join("، ")}`,
-                    after: fix.toPerson
-                      ? `الاسم «${fix.toPerson}» — الحساب والمبلغ والاعتماد كما هي`
+                    after: fix.toParty
+                      ? `الطرف «${fix.toParty}» — الحساب والمبلغ والاعتماد كما هي`
+                      : fix.toPerson
+                        ? `الاسم «${fix.toPerson}» — الحساب والمبلغ والاعتماد كما هي`
                       : fix.toAccount
                         ? `الحساب ${fix.toAccount} — ${item?.name ?? ""}${
                             fix.toProject ? ` · ${fix.toProject}` : ""
@@ -10101,6 +10110,12 @@ type BulkFix = {
    * متابعة العهد، رصيدُ كلٍّ منهما شطرُ رصيدٍ واحد.
    */
   toPerson?: string;
+  /**
+   * الاسم الذي يُوحَّد عليه الطرف — المورّد أو المقاول أو العامل.
+   *
+   * والطرف غير الدافع/المستلم: هذا من عُمل معه، وذاك من ناوله المال.
+   */
+  toParty?: string;
   match: (m: Movement) => boolean;
 };
 
@@ -10141,6 +10156,21 @@ const BULK_FIXES: BulkFix[] = [
       "دفعة ألمنيوم بألفٍ وخمسمئة (قيد ١٢٩٦، مايو ٢٠٢٥) قُيّدت على «رواتب وأجور إدارية»، فضخّمت الرواتب الإدارية وأنقصت التكاليف المباشرة. ومورّد الألمنيوم مسجّلٌ «مورّداً»، فدفعته مواد. ومشروعها قديم مُقفل غير موجود في النظام، فتبقى على «مصروفات مشتركة». صافي ربح ٢٠٢٥ لا يتغيّر.",
     toAccount: "5110",
     match: isAluminiumOnSalaries,
+  },
+  {
+    id: "abdullatif-name-unify",
+    title: "توحيد اسم عبداللطيف أبو أحمد — النجّار",
+    reason:
+      "كُتب اسمه في الحركات بأربع صيغ: «ابو احمد» و«عبداللطيف» و«عبداللطيف أحمد (أبو أحمد النجار)» و«عبداللطيف أحمد عبداللطيف حسوب» و«بو احمد النجار». فلا تجتمع أعماله ببحثٍ واحد، ولا يُعرف ما له وما عليه إلا بتتبّع الصيغ واحدةً واحدة. والرجل واحد: صاحب عقد الحدادة والنجارة 3003 ومن عمل باليومية قبله. ولا يتغيّر بهذا حسابٌ ولا مبلغٌ ولا اعتماد؛ يتغيّر رسمُ اسم.",
+    toParty: "عبداللطيف ابواحمد",
+    match: (m) =>
+      [
+        "ابو احمد",
+        "عبداللطيف",
+        "عبداللطيف أحمد (أبو أحمد النجار)",
+        "عبداللطيف أحمد عبداللطيف حسوب",
+        "بو احمد النجار",
+      ].includes((m.party ?? "").trim()),
   },
   {
     id: "noah-name-unify",
@@ -10197,9 +10227,11 @@ function BulkFixPanel({
           const byProject = new Map<string, { n: number; sum: number }>();
           for (const m of targets) {
             /* في نقل المشروع وحده كلها من مشروعٍ واحد، فتُجمع بالحساب */
-            const key = fix.toPerson
-              ? m.person || "بلا اسم"
-              : fix.toAccount
+            const key = fix.toParty
+              ? m.party || "بلا اسم"
+              : fix.toPerson
+                ? m.person || "بلا اسم"
+                : fix.toAccount
                 ? m.project || "بلا مشروع"
                 : m.debitCode;
             const row = byProject.get(key) ?? { n: 0, sum: 0 };
@@ -10221,6 +10253,11 @@ function BulkFixPanel({
               {fix.toPerson && (
                 <p className="mt-1 text-sm font-medium text-slate-700">
                   ويصير اسم صاحبها كلِّها «{fix.toPerson}».
+                </p>
+              )}
+              {fix.toParty && (
+                <p className="mt-1 text-sm font-medium text-slate-700">
+                  ويصير طرفُها كلِّها «{fix.toParty}».
                 </p>
               )}
 
