@@ -2336,19 +2336,18 @@ export default function HomeV2() {
                   يُعاد إلى الانتظار، ولو أُعيد لخرجت المصروفات من القوائم.
                 */
                 setMovements((prev) =>
-                  prev.map((m) =>
-                    ids.has(m.id)
-                      ? fix.toAccount && item
-                        ? {
-                            ...m,
-                            debitCode: fix.toAccount,
-                            itemCode: item.code,
-                            itemName: item.name,
-                            project: fix.toProject ?? m.project,
-                          }
-                        : { ...m, project: fix.toProject ?? m.project }
-                      : m
-                  )
+                  prev.map((m) => {
+                    if (!ids.has(m.id)) return m;
+                    const next = { ...m };
+                    if (fix.toAccount && item) {
+                      next.debitCode = fix.toAccount;
+                      next.itemCode = item.code;
+                      next.itemName = item.name;
+                    }
+                    if (fix.toProject) next.project = fix.toProject;
+                    if (fix.toPerson) next.person = fix.toPerson;
+                    return next;
+                  })
                 );
                 log(
                   "تعديل",
@@ -2357,14 +2356,20 @@ export default function HomeV2() {
                     targets.reduce((s, m) => s + m.amount, 0)
                   )} د.ك`,
                   {
-                    before: `الحساب ${before} · القيود ${targets
-                      .map((m) => m.entryNo)
-                      .join("، ")}`,
-                    after: fix.toAccount
-                      ? `الحساب ${fix.toAccount} — ${item?.name ?? ""}${
-                          fix.toProject ? ` · ${fix.toProject}` : ""
-                        }`
-                      : `المشروع «${fix.toProject}» — الحساب والاعتماد كما هما`,
+                    before: fix.toPerson
+                      ? `الاسم «${targets[0]?.person ?? ""}» · القيود ${targets
+                          .map((m) => m.entryNo)
+                          .join("، ")}`
+                      : `الحساب ${before} · القيود ${targets
+                          .map((m) => m.entryNo)
+                          .join("، ")}`,
+                    after: fix.toPerson
+                      ? `الاسم «${fix.toPerson}» — الحساب والمبلغ والاعتماد كما هي`
+                      : fix.toAccount
+                        ? `الحساب ${fix.toAccount} — ${item?.name ?? ""}${
+                            fix.toProject ? ` · ${fix.toProject}` : ""
+                          }`
+                        : `المشروع «${fix.toProject}» — الحساب والاعتماد كما هما`,
                   }
                 );
               }}
@@ -9847,6 +9852,13 @@ type BulkFix = {
   toAccount?: string;
   /** السلّة أو المشروع الذي تنتقل إليه — يُترك فارغاً فيبقى كل شيء كما هو */
   toProject?: string;
+  /**
+   * الاسم الذي يُوحَّد عليه الدافع/المستلم.
+   *
+   * لا يمسّ حساباً ولا مبلغاً: اسمٌ واحدٌ اختلف رسمه فصار شخصين في
+   * متابعة العهد، رصيدُ كلٍّ منهما شطرُ رصيدٍ واحد.
+   */
+  toPerson?: string;
   match: (m: Movement) => boolean;
 };
 
@@ -9887,6 +9899,14 @@ const BULK_FIXES: BulkFix[] = [
       "دفعة ألمنيوم بألفٍ وخمسمئة (قيد ١٢٩٦، مايو ٢٠٢٥) قُيّدت على «رواتب وأجور إدارية»، فضخّمت الرواتب الإدارية وأنقصت التكاليف المباشرة. ومورّد الألمنيوم مسجّلٌ «مورّداً»، فدفعته مواد. ومشروعها قديم مُقفل غير موجود في النظام، فتبقى على «مصروفات مشتركة». صافي ربح ٢٠٢٥ لا يتغيّر.",
     toAccount: "5110",
     match: isAluminiumOnSalaries,
+  },
+  {
+    id: "noah-name-unify",
+    title: "توحيد اسم المهندس نوح — «م.نوح» ← «م. نوح»",
+    reason:
+      "اسم المهندس مكتوبٌ في الحركات «م.نوح» بلا مسافة، وفي قائمة الأشخاص «م. نوح» بمسافة. فظهر في متابعة العهد شخصان: واحدٌ عليه صرفٌ بلا إنفاق، وآخر عليه إنفاقٌ بلا صرف — ولا يُقفل رصيدُ أيّهما وهما رجلٌ واحد. ولا يتغيّر بهذا حسابٌ ولا مبلغٌ ولا اعتماد؛ يتغيّر رسمُ اسم.",
+    toPerson: "م. نوح",
+    match: (m) => m.person === "م.نوح",
   },
   {
     id: "car-paint-to-maintenance",
@@ -9935,9 +9955,11 @@ function BulkFixPanel({
           const byProject = new Map<string, { n: number; sum: number }>();
           for (const m of targets) {
             /* في نقل المشروع وحده كلها من مشروعٍ واحد، فتُجمع بالحساب */
-            const key = fix.toAccount
-              ? m.project || "بلا مشروع"
-              : m.debitCode;
+            const key = fix.toPerson
+              ? m.person || "بلا اسم"
+              : fix.toAccount
+                ? m.project || "بلا مشروع"
+                : m.debitCode;
             const row = byProject.get(key) ?? { n: 0, sum: 0 };
             byProject.set(key, { n: row.n + 1, sum: row.sum + m.amount });
           }
@@ -9952,6 +9974,11 @@ function BulkFixPanel({
               {fix.toProject && (
                 <p className="mt-1 text-sm font-medium text-slate-700">
                   وتنتقل كلها إلى «{fix.toProject}».
+                </p>
+              )}
+              {fix.toPerson && (
+                <p className="mt-1 text-sm font-medium text-slate-700">
+                  ويصير اسم صاحبها كلِّها «{fix.toPerson}».
                 </p>
               )}
 

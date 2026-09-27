@@ -36,6 +36,7 @@
     "render:print": "node db/render-print.mjs",
     "check:empty-device": "node db/check-empty-device.mjs",
     "check:login": "node db/check-login.mjs",
+    "check:person-unify": "node db/check-person-unify.mjs",
     "verify:live": "node db/verify-live.mjs",
     "check:import": "node db/check-import.mjs",
     "check:merge-audit": "node db/check-merge-audit.mjs",
