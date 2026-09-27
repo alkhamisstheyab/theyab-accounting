@@ -61,6 +61,14 @@ export type Employee = {
   restDay: string;
   active: boolean;
   passportNumber: string;
+  /**
+   * بداية إذن العمل والإقامة.
+   *
+   * تُسأل عنها الشؤون عند التجديد، وتُكتب في معاملات العمالة. ووجودها
+   * في الملفّ يُغني عن الرجوع إلى الورق في كل مرة.
+   */
+  workPermitStart?: string;
+  residencyStart?: string;
   workPermitExpiry: string;
   residencyExpiry: string;
   notes: string;

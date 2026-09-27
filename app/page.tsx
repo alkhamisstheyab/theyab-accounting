@@ -1063,6 +1063,7 @@ export default function HomeV2() {
         movements,
         contractors,
         projects,
+        employees,
         quotations,
         workItems,
         audit,
@@ -1076,6 +1077,7 @@ export default function HomeV2() {
       movements,
       contractors,
       projects,
+      employees,
       quotations,
       workItems,
       audit,
@@ -17350,8 +17352,10 @@ const BLANK_EMPLOYEE = {
   wageAccount: "",
   restDay: "الجمعة",
   passportNumber: "",
-  workPermitExpiry: "",
+  residencyStart: "",
   residencyExpiry: "",
+  workPermitStart: "",
+  workPermitExpiry: "",
   notes: "",
 };
 
@@ -17425,6 +17429,8 @@ function EmployeesPage({
       wageAccount: e.wageAccount,
       restDay: e.restDay,
       passportNumber: e.passportNumber,
+      residencyStart: e.residencyStart ?? "",
+      workPermitStart: e.workPermitStart ?? "",
       workPermitExpiry: e.workPermitExpiry,
       residencyExpiry: e.residencyExpiry,
       notes: e.notes,
@@ -17476,6 +17482,8 @@ function EmployeesPage({
       restDay: form.restDay,
       active: !form.endDate,
       passportNumber: form.passportNumber.trim(),
+      residencyStart: form.residencyStart || undefined,
+      workPermitStart: form.workPermitStart || undefined,
       workPermitExpiry: form.workPermitExpiry,
       residencyExpiry: form.residencyExpiry,
       notes: form.notes.trim(),
@@ -17682,11 +17690,27 @@ function EmployeesPage({
                     className={inputClass}
                   />
                 </Field>
+                <Field label="بداية الإقامة">
+                  <input
+                    type="date"
+                    value={form.residencyStart}
+                    onChange={(e) => set("residencyStart", e.target.value)}
+                    className={inputClass}
+                  />
+                </Field>
                 <Field label="انتهاء الإقامة">
                   <input
                     type="date"
                     value={form.residencyExpiry}
                     onChange={(e) => set("residencyExpiry", e.target.value)}
+                    className={inputClass}
+                  />
+                </Field>
+                <Field label="بداية إذن العمل">
+                  <input
+                    type="date"
+                    value={form.workPermitStart}
+                    onChange={(e) => set("workPermitStart", e.target.value)}
                     className={inputClass}
                   />
                 </Field>

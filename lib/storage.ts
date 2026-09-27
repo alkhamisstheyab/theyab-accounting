@@ -541,6 +541,8 @@ function migrateEmployee(raw: unknown): Employee {
     restDay: str(e.restDay, "الجمعة") || "الجمعة",
     active: e.active !== false,
     passportNumber: str(e.passportNumber),
+    workPermitStart: str(e.workPermitStart) || undefined,
+    residencyStart: str(e.residencyStart) || undefined,
     workPermitExpiry: str(e.workPermitExpiry),
     residencyExpiry: str(e.residencyExpiry),
     notes: str(e.notes),

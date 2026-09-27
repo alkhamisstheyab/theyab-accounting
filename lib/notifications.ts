@@ -13,6 +13,7 @@
 
 import { Movement, isApproved, isNonProject, round3 } from "./accounting";
 import { AuditEntry } from "./audit";
+import type { Employee } from "./payroll";
 import { Permission } from "./permissions";
 import { Quotation, WorkItem, isCostStale, quotationAgeDays } from "./quotations";
 import {
@@ -42,6 +43,8 @@ export type NoticeInput = {
   contractors: Contractor[];
   /** المشاريع — لتأمين المواقع ومدده */
   projects: Project[];
+  /** الموظفون — لإقاماتهم وأذون عملهم */
+  employees: Employee[];
   quotations: Quotation[];
   workItems: WorkItem[];
   audit: AuditEntry[];
@@ -151,6 +154,69 @@ export function projectInsurance(
     });
   }
   return rows.sort((a, b) => a.daysLeft - b.daysLeft);
+}
+
+/** كم يوماً بقي على انتهاء وثيقة — سالب يعني منتهية */
+const daysLeft = (date: string, today: string): number =>
+  Math.round(
+    (new Date(date + "T00:00:00Z").getTime() -
+      new Date(today + "T00:00:00Z").getTime()) /
+      86_400_000
+  );
+
+/**
+ * وثائق العمالة: الإقامة وإذن العمل.
+ *
+ * وانتهاؤها ليس تأخيراً إدارياً: الإقامة المنتهية غرامةٌ يومية، والعمل
+ * بإذنٍ منتهٍ مسؤوليةٌ على الشركة. ولا يُنبَّه إليها في شاشة الموظفين
+ * وحدها — من لا يفتحها لا يعلم — بل تُعرض على من يدخل النظام.
+ *
+ * والكويتي لا إقامة له ولا إذن عمل، فلا يُسأل عنهما.
+ */
+export const DOCUMENT_ALERT_DAYS = 60;
+
+export type DocumentRow = {
+  employee: Employee;
+  label: string;
+  date: string;
+  days: number;
+};
+
+export function staffDocuments(
+  employees: Employee[],
+  today: string
+): { expired: DocumentRow[]; soon: DocumentRow[]; missing: DocumentRow[] } {
+  const expired: DocumentRow[] = [];
+  const soon: DocumentRow[] = [];
+  const missing: DocumentRow[] = [];
+
+  for (const employee of employees) {
+    if (employee.active === false) continue;
+    if (employee.isKuwaiti) continue;
+
+    for (const [label, date] of [
+      ["الإقامة", employee.residencyExpiry],
+      ["إذن العمل", employee.workPermitExpiry],
+    ] as const) {
+      const value = (date ?? "").trim();
+      if (!value) {
+        missing.push({ employee, label, date: "", days: 0 });
+        continue;
+      }
+      const days = daysLeft(value, today);
+      if (days < 0) expired.push({ employee, label, date: value, days });
+      else if (days <= DOCUMENT_ALERT_DAYS) {
+        soon.push({ employee, label, date: value, days });
+      }
+    }
+  }
+
+  const byDays = (a: DocumentRow, b: DocumentRow) => a.days - b.days;
+  return {
+    expired: expired.sort(byDays),
+    soon: soon.sort(byDays),
+    missing,
+  };
 }
 
 export function buildNotices(input: NoticeInput): Notice[] {
@@ -327,6 +393,59 @@ export function buildNotices(input: NoticeInput): Notice[] {
       count: uninsured.length,
       needs: "projects.manage",
   });
+  }
+
+  /* ---- وثائق العمالة ---- */
+
+  const documents = staffDocuments(input.employees, input.today);
+
+  if (documents.expired.length > 0) {
+    notices.push({
+      id: "documents-expired",
+      tone: "action",
+      title: `${documents.expired.length} وثيقة عاملٍ منتهية`,
+      detail:
+        documents.expired
+          .map(
+            (r) =>
+              `${r.employee.name}: ${r.label} منذ ${Math.abs(r.days)} يوماً`
+          )
+          .join(" · ") + " — والغرامة تُحسب باليوم.",
+      page: "الموظفون",
+      count: documents.expired.length,
+      needs: "employees.view",
+    });
+  }
+
+  if (documents.soon.length > 0) {
+    notices.push({
+      id: "documents-expiring",
+      tone: "warn",
+      title: `${documents.soon.length} وثيقة عاملٍ تنتهي قريباً`,
+      detail: documents.soon
+        .map((r) => `${r.employee.name}: ${r.label} بعد ${r.days} يوماً (${r.date})`)
+        .join(" · "),
+      page: "الموظفون",
+      count: documents.soon.length,
+      needs: "employees.view",
+    });
+  }
+
+  if (documents.missing.length > 0) {
+    notices.push({
+      id: "documents-missing",
+      tone: "info",
+      title: `${documents.missing.length} وثيقة غير مسجَّلة في ملفّات العمالة`,
+      detail:
+        [
+          ...new Set(
+            documents.missing.map((r) => `${r.employee.name} (${r.label})`)
+          ),
+        ].join(" · ") + " — سجّل تاريخ انتهائها ليُنبَّه إليها قبل انقضائها.",
+      page: "الموظفون",
+      count: documents.missing.length,
+      needs: "employees.manage",
+    });
   }
 
   /* ---- سلامة البيانات ---- */
