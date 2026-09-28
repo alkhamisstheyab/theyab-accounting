@@ -17569,6 +17569,7 @@ const BLANK_EMPLOYEE = {
   civilId: "",
   nationality: "",
   isKuwaiti: false,
+  insured: false,
   jobTitle: "",
   department: "إداري",
   project: "",
@@ -17658,6 +17659,7 @@ function EmployeesPage({
       wageAccount: e.wageAccount,
       restDay: e.restDay,
       passportNumber: e.passportNumber,
+      insured: e.insured ?? e.isKuwaiti,
       residencyStart: e.residencyStart ?? "",
       workPermitStart: e.workPermitStart ?? "",
       workPermitExpiry: e.workPermitExpiry,
@@ -17711,6 +17713,7 @@ function EmployeesPage({
       restDay: form.restDay,
       active: !form.endDate,
       passportNumber: form.passportNumber.trim(),
+      insured: form.insured,
       residencyStart: form.residencyStart || undefined,
       workPermitStart: form.workPermitStart || undefined,
       workPermitExpiry: form.workPermitExpiry,
@@ -17832,14 +17835,40 @@ function EmployeesPage({
                     className={inputClass}
                   />
                 </Field>
-                <div className="flex items-end pb-3">
+                <div className="flex flex-col justify-end gap-2 pb-3">
+                  {/*
+                    الجنسية والاشتراك أمران: الجنسية تُسقط عنه الإقامة وإذن
+                    العمل، والاشتراك يُحسب على الكويتي المسجَّل على الشركة.
+                    ومن له عملٌ أصليٌّ يُؤمَّن عليه منه — كصاحب المكافأة —
+                    كويتيٌّ ولا يُخصم منه.
+                  */}
                   <label className="flex items-center gap-2 text-sm font-medium">
                     <input
                       type="checkbox"
                       checked={form.isKuwaiti}
-                      onChange={(e) => set("isKuwaiti", e.target.checked)}
+                      onChange={(e) =>
+                        setForm({
+                          ...form,
+                          isKuwaiti: e.target.checked,
+                          /* غير الكويتي لا يُشترك، والكويتي يُسأل عنه */
+                          insured: e.target.checked ? form.insured : false,
+                        })
+                      }
                     />
-                    كويتي — تُحتسب له التأمينات
+                    كويتي — فلا إقامة له ولا إذن عمل
+                  </label>
+                  <label
+                    className={`flex items-center gap-2 text-sm font-medium ${
+                      form.isKuwaiti ? "" : "text-slate-400"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      disabled={!form.isKuwaiti}
+                      checked={form.insured}
+                      onChange={(e) => set("insured", e.target.checked)}
+                    />
+                    مشترك في التأمينات على الشركة
                   </label>
                 </div>
                 <Field label="رقم الجواز">

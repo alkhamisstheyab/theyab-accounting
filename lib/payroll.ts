@@ -28,6 +28,17 @@ export type Employee = {
   nationality: string;
   /** التأمينات الاجتماعية تخص الكويتيين وحدهم */
   isKuwaiti: boolean;
+
+  /**
+   * أمشتركٌ في التأمينات الاجتماعية على هذه الشركة؟
+   *
+   * الجنسية لا تكفي: الاشتراك يقع على الكويتي **المسجَّل على الشركة**.
+   * ومن له عملٌ أصليٌّ يُؤمَّن عليه منه — كصاحب المكافأة الذي يعمل في
+   * جهةٍ حكومية — لا تُسجّله الشركة ولا تخصم منه، وإن كان كويتياً.
+   *
+   * وغيرُ المحدَّد يتبع الجنسية، فلا تتغيّر حسابات من سُجّل قبل الحقل.
+   */
+  insured?: boolean;
   jobTitle: string;
   /** إداري أو موقع — يحدّد حساب المصروف */
   department: string;
@@ -493,8 +504,10 @@ export function computePayrollLine(input: {
   const insurable = settings.socialInsuranceCeiling
     ? Math.min(gross, settings.socialInsuranceCeiling)
     : gross;
+  /* الاشتراك لا الجنسية: صاحب المكافأة كويتيٌّ ولا يُخصم منه */
+  const subscribed = employee.insured ?? employee.isKuwaiti;
   const socialInsurance =
-    settings.socialInsuranceEnabled && employee.isKuwaiti
+    settings.socialInsuranceEnabled && subscribed
       ? round3((insurable * settings.socialInsuranceEmployee) / 100)
       : 0;
 

@@ -541,6 +541,8 @@ function migrateEmployee(raw: unknown): Employee {
     restDay: str(e.restDay, "الجمعة") || "الجمعة",
     active: e.active !== false,
     passportNumber: str(e.passportNumber),
+    /* من سُجّل قبل الحقل: اشتراكه على جنسيته كما كان الحساب */
+    insured: typeof e.insured === "boolean" ? e.insured : Boolean(e.isKuwaiti),
     workPermitStart: str(e.workPermitStart) || undefined,
     residencyStart: str(e.residencyStart) || undefined,
     workPermitExpiry: str(e.workPermitExpiry),

@@ -204,9 +204,51 @@ check(
   page.includes("creditCode: EMPLOYEE_ADVANCE_ACCOUNT")
 );
 
+/* ---- الاشتراك في التأمينات لا الجنسية ---- */
+{
+  const settings = {
+    ...defaultPayrollSettings(),
+    socialInsuranceEnabled: true,
+    socialInsuranceEmployee: 8,
+  };
+  const base = {
+    id: "k",
+    name: "كويتي",
+    active: true,
+    wageType: "شهري",
+    basicWage: 1000,
+    allowances: [],
+    restDay: "الجمعة",
+    isKuwaiti: true,
+  };
+  const days = [];
+  const line = (employee) =>
+    computePayrollLine({ employee, attendance: days, settings });
+
+  console.log("");
+  check(
+    "الكويتي المشترك يُخصم منه",
+    line({ ...base, insured: true }).socialInsurance > 0,
+    String(line({ ...base, insured: true }).socialInsurance)
+  );
+  check(
+    "وصاحب المكافأة كويتيٌّ ولا يُخصم منه",
+    line({ ...base, insured: false }).socialInsurance === 0
+  );
+  check(
+    "ومن سُجّل قبل الحقل يتبع جنسيته",
+    line({ ...base }).socialInsurance > 0
+  );
+  check(
+    "وغير الكويتي لا يُخصم منه",
+    line({ ...base, isKuwaiti: false, insured: undefined }).socialInsurance === 0
+  );
+}
+
 console.log(
   bad === 0
     ? "\n✓ السلفة تُخصم من الراتب فتُقفل، والراتب يبقى مصروفاً بكامله"
     : `\n✗ ${bad} فحصاً أخفق`
 );
+
 process.exit(bad === 0 ? 0 : 1);
