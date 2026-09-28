@@ -215,6 +215,7 @@ import {
   type DuePerson,
   type DueRow,
 } from "@/lib/dues";
+import { spendByQuarter, workSplit } from "@/lib/quarters";
 import { compareStates, type FieldComparison } from "@/lib/changes";
 import { ROW_COLLECTIONS } from "@/lib/collections";
 import { isAdminExpenseToGeneral } from "@/lib/admin-to-general";
@@ -335,6 +336,7 @@ const PAGES = [
   "ميزان المراجعة",
   "القوائم المالية",
   "التقارير",
+  "التقرير الربعي",
   "المشاريع",
   "عروض الأسعار",
   "بنود الأعمال",
@@ -1748,6 +1750,10 @@ export default function HomeV2() {
               year={year}
               income={income}
             />
+          )}
+
+          {page === "التقرير الربعي" && (
+            <QuarterlyPage movements={movements} chart={chart} />
           )}
 
           {page === "المشاريع" && (
@@ -13512,6 +13518,228 @@ function InvoicesPage({
             {amountInWords(invoiceTotal(open))}
           </div>
         </div>
+      </Panel>
+    </>
+  );
+}
+
+/* ================================================================== */
+/* التقرير الربعي                                                      */
+/* ================================================================== */
+
+/**
+ * أين يذهب المال، وما الذي يستحقّ قراراً.
+ *
+ * والربع أصدق من الشهر: الشهر يتقلّب بمصروفٍ واحدٍ كبير، والسنة تُخفي
+ * التحوّل داخلها. والغاية ليست عرض الأرقام بل أن يُبنى عليها قرار —
+ * أنستأجر المعدة أم نشتريها؟ أنعمل باليومية أم بعقد؟
+ */
+function QuarterlyPage({
+  movements,
+  chart,
+}: {
+  movements: Movement[];
+  chart: Account[];
+}) {
+  const spend = useMemo(() => spendByQuarter(movements, chart), [movements, chart]);
+  const byQuarter = useMemo(() => workSplit(movements, "quarter"), [movements]);
+  const byProject = useMemo(() => workSplit(movements, "project"), [movements]);
+
+  const [showAll, setShowAll] = useState(false);
+  const visible = showAll ? spend.rows : spend.rows.slice(0, 14);
+  const rising = spend.rows.filter((r) => r.rising);
+
+  if (spend.quarters.length === 0) {
+    return (
+      <Panel title="التقرير الربعي">
+        <Empty>لا حركات معتمدة بعد</Empty>
+      </Panel>
+    );
+  }
+
+  const last = spend.quarters[spend.quarters.length - 1];
+  const looseAll = byQuarter.reduce((sum, r) => sum + r.loose, 0);
+  const contractedAll = byQuarter.reduce((sum, r) => sum + r.contracted, 0);
+
+  return (
+    <>
+      <Panel
+        title="أين يذهب المال"
+        subtitle={`${spend.quarters.length} ربعاً · ${fmt(spend.grand)} د.ك إنفاقاً معتمداً`}
+      >
+        {rising.length > 0 && (
+          <Banner tone="warn">
+            <b>{rising.length}</b> بنداً يتصاعد ثلاثة أرباعٍ متتالية:{" "}
+            {rising
+              .map((r) => `${r.name} (${fmt(r.byQuarter[last] ?? 0)} في ${last})`)
+              .join(" · ")}{" "}
+            — وهذه أولى ما يُنظر فيه: أتستأجر أم تشتري؟ أتتعاقد أم تُبقي اليومية؟
+          </Banner>
+        )}
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-right text-sm">
+            <thead className="bg-slate-100">
+              <tr>
+                <Th>البند</Th>
+                {spend.quarters.map((q) => (
+                  <Th key={q}>{q}</Th>
+                ))}
+                <Th>الجملة</Th>
+                <Th>معدّل الربع</Th>
+                <Th>النسبة</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {visible.map((row) => (
+                <tr key={row.account} className="border-b border-slate-100">
+                  <Td>
+                    <span className="text-xs text-slate-400">{row.account}</span>{" "}
+                    {row.name}
+                    {row.rising && (
+                      <span className="mr-2 rounded bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-800">
+                        يتصاعد
+                      </span>
+                    )}
+                  </Td>
+                  {spend.quarters.map((q) => (
+                    <Td key={q} className="tabular-nums">
+                      {row.byQuarter[q] ? fmt(row.byQuarter[q]) : "—"}
+                    </Td>
+                  ))}
+                  <Td className="tabular-nums font-bold">{fmt(row.total)}</Td>
+                  <Td className="tabular-nums text-slate-500">{fmt(row.average)}</Td>
+                  <Td className="tabular-nums text-slate-500">{row.share}%</Td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot className="bg-slate-50 font-bold">
+              <tr>
+                <Td>الإجمالي</Td>
+                {spend.quarters.map((q) => (
+                  <Td key={q} className="tabular-nums">
+                    {fmt(spend.totals[q] ?? 0)}
+                  </Td>
+                ))}
+                <Td className="tabular-nums">{fmt(spend.grand)}</Td>
+                <Td colSpan={2}>{""}</Td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+
+        {spend.rows.length > 14 && (
+          <button
+            onClick={() => setShowAll(!showAll)}
+            className="mt-3 rounded-lg bg-slate-100 px-5 py-2 font-bold no-print"
+          >
+            {showAll ? "أكبر أربعة عشر بنداً" : `كل البنود (${spend.rows.length})`}
+          </button>
+        )}
+      </Panel>
+
+      <Panel
+        title="اليوميات مقابل العقود"
+        subtitle="أجور المقاولين وحدها — ما دُفع بعقدٍ مبرم مقابل ما دُفع باليومية"
+      >
+        <div className="mb-5 grid grid-cols-1 gap-3 md:grid-cols-3">
+          {[
+            ["بعقد", contractedAll, "text-green-800"],
+            ["بلا عقد", looseAll, "text-amber-800"],
+            [
+              "نسبة التعاقد",
+              contractedAll + looseAll
+                ? Math.round((contractedAll / (contractedAll + looseAll)) * 100)
+                : 0,
+              "font-bold",
+            ],
+          ].map(([label, value, cls], i) => (
+            <div key={String(label)} className="rounded-xl bg-slate-50 p-4">
+              <p className="text-sm text-slate-500">{label}</p>
+              <p className={`mt-1 text-2xl ${cls}`}>
+                {i === 2 ? `${value}%` : <Money value={Number(value)} bold />}
+                {i === 2 ? "" : " د.ك"}
+              </p>
+            </div>
+          ))}
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-right text-sm">
+            <thead className="bg-slate-100">
+              <tr>
+                <Th>الربع</Th>
+                <Th>بعقد</Th>
+                <Th>بلا عقد</Th>
+                <Th>الجملة</Th>
+                <Th>نسبة التعاقد</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {byQuarter.map((row) => (
+                <tr key={row.key} className="border-b border-slate-100">
+                  <Td>{row.key}</Td>
+                  <Td className="tabular-nums">{row.contracted ? fmt(row.contracted) : "—"}</Td>
+                  <Td className="tabular-nums">{row.loose ? fmt(row.loose) : "—"}</Td>
+                  <Td className="tabular-nums font-bold">{fmt(row.total)}</Td>
+                  <Td
+                    className={
+                      row.share >= 70
+                        ? "font-bold text-green-700"
+                        : row.share <= 30
+                          ? "font-bold text-amber-700"
+                          : ""
+                    }
+                  >
+                    {row.share}%
+                  </Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <p className="mt-5 mb-2 font-bold">وبحسب المشروع</p>
+        <div className="overflow-x-auto">
+          <table className="w-full text-right text-sm">
+            <thead className="bg-slate-100">
+              <tr>
+                <Th>المشروع</Th>
+                <Th>بعقد</Th>
+                <Th>بلا عقد</Th>
+                <Th>الجملة</Th>
+                <Th>نسبة التعاقد</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {byProject.map((row) => (
+                <tr key={row.key} className="border-b border-slate-100">
+                  <Td>{row.key}</Td>
+                  <Td className="tabular-nums">{row.contracted ? fmt(row.contracted) : "—"}</Td>
+                  <Td className="tabular-nums">{row.loose ? fmt(row.loose) : "—"}</Td>
+                  <Td className="tabular-nums font-bold">{fmt(row.total)}</Td>
+                  <Td
+                    className={
+                      row.share >= 70
+                        ? "font-bold text-green-700"
+                        : row.share <= 30
+                          ? "font-bold text-amber-700"
+                          : ""
+                    }
+                  >
+                    {row.share}%
+                  </Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <p className="mt-4 text-sm text-slate-600">
+          وليس الأقلّ خيراً بإطلاق: اليومية تُناسب عملاً صغيراً عارضاً، والعقد
+          يُناسب عملاً معلوم الحدّ — يُعرف مقداره وشرطه ومتى يُسلَّم. وإنما
+          يُعرض المقدار ليُقرَّر عن بيّنة.
+        </p>
       </Panel>
     </>
   );

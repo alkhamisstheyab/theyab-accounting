@@ -297,6 +297,7 @@ export const PAGE_PERMISSION: Record<string, Permission> = {
   "ميزان المراجعة": "trialBalance.view",
   "القوائم المالية": "financials.view",
   التقارير: "reports.view",
+  "التقرير الربعي": "reports.view",
   المشاريع: "projects.view",
   المقاولون: "contractors.view",
   "ربط الحركات": "contractors.manage",
