@@ -93,6 +93,8 @@ import {
   dailyWage,
   defaultPayrollSettings,
   transferSheets,
+  type TransferLine,
+  type TransferSheets,
   defaultWageAccount,
   endOfService,
   hourlyWage,
@@ -397,6 +399,11 @@ export default function HomeV2() {
   /** العقد المطلوب طباعته */
   const [contractFor, setContractFor] = useState<Contractor | null>(null);
   /** كشف الراتب المطلوب طباعته */
+  /** كشفا التحويل المفتوحان للطباعة، ومعهما شهرهما */
+  const [transferSheet, setTransferSheet] = useState<{
+    sheets: TransferSheets;
+    month: string;
+  } | null>(null);
   const [payslip, setPayslip] = useState<{
     run: PayrollRun;
     line: PayrollLine;
@@ -1337,7 +1344,12 @@ export default function HomeV2() {
       {/* الإخفاء على الغلاف الداخلي لا على main، وإلا اختفى السند معه */}
       <div
         className={`flex min-h-screen ${
-          voucherFor || contractFor || payslip || quoteSheet || invoiceSheet
+          voucherFor ||
+          contractFor ||
+          payslip ||
+          transferSheet ||
+          quoteSheet ||
+          invoiceSheet
             ? "hide-when-printing"
             : ""
         }`}
@@ -2469,6 +2481,9 @@ export default function HomeV2() {
                 );
               }}
               onPayslip={(run, line) => setPayslip({ run, line })}
+              onTransferSheet={(sheets, month) =>
+                setTransferSheet({ sheets, month })
+              }
               onLog={log}
             />
           )}
@@ -2846,6 +2861,16 @@ export default function HomeV2() {
           )}
         </section>
       </div>
+
+      {transferSheet && (
+        <TransferSheet
+          sheets={transferSheet.sheets}
+          month={transferSheet.month}
+          monthName={monthLabel(transferSheet.month)}
+          company={company}
+          onClose={() => setTransferSheet(null)}
+        />
+      )}
 
       {payslip && (
         <PayslipSheet
@@ -19471,6 +19496,7 @@ function PayrollPage({
   setRuns,
   onPost,
   onPayslip,
+  onTransferSheet,
   onLog,
 }: {
   employees: Employee[];
@@ -19487,6 +19513,7 @@ function PayrollPage({
   setRuns: Dispatch<SetStateAction<PayrollRun[]>>;
   onPost: (run: PayrollRun, movements: Movement[]) => void;
   onPayslip: (run: PayrollRun, line: PayrollLine) => void;
+  onTransferSheet: (sheets: TransferSheets, month: string) => void;
   onLog: (
     action: AuditAction,
     entity: AuditEntity,
@@ -20030,8 +20057,16 @@ function PayrollPage({
           كل شهر.
         */}
         {lines.length > 0 && (
-          <div className="mt-6 rounded-xl border border-slate-200 p-4 no-print">
-            <p className="mb-1 font-bold">كشفا التحويل البنكي</p>
+          <div className="mt-6 rounded-xl border border-slate-200 p-4">
+            <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+              <p className="font-bold">كشفا التحويل البنكي</p>
+              <button
+                onClick={() => onTransferSheet(sheets, month)}
+                className="rounded-lg bg-slate-900 px-5 py-2 font-bold text-white no-print"
+              >
+                🖨 اطبع الكشفين
+              </button>
+            </div>
             <p className="mb-3 text-sm text-slate-600">
               الأول يُرفع كما هو في ملفّ الشؤون، والثاني تكملةُ الأجر الفعلي.
               والخصومات كلُّها من التكملة، فلا يُنقَص الراتب المسجَّل.
@@ -20158,6 +20193,155 @@ function PayrollPage({
 /* ================================================================== */
 /* كشف الراتب                                                          */
 /* ================================================================== */
+
+/**
+ * ورقة التحويل البنكي.
+ *
+ * ما في الشاشة يُقرأ، وهذه تُنقل إلى كشف البنك سطراً سطراً. فكلُّ كشفٍ
+ * في ورقةٍ مستقلّة بترويسة الشركة وشهرها ومجموعها وموضعِ توقيع — لأن
+ * الكشفين يُرفعان منفصلين: أحدهما إلى الشؤون والآخر تكملةٌ للأجر.
+ */
+function TransferSheet({
+  sheets,
+  month,
+  monthName,
+  company,
+  onClose,
+}: {
+  sheets: TransferSheets;
+  month: string;
+  monthName: string;
+  company: CompanyProfile;
+  onClose: () => void;
+}) {
+  const parts = [
+    {
+      key: "registered",
+      title: "كشف الرواتب المسجَّلة",
+      note: "الأجر المسجَّل في ملفّ الشركة بوزارة الشؤون",
+      rows: sheets.lines.filter((r) => r.registered > 0),
+      pick: (r: TransferLine) => r.registered,
+      total: sheets.registeredTotal,
+    },
+    {
+      key: "topUp",
+      title: "كشف تكملة الرواتب",
+      note: "الفرق بين الأجر الفعلي والمسجَّل — بدلاتٌ وما بقي",
+      rows: sheets.lines.filter((r) => r.topUp > 0),
+      pick: (r: TransferLine) => r.topUp,
+      total: sheets.topUpTotal,
+    },
+  ];
+
+  return (
+    <div
+      className="voucher-sheet fixed inset-0 z-50 overflow-auto bg-slate-800/60 p-6"
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="voucher-body designed-sheet mx-auto max-w-3xl bg-white p-10 shadow-xl"
+      >
+        <div className="mb-6 flex justify-end gap-3 no-print">
+          <button
+            onClick={() => window.print()}
+            className="rounded-lg bg-slate-900 px-6 py-3 font-bold text-white"
+          >
+            🖨 طباعة
+          </button>
+          <button
+            onClick={onClose}
+            className="rounded-lg bg-slate-200 px-6 py-3 font-bold"
+          >
+            إغلاق
+          </button>
+        </div>
+
+        {parts.map((part, index) => (
+          <div
+            key={part.key}
+            style={index === 1 ? { breakBefore: "page", paddingTop: 24 } : undefined}
+          >
+            <div className="flex items-start justify-between border-b-4 border-slate-900 pb-4">
+              <div className="flex items-center gap-4">
+                {company.logo && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={company.logo} alt="" style={{ height: 64 }} />
+                )}
+                <div>
+                  <div className="text-xl font-bold">{company.name}</div>
+                  <div className="text-xs text-slate-600">
+                    {[company.address, company.phone].filter(Boolean).join(" · ")}
+                  </div>
+                </div>
+              </div>
+              <div className="text-left">
+                <div className="rounded-lg border-2 border-slate-900 px-5 py-2 text-center">
+                  <div className="font-bold">{part.title}</div>
+                  <div className="text-xs">{monthName}</div>
+                </div>
+              </div>
+            </div>
+
+            <p className="mt-3 text-sm text-slate-600">{part.note}</p>
+
+            <table className="mt-4 w-full text-right text-sm">
+              <thead>
+                <tr className="border-b-2 border-slate-900">
+                  <th className="py-2 text-right">م</th>
+                  <th className="py-2 text-right">الموظف</th>
+                  <th className="py-2 text-right">الآيبان</th>
+                  <th className="py-2 text-left">المبلغ (د.ك)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {part.rows.map((row, i) => (
+                  <tr key={row.employeeId} className="border-b border-slate-300">
+                    <td className="py-2">{i + 1}</td>
+                    <td className="py-2 font-medium">{row.employeeName}</td>
+                    <td className="py-2 font-mono text-xs">{row.iban || "—"}</td>
+                    <td className="py-2 text-left tabular-nums">{fmt(part.pick(row))}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="border-t-2 border-slate-900 font-bold">
+                  <td className="py-2" colSpan={3}>
+                    الإجمالي — {part.rows.length} موظفاً
+                  </td>
+                  <td className="py-2 text-left tabular-nums">{fmt(part.total)}</td>
+                </tr>
+              </tfoot>
+            </table>
+
+            <p className="mt-2 text-sm">
+              فقط لا غير: <b>{amountInWords(part.total)}</b>
+            </p>
+
+            <div className="mt-10 flex justify-between text-sm">
+              <div>
+                <div className="mb-10">أعدّه</div>
+                <div className="border-t border-slate-400 pt-1 text-slate-600">
+                  التوقيع
+                </div>
+              </div>
+              <div>
+                <div className="mb-10">اعتمده</div>
+                <div className="border-t border-slate-400 pt-1 text-slate-600">
+                  التوقيع
+                </div>
+              </div>
+            </div>
+
+            <p className="mt-6 text-xs text-slate-500">
+              مسيّر {month} · حُرّر من نظام الشركة المحاسبي
+            </p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 function PayslipSheet({
   run,

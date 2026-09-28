@@ -127,6 +127,30 @@ if (BACKUP && fs.existsSync(BACKUP)) {
   );
 }
 
+console.log("\nوالكشفان يُطبعان ليُنقلا إلى البنك:\n");
+
+const page = fs.readFileSync("app/page.tsx", "utf8");
+check("للكشفين ورقةٌ مستقلّة", page.includes("function TransferSheet({"));
+check("وزرٌّ يفتحها", page.includes("🖨 اطبع الكشفين"));
+check(
+  "وكلُّ كشفٍ في صفحةٍ وحده — فهما يُرفعان منفصلين",
+  page.includes('breakBefore: "page"')
+);
+check(
+  "وفيها ترويسة الشركة وشهر المسيّر",
+  page.includes("{company.name}") && page.includes("{monthName}")
+);
+check("والآيبان لكل سطر", page.includes("{row.iban || \"—\"}"));
+check(
+  "والمجموع بالحروف كما في السندات",
+  page.includes("amountInWords(part.total)")
+);
+check("وموضع توقيعٍ واعتماد", page.includes("اعتمده"));
+check(
+  "واللوحة نفسها لم تعد تُخفى عند الطباعة",
+  !page.includes('<div className="mt-6 rounded-xl border border-slate-200 p-4 no-print">')
+);
+
 console.log(
   bad === 0
     ? "\n✓ كشفان يقتسمان الصافي، والمسجَّل يُرفع كما هو في الملفّ"
