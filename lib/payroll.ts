@@ -321,6 +321,84 @@ export type PayrollLine = {
   warnings: string[];
 };
 
+/* ------------------------------------------------------------------ */
+/* كشفا التحويل البنكي                                                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * الرواتب تنزل بكشفين لا بكشفٍ واحد.
+ *
+ * الأول: الأجر المسجَّل في ملفّ الشركة بوزارة الشؤون — يُرفع كما هو في
+ * الملفّ، لا يزيد ولا ينقص، وإلا ظهر الموظف مأخوذاً من راتبه الرسمي.
+ * والثاني: تكملةُ أجره الفعلي — بدلاته وما بقي له.
+ *
+ * ومن لا أجر مسجَّل له — صاحبُ المكافأة، ومن لم يُسجَّل على الشركة بعد —
+ * فكلُّ ما له في كشف التكملة.
+ *
+ * والخصومات كلُّها من التكملة: غيابٌ أو سدادُ سلفةٍ أو جزاء. فإن زادت
+ * على التكملة لم يبقَ إلا أن يُنقص المسجَّل، وذلك ما يُنبَّه إليه.
+ */
+export type TransferLine = {
+  employeeId: string;
+  employeeName: string;
+  iban: string;
+  /** ما يُحوَّل في كشف الشؤون */
+  registered: number;
+  /** ما يُحوَّل في كشف التكملة */
+  topUp: number;
+  /** الصافي المستحقّ — مجموع الكشفين */
+  net: number;
+  /** الخصم تجاوز التكملة فاضطُرّ إلى المسجَّل */
+  short: boolean;
+};
+
+export type TransferSheets = {
+  lines: TransferLine[];
+  registeredTotal: number;
+  topUpTotal: number;
+  netTotal: number;
+  /** من نقص مسجَّلهم لأن خصمهم تجاوز تكملتهم */
+  shortfalls: TransferLine[];
+};
+
+export function transferSheets(
+  lines: PayrollLine[],
+  employees: Employee[]
+): TransferSheets {
+  const rows: TransferLine[] = [];
+
+  for (const line of lines) {
+    const employee = employees.find((e) => e.id === line.employeeId);
+    const registeredWage = round3(Number(employee?.registeredWage) || 0);
+    const net = round3(line.net);
+
+    /* المسجَّل لا يتجاوز الصافي: لا يُحوَّل ما ليس مستحقاً */
+    const registered = round3(Math.min(registeredWage, Math.max(net, 0)));
+    const topUp = round3(net - registered);
+
+    rows.push({
+      employeeId: line.employeeId,
+      employeeName: line.employeeName,
+      iban: employee?.iban ?? "",
+      registered,
+      topUp,
+      net,
+      short: registeredWage > 0 && registered < registeredWage - 0.0005,
+    });
+  }
+
+  const sum = (pick: (r: TransferLine) => number) =>
+    round3(rows.reduce((total, r) => total + pick(r), 0));
+
+  return {
+    lines: rows,
+    registeredTotal: sum((r) => r.registered),
+    topUpTotal: sum((r) => r.topUp),
+    netTotal: sum((r) => r.net),
+    shortfalls: rows.filter((r) => r.short),
+  };
+}
+
 /**
  * يحسب راتب موظف عن شهر من سجلات حضوره.
  *

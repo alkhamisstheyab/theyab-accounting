@@ -92,6 +92,7 @@ import {
   computePayrollLine,
   dailyWage,
   defaultPayrollSettings,
+  transferSheets,
   defaultWageAccount,
   endOfService,
   hourlyWage,
@@ -19498,6 +19499,9 @@ function PayrollPage({
     );
   }
 
+  /* كشفا التحويل — يُحسبان من الأجر المسجَّل في ملفّ كل موظف */
+  const sheets = transferSheets(lines, employees);
+
   const statusTone =
     existing?.status === "مرحّل"
       ? "bg-green-100 text-green-800"
@@ -19762,6 +19766,81 @@ function PayrollPage({
             </tfoot>
           </table>
         </div>
+
+        {/*
+          كشفا التحويل: الرواتب تنزل بكشفين من البنك — المسجَّل في ملفّ
+          الشؤون، وتكملةُ الأجر الفعلي. وكان يقسمهما صاحب الشركة بيده
+          كل شهر.
+        */}
+        {lines.length > 0 && (
+          <div className="mt-6 rounded-xl border border-slate-200 p-4 no-print">
+            <p className="mb-1 font-bold">كشفا التحويل البنكي</p>
+            <p className="mb-3 text-sm text-slate-600">
+              الأول يُرفع كما هو في ملفّ الشؤون، والثاني تكملةُ الأجر الفعلي.
+              والخصومات كلُّها من التكملة، فلا يُنقَص الراتب المسجَّل.
+            </p>
+
+            <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+              {[
+                ["كشف الشؤون", sheets.registeredTotal, "text-slate-900"],
+                ["كشف التكملة", sheets.topUpTotal, "text-blue-800"],
+                ["مجموعهما", sheets.netTotal, "font-bold"],
+              ].map(([label, value, cls]) => (
+                <div key={String(label)} className="rounded-lg bg-slate-50 p-3">
+                  <p className="text-sm text-slate-500">{label}</p>
+                  <p className={`mt-1 text-xl ${cls}`}>
+                    <Money value={Number(value)} bold /> د.ك
+                  </p>
+                </div>
+              ))}
+            </div>
+
+            {sheets.shortfalls.length > 0 && (
+              <Banner tone="warn">
+                خصمُ {sheets.shortfalls.length} موظفاً تجاوز تكملته، فنقص راتبه
+                المسجَّل:{" "}
+                {sheets.shortfalls.map((r) => r.employeeName).join("، ")} — راجعه
+                قبل الرفع إلى الوزارة.
+              </Banner>
+            )}
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-right text-sm">
+                <thead className="bg-slate-100">
+                  <tr>
+                    <Th>الموظف</Th>
+                    <Th>كشف الشؤون</Th>
+                    <Th>كشف التكملة</Th>
+                    <Th>الصافي</Th>
+                    <Th>الآيبان</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sheets.lines.map((row) => (
+                    <tr key={row.employeeId} className="border-b border-slate-100">
+                      <Td>{row.employeeName}</Td>
+                      <Td>{row.registered > 0 ? <Money value={row.registered} /> : "—"}</Td>
+                      <Td>{row.topUp > 0 ? <Money value={row.topUp} /> : "—"}</Td>
+                      <Td>
+                        <Money value={row.net} bold />
+                      </Td>
+                      <Td className="text-xs text-slate-500">{row.iban || "—"}</Td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot className="bg-slate-50 font-bold">
+                  <tr>
+                    <Td>الإجمالي</Td>
+                    <Td>{fmt(sheets.registeredTotal)}</Td>
+                    <Td>{fmt(sheets.topUpTotal)}</Td>
+                    <Td>{fmt(sheets.netTotal)}</Td>
+                    <Td>{""}</Td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        )}
 
         {existing && (
           <p className="mt-4 text-sm text-slate-500">
