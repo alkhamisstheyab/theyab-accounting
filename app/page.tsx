@@ -218,6 +218,7 @@ import {
   type DueRow,
 } from "@/lib/dues";
 import { spendByQuarter, workSplit } from "@/lib/quarters";
+import { matchPerson } from "@/lib/people-match";
 import { compareStates, type FieldComparison } from "@/lib/changes";
 import { ROW_COLLECTIONS } from "@/lib/collections";
 import { isAdminExpenseToGeneral } from "@/lib/admin-to-general";
@@ -19537,9 +19538,17 @@ function PayrollPage({
   );
 
   /*
-    رصيد سلفة كل موظف كما في الدفاتر: يُبحث بالاسم لأن قيود السلف تحمل
-    اسم الموظف في خانة «الدافع/المستلم» لا معرّفه. فيُعرض ليُخصم منه،
-    ولا يُخصم من تلقائه — القرار لصاحبه.
+    رصيد سلفة كل موظف كما في الدفاتر.
+
+    قيود السلف تحمل اسم صاحبها في خانة «الدافع/المستلم» لا معرّفه،
+    والاسم يُكتب كما يُنادى به — «مصطفى الأنصاري» لمن في ملفّه «مصطفى
+    عبدالماليك محمد الأنصاري». فلا تُطابَق الأسماء حرفاً بحرف، بل
+    بالاسمين الأول والأخير (matchPerson)، ويُجمَع الرصيد على **معرّف**
+    الموظف حتى يستوي في الحساب ما كُتب مختصراً وما كُتب كاملاً.
+
+    ومن لم يُعرف صاحبه — مقاولٌ أو اسمٌ يشتبه بموظفَين — طُرح، فلا يُخصم
+    من أحدٍ ما ليس عليه. ولا يُخصم شيءٌ من تلقائه: التنبيه يُعرض والقرار
+    لصاحبه.
   */
   const advanceBalance = useMemo(() => {
     const balances = new Map<string, number>();
@@ -19547,6 +19556,8 @@ function PayrollPage({
       if (m.approval !== "معتمدة") continue;
       const person = (m.person || "").trim();
       if (!person) continue;
+      const owner = matchPerson(person, employees);
+      if (!owner) continue;
       const sign =
         m.debitCode === EMPLOYEE_ADVANCE_ACCOUNT
           ? 1
@@ -19554,10 +19565,13 @@ function PayrollPage({
             ? -1
             : 0;
       if (sign === 0) continue;
-      balances.set(person, round3((balances.get(person) ?? 0) + sign * m.amount));
+      balances.set(
+        owner.id,
+        round3((balances.get(owner.id) ?? 0) + sign * m.amount)
+      );
     }
     return balances;
-  }, [movements]);
+  }, [movements, employees]);
 
   const existing = runs.find((r) => r.month === month) ?? null;
   const locked = isYearClosed(yearLocks, year);
@@ -19995,16 +20009,16 @@ function PayrollPage({
                           placeholder="0"
                           className="w-24 rounded border border-slate-300 px-2 py-1 no-print"
                         />
-                        {(advanceBalance.get(line.employeeName) ?? 0) > 0 && (
+                        {(advanceBalance.get(line.employeeId) ?? 0) > 0 && (
                           <div className="mt-1 text-xs text-amber-800">
-                            بذمته {fmt(advanceBalance.get(line.employeeName) ?? 0)}
+                            بذمته {fmt(advanceBalance.get(line.employeeId) ?? 0)}
                             <button
                               onClick={() =>
                                 setAdvances((p) => ({
                                   ...p,
                                   [line.employeeId]: String(
                                     Math.min(
-                                      advanceBalance.get(line.employeeName) ?? 0,
+                                      advanceBalance.get(line.employeeId) ?? 0,
                                       line.net
                                     )
                                   ),
