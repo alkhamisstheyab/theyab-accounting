@@ -17640,6 +17640,7 @@ const BLANK_EMPLOYEE = {
   wageAccount: "",
   restDay: "الجمعة",
   passportNumber: "",
+  email: "",
   residencyStart: "",
   residencyExpiry: "",
   workPermitStart: "",
@@ -17717,6 +17718,7 @@ function EmployeesPage({
       wageAccount: e.wageAccount,
       restDay: e.restDay,
       passportNumber: e.passportNumber,
+      email: e.email ?? "",
       insured: e.insured ?? e.isKuwaiti,
       residencyStart: e.residencyStart ?? "",
       workPermitStart: e.workPermitStart ?? "",
@@ -17771,6 +17773,7 @@ function EmployeesPage({
       restDay: form.restDay,
       active: !form.endDate,
       passportNumber: form.passportNumber.trim(),
+      email: form.email.trim() || undefined,
       insured: form.insured,
       residencyStart: form.residencyStart || undefined,
       workPermitStart: form.workPermitStart || undefined,
@@ -17935,6 +17938,19 @@ function EmployeesPage({
                     value={form.passportNumber}
                     onChange={(e) => set("passportNumber", e.target.value)}
                     className={inputClass}
+                  />
+                </Field>
+                <Field
+                  label="البريد الإلكتروني"
+                  hint="يُرجَع إليه عند الحاجة — وليس مطلوباً"
+                >
+                  <input
+                    type="email"
+                    dir="ltr"
+                    value={form.email}
+                    onChange={(e) => set("email", e.target.value)}
+                    className={inputClass}
+                    placeholder="name@example.com"
                   />
                 </Field>
               </div>
