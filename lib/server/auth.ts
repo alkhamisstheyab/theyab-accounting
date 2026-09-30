@@ -235,6 +235,24 @@ export type LoginOutcome =
   | { ok: false; reason: string; lockedUntil?: Date };
 
 /**
+ * تسويةُ اسم المستخدم في قاعدة البيانات.
+ *
+ * الاسم يُكتب الآن بيد صاحبه ولا يُختار من قائمة، والعربية تُكتب الهمزة
+ * فيها وتُترك: «نوح احمد ابراهيم» و«نوح أحمد إبراهيم» رجلٌ واحد، ومن
+ * سُجّل بأحدهما وكتب الآخر مُنع — ثم مُنع خمساً فأُوقف حسابه ربع ساعة،
+ * وهو لم يُخطئ في شيء.
+ *
+ * فتُسوّى قبل المقارنة: الألف بأشكالها، والياء المقصورة، والتاء
+ * المربوطة، والتطويل، والتشكيل، والمسافات الزائدة.
+ *
+ * وكلمةُ المرور لا تُسوّى ولا حرفاً — تُقارَن كما كُتبت.
+ */
+const normalizedName = (expr: string): string =>
+  `regexp_replace(
+     translate(btrim(${expr}), 'أإآٱىةـًٌٍَُِّْ', 'اااايه'),
+     '[[:space:]]+', ' ', 'g')`;
+
+/**
  * يسجّل الدخول باسم المستخدم وكلمة المرور.
  *
  * رسالة الفشل واحدة سواء كان الاسم خاطئاً أو الكلمة — فلا يُعرف من
@@ -245,7 +263,7 @@ export async function login(
   password: string,
   userAgent: string
 ): Promise<LoginOutcome> {
-  const row = await queryOne<{
+  const matches = await query<{
     id: string;
     name: string;
     job_title: string;
@@ -259,16 +277,29 @@ export async function login(
     `SELECT id, name, job_title, role, permissions, password_hash,
             must_change_pin, failed_attempts, locked_until
      FROM users
-     /*
-       الاسم يُكتب الآن ولا يُختار من قائمة، فالمسافة الزائدة بين
-       كلمتيه خطأٌ مطبعيٌّ لا حسابٌ آخر. وكلمة المرور تبقى كما هي
-       تُقارَن حرفاً حرفاً.
-     */
-     WHERE regexp_replace(btrim(name), '[[:space:]]+', ' ', 'g')
-         = regexp_replace(btrim($1), '[[:space:]]+', ' ', 'g')
+     WHERE ${normalizedName("name")} = ${normalizedName("$1")}
        AND active`,
     [name.trim()]
   );
+
+  /*
+    وحيث أشكل لم يُخمَّن: اسمان يستويان بعد التسوية حسابان لا حساب،
+    و`queryOne` كان يأخذ أوّلهما فيُدخل رجلاً على حساب غيره لو وافقت
+    كلمته. فيُقدَّم التطابق التامّ، فإن لم يكن فلا دخول — وهذا خللٌ في
+    تسمية الحسابات يُراجع فيه المدير، لا خطأٌ من صاحبه.
+  */
+  let row = matches.length === 1 ? matches[0] : null;
+  if (matches.length > 1) {
+    const typed = name.trim();
+    const exact = matches.filter((u) => u.name.trim() === typed);
+    if (exact.length === 1) row = exact[0];
+    else {
+      return {
+        ok: false,
+        reason: "تعذّر تمييز الحساب — اسمان متشابهان. راجع المدير.",
+      };
+    }
+  }
 
   if (row?.locked_until && row.locked_until > new Date()) {
     return {

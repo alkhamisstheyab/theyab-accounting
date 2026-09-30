@@ -46,6 +46,7 @@
     "check:quarterly": "node db/check-quarterly.mjs",
     "check:people-match": "node db/check-people-match.mjs",
     "check:payroll-buckets": "node db/check-payroll-buckets.mjs",
+    "check:login-name": "node db/check-login-name.mjs",
     "check:merge-audit": "node db/check-merge-audit.mjs",
     "check:closed": "node db/check-closed-payments.mjs",
     "check:frozen": "node db/check-frozen-address.mjs",
