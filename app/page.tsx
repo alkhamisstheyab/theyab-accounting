@@ -219,6 +219,11 @@ import {
 } from "@/lib/dues";
 import { spendByQuarter, workSplit } from "@/lib/quarters";
 import { matchPerson } from "@/lib/people-match";
+import {
+  isPayrollAdminWithoutBucket,
+  isPayrollSiteWithoutBucket,
+  wageBucket,
+} from "@/lib/payroll-buckets";
 import { compareStates, type FieldComparison } from "@/lib/changes";
 import { ROW_COLLECTIONS } from "@/lib/collections";
 import { isAdminExpenseToGeneral } from "@/lib/admin-to-general";
@@ -10231,6 +10236,33 @@ const BULK_FIXES: BulkFix[] = [
     match: (m) => m.person === "م.نوح",
   },
   {
+    id: "payroll-admin-bucket",
+    title: "رواتب المسيّر الإدارية ← «عام»",
+    reason:
+      "قيود مسيّر الرواتب تأخذ المشروع من ملفّ الموظف، وملفّات الأحد عشر كلُّها بلا مشروع — فخرجت قيود مسيّر سبتمبر ٢٠٢٦ بخانةٍ فارغة، وهي الوحيدة في الدفاتر كلّها. والفراغ ليس وعاءً ثالثاً: تقرير ربحية المشاريع يُسقطه إسقاطاً صامتاً، فلا تُرى هذه الأجور في قسيمةٍ ولا في وعاء. وهذه على حسابٍ إداريّ فوعاؤها «عام» بقاعدة صاحب الشركة. ولا يتغيّر حسابٌ ولا مبلغٌ ولا اعتماد — ولا الميزان ولا صافي الربح.",
+    toProject: "عام",
+    match: isPayrollAdminWithoutBucket,
+  },
+  {
+    id: "payroll-site-bucket",
+    title: "أجور المسيّر التنفيذية ← «مصروفات مشتركة»",
+    reason:
+      "أجورُ العمالة المباشرة في مسيّر الرواتب خرجت بخانة مشروعٍ فارغة كأخواتها الإدارية. ووعاؤها «مصروفات مشتركة» لا قسيمةٌ بعينها: العامل يعمل في القسائم كلّها في الشهر الواحد، فلا يُحمَّل أجرُه على واحدةٍ منها. ومن تفرّغ لقسيمةٍ يُعيَّن مشروعُه في ملفّه فيُحمَّل عليها من تلقائه. ولا يتغيّر حسابٌ ولا مبلغٌ ولا اعتماد.",
+    toProject: "مصروفات مشتركة",
+    match: isPayrollSiteWithoutBucket,
+  },
+  {
+    id: "office-internet-6230",
+    title: "فاتورة الإنترنت ← «إتصالات وإنترنت» (6230)",
+    reason:
+      "فاتورة إنترنت المكتب قُيّدت على «مصروفات إدارية أخرى» (6290) ببند «مصروف إداري»، وفاتورة الشهر الذي قبله على 6230 ببند «هاتف» — وهو البابُ الذي اعتمده صاحب الشركة للهاتف والإنترنت. وحسابٌ يجمع الاتصالات مع كل مصروفٍ إداريٍّ آخر لا يُعرف منه ما يُنفق على الاتصال. والتصحيح يقع على قيود سبتمبر ٢٠٢٦ وما بعده وحدها: القيود التي سبقت القاعدة تبقى على 6290، فالقاعدة للمستقبل لا للماضي. وصافي الربح لا يتغيّر — الحسابان كلاهما في قائمة الدخل.",
+    toAccount: "6230",
+    match: (m) =>
+      m.debitCode === "6290" &&
+      m.date >= "2026-09-01" &&
+      /انترنت|إنترنت|هاتف|تلفون/.test(m.description),
+  },
+  {
     id: "car-paint-to-maintenance",
     title: "صبغ السيارة ← «صيانة وإصلاحات» (6250)",
     reason:
@@ -19684,6 +19716,14 @@ function PayrollPage({
       const employee = employees.find((e) => e.id === line.employeeId);
       if (!employee) continue;
 
+      /*
+        وعاءُ الأجر: مشروعُ الموظف إن تفرّغ لقسيمة، وإلّا فبحسب باب
+        الصرف — الإداريُّ على «عام» والتنفيذيُّ على «مصروفات مشتركة».
+        وكان يُكتب مشروعُ الموظف وحده، وملفّاتهم بلا مشاريع، فخرجت قيود
+        سبتمبر ٢٠٢٦ بخانةٍ فارغة يُسقطها تقرير الربحية صامتاً.
+      */
+      const bucket = wageBucket(employee.project, wageAccountOf(employee));
+
       if (line.net > 0)
       movements.push({
         id: newId(),
@@ -19697,7 +19737,7 @@ function PayrollPage({
         debitCode: wageAccountOf(employee),
         creditCode: "1112",
         amount: line.net,
-        project: employee.project,
+        project: bucket,
         person: line.employeeName,
         paymentMethod: "تحويل بنكي",
         party: line.employeeName,
@@ -19731,7 +19771,7 @@ function PayrollPage({
           debitCode: wageAccountOf(employee),
           creditCode: EMPLOYEE_ADVANCE_ACCOUNT,
           amount: advance,
-          project: employee.project,
+          project: bucket,
           person: line.employeeName,
           paymentMethod: "",
           party: line.employeeName,
