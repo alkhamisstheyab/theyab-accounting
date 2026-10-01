@@ -15088,6 +15088,60 @@ function UsersPage({
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [showForm, setShowForm] = useState(false);
+  /*
+    الكلمة المؤقّتة تُعرض مرّةً ثم تزول من الذاكرة.
+
+    ولا تُحفظ في الجهاز ولا في الحالة الدائمة: المحفوظ عند الخادم
+    تجزئتُها لا هي، فمن أغلق الشاشة قبل أن ينسخها أعاد التعيين.
+  */
+  const [issued, setIssued] = useState<{ name: string; password: string } | null>(
+    null
+  );
+  const [resetting, setResetting] = useState(false);
+
+  /**
+   * يطلب من الخادم كلمةً مؤقّتة لمن يُعدَّل ملفّه.
+   *
+   * ولا تُكتب من المتصفّح: عمود كلمة المرور محروسٌ عند الخادم، فما
+   * يرسله الجهاز يُرفض صامتاً. فالطلبُ يمضي إلى طريقٍ يفحص الصلاحية
+   * ويولّد ويُعيد.
+   */
+  const resetPassword = async () => {
+    const user = users.find((u) => u.id === editingId);
+    if (!user) return;
+    if (
+      !window.confirm(
+        `إعادة تعيين كلمة مرور «${user.name}»؟\n\nكلمتُه الحالية تبطل في الحال، وتُعرض لك كلمةٌ مؤقّتة مرّةً واحدة.`
+      )
+    ) {
+      return;
+    }
+    setResetting(true);
+    setError("");
+    try {
+      const response = await fetch("/api/users/reset-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: user.id }),
+      });
+      const body = (await response.json()) as {
+        ok?: boolean;
+        name?: string;
+        password?: string;
+        error?: string;
+      };
+      if (!response.ok || !body.ok) {
+        setError(body.error ?? "تعذّرت إعادة التعيين");
+        return;
+      }
+      setIssued({ name: body.name ?? user.name, password: body.password ?? "" });
+      setMessage("");
+    } catch {
+      setError("تعذّر الوصول إلى الخادم — راجع الاتصال");
+    } finally {
+      setResetting(false);
+    }
+  };
 
   const set = (key: keyof typeof BLANK_USER, value: string) =>
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -15116,7 +15170,9 @@ function UsersPage({
     setShowForm(true);
   };
 
+  /* الكلمة المعروضة تخصّ من فُتح ملفّه، فلا تبقى معلّقةً على غيره */
   const openEdit = (user: User) => {
+    setIssued(null);
     setEditingId(user.id);
     setForm({
       name: user.name,
@@ -15169,8 +15225,11 @@ function UsersPage({
       }
     }
 
-    // الرقم مطلوب للجديد، واختياري عند التعديل
-    if (!editingId || form.pin) {
+    /*
+      الرقم للجديد وحده: صفُّه يُنشأ فتُكتب تجزئته معه، وعند التعديل
+      يحرسها الخادم فلا تُكتب. وإعادة التعيين لها زرُّها.
+    */
+    if (!editingId) {
       if (form.pin.length < 4) return setError("رقم الدخول أربعة أرقام فأكثر");
       if (form.pin !== form.pin2) return setError("الرقمان غير متطابقين");
     }
@@ -15282,29 +15341,94 @@ function UsersPage({
                 />
               </Field>
 
-              <Field
-                label="رقم الدخول"
-                hint={editingId ? "اتركه فارغاً للإبقاء على الرقم الحالي" : "أربعة أرقام فأكثر"}
-              >
-                <input
-                  type="password"
-                  inputMode="numeric"
-                  value={form.pin}
-                  onChange={(e) => set("pin", e.target.value)}
-                  className={inputClass}
-                />
-              </Field>
+              {/*
+                الرقم يُكتب عند الإنشاء وحده.
 
-              <Field label="تأكيد رقم الدخول">
-                <input
-                  type="password"
-                  inputMode="numeric"
-                  value={form.pin2}
-                  onChange={(e) => set("pin2", e.target.value)}
-                  className={inputClass}
-                />
-              </Field>
+                وكان يظهر عند التعديل أيضاً، وهو لا يعمل: عمود كلمة
+                المرور محروسٌ عند الخادم فلا يقبل ما يكتبه المتصفّح —
+                يرفضه صامتاً. فكان المدير يضع رقماً ويظنّه عمل، ويُعطيه
+                صاحبَه، فيُحاول خمساً فيُوقَف حسابه. فصار موضعه زرّاً
+                يطلب من الخادم كلمةً مؤقّتة.
+              */}
+              {!editingId && (
+                <>
+                  <Field label="رقم الدخول" hint="أربعة أرقام فأكثر">
+                    <input
+                      type="password"
+                      inputMode="numeric"
+                      value={form.pin}
+                      onChange={(e) => set("pin", e.target.value)}
+                      className={inputClass}
+                    />
+                  </Field>
+
+                  <Field label="تأكيد رقم الدخول">
+                    <input
+                      type="password"
+                      inputMode="numeric"
+                      value={form.pin2}
+                      onChange={(e) => set("pin2", e.target.value)}
+                      className={inputClass}
+                    />
+                  </Field>
+                </>
+              )}
             </div>
+
+            {editingId && (
+              <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <p className="mb-1 font-bold">كلمة المرور</p>
+                <p className="mb-3 text-sm text-slate-600">
+                  يضعها صاحبها بنفسه ولا تُقرأ من هنا — المحفوظ تجزئتُها لا
+                  هي. ولمن نسيها أو أُوقف حسابه بعد محاولاتٍ خاطئة:
+                </p>
+                <button
+                  onClick={resetPassword}
+                  disabled={resetting}
+                  className="rounded-lg bg-amber-600 px-5 py-2 font-bold text-white disabled:bg-slate-300"
+                >
+                  {resetting ? "يُعيد التعيين…" : "أعد تعيين كلمة المرور"}
+                </button>
+              </div>
+            )}
+
+            {issued && (
+              <div className="mt-4 rounded-xl border-2 border-amber-500 bg-amber-50 p-4">
+                <p className="mb-1 font-bold text-amber-900">
+                  كلمةٌ مؤقّتة لـ {issued.name}
+                </p>
+                <p className="mb-3 text-sm text-amber-900">
+                  انسخها الآن — <b>لا تُعرض مرّةً أخرى</b>. وسيُلزمه النظام
+                  بوضع كلمةٍ يعرفها وحده عند أول دخول، فلا تبقى كلمةٌ يعرفها
+                  اثنان.
+                </p>
+                <div className="flex flex-wrap items-center gap-3">
+                  <code
+                    dir="ltr"
+                    className="rounded-lg border border-amber-300 bg-white px-4 py-2 text-lg font-bold tracking-wider"
+                  >
+                    {issued.password}
+                  </code>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard
+                        ?.writeText(issued.password)
+                        .then(() => setMessage("نُسخت الكلمة المؤقّتة"))
+                        .catch(() => setMessage("انسخها بيدك — المتصفّح منع النسخ"));
+                    }}
+                    className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-bold text-white"
+                  >
+                    انسخ
+                  </button>
+                  <button
+                    onClick={() => setIssued(null)}
+                    className="rounded-lg bg-slate-200 px-4 py-2 text-sm font-bold"
+                  >
+                    أخفِها
+                  </button>
+                </div>
+              </div>
+            )}
 
             <div className="mt-5">
               <p className="mb-2 text-sm font-medium">الدور</p>

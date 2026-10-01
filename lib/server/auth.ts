@@ -387,6 +387,75 @@ export async function changeOwnPassword(
   return { ok: true };
 }
 
+/**
+ * محارف الكلمة المؤقّتة.
+ *
+ * تُقرأ من شاشةٍ وتُنقل في رسالة، فحُذف منها ما يلتبس: الصفر والحرف O،
+ * والواحد مع l و I. ومن أملى كلمةً فيها حرفٌ ملتبس عاد صاحبها يسأل،
+ * فيضيع من الوقت أكثر مما وُفِّر من طولها.
+ */
+const TEMP_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+
+/**
+ * يولّد كلمةً مؤقّتة.
+ *
+ * من مصدر عشوائيٍّ معمّى لا من `Math.random` — فهي كلمة مرورٍ وإن قصر
+ * عمرها، وبين توليدها واستعمالها ساعاتٌ يُرسل فيها الاسم في رسالة.
+ *
+ * واثنا عشر محرفاً: أطول من الحدّ الأدنى بكثير، لأنها تُقرأ ولا تُحفظ.
+ */
+function temporaryPassword(length = 12): string {
+  const bytes = randomBytes(length);
+  let out = "";
+  for (let i = 0; i < length; i++) {
+    out += TEMP_ALPHABET[bytes[i] % TEMP_ALPHABET.length];
+  }
+  /* فيها حروفٌ قطعاً، فلا تُردّ بقاعدة «ليست أرقاماً فقط» */
+  return out;
+}
+
+export type ResetOutcome =
+  | { ok: true; name: string; password: string }
+  | { ok: false; reason: string };
+
+/**
+ * يُعيد صاحبُ الصلاحية تعيين كلمة مرور مستخدمٍ آخر.
+ *
+ * كان هذا لا يُفعل إلا من سطر الأوامر على جهاز صاحب الشركة
+ * (`db/reset-password.mjs`)، وهو لا يحمل حاسوبه معه. وفي شاشة
+ * المستخدمين خانةُ «رقم الدخول» تُغري من يراها، والخادم يرفض ما تكتبه
+ * **صامتاً** لأن عمود كلمة المرور محروس — فيظنّ المدير أنه أعاد التعيين،
+ * ويُعطي الرجلَ رقماً لا يفتح، فيُحاول خمساً فيُوقَف حسابه.
+ *
+ * فصار من الشاشة: يولّد الخادم كلمةً مؤقّتة ويعرضها **مرّةً واحدة** على
+ * من طلبها، ثم لا سبيل إلى قراءتها — المحفوظ تجزئتُها لا هي. ويُعلَّم
+ * الحساب بأن يُلزَم صاحبه بكلمةٍ يعرفها وحده عند أول دخول، فلا تبقى
+ * كلمةٌ يعرفها اثنان.
+ *
+ * ويُرفع معها كلُّ إيقافٍ وتُصفَّر المحاولات — فمن نسي كلمته أكثرَ ما
+ * يكون قد حاول حتى أُوقف.
+ */
+export async function resetUserPassword(userId: string): Promise<ResetOutcome> {
+  const row = await queryOne<{ id: string; name: string }>(
+    `SELECT id, name FROM users WHERE id = $1`,
+    [userId]
+  );
+  if (!row) return { ok: false, reason: "الحساب غير موجود" };
+
+  const password = temporaryPassword();
+  await query(
+    `UPDATE users
+        SET password_hash = $2,
+            must_change_pin = true,
+            failed_attempts = 0,
+            locked_until = NULL
+      WHERE id = $1`,
+    [row.id, await hashPassword(password)]
+  );
+
+  return { ok: true, name: row.name, password };
+}
+
 /** مقارنة ثابتة الزمن — للأسرار خارج bcrypt */
 export function safeEqual(a: string, b: string): boolean {
   const left = Buffer.from(a);

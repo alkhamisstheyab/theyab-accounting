@@ -47,34 +47,48 @@ if (!url) {
   process.exit(1);
 }
 
-const { neon } = await import("@neondatabase/serverless");
-const sql = neon(url);
+/*
+  السائق هو `pg` — وهو المثبّت في المشروع. وكان هنا
+  `@neondatabase/serverless` وليست في الاعتماديات، فكان السكربت يتعطّل
+  قبل أن يصل إلى القاعدة: يُظهر خطأً أحمر يظنّه قارئُه عطلاً في الشبكة.
+*/
+const pg = (await import("pg")).default;
+const client = new pg.Client({
+  connectionString: url,
+  ssl: { rejectUnauthorized: false },
+});
+await client.connect();
+const sql = (text, params = []) => client.query(text, params).then((r) => r.rows);
 
-const found = await sql`
-  SELECT id, name, active
-  FROM users
-  WHERE regexp_replace(btrim(name), '[[:space:]]+', ' ', 'g')
-      = regexp_replace(btrim(${name}), '[[:space:]]+', ' ', 'g')
-`;
+const found = await sql(
+  `SELECT id, name, active
+     FROM users
+    WHERE regexp_replace(btrim(name), '[[:space:]]+', ' ', 'g')
+        = regexp_replace(btrim($1), '[[:space:]]+', ' ', 'g')`,
+  [name]
+);
 
 if (found.length === 0) {
   console.error(`لا مستخدم بهذا الاسم: ${name}`);
-  const all = await sql`SELECT name, active FROM users ORDER BY name`;
+  const all = await sql(`SELECT name, active FROM users ORDER BY name`);
   console.error("الموجودون: " + all.map((u) => u.name).join("، "));
+  await client.end();
   process.exit(1);
 }
 
 const user = found[0];
 const hash = await bcrypt.hash(password, 12);
 
-await sql`
-  UPDATE users
-  SET password_hash = ${hash},
-      must_change_pin = true,
-      failed_attempts = 0,
-      locked_until = NULL,
-      active = true
-  WHERE id = ${user.id}
-`;
+await sql(
+  `UPDATE users
+      SET password_hash = $1,
+          must_change_pin = true,
+          failed_attempts = 0,
+          locked_until = NULL,
+          active = true
+    WHERE id = $2`,
+  [hash, user.id]
+);
 
 console.log(`✓ ${user.name}: كلمةٌ مؤقتة، ويُلزَم بتغييرها عند أول دخول`);
+await client.end();
