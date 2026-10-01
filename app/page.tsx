@@ -100,6 +100,7 @@ import {
   hourlyWage,
   monthLabel,
   EMPLOYEE_ADVANCE_ACCOUNT,
+  PENALTY_MAX_DAYS,
   payrollTotals,
   totalAllowances,
 } from "@/lib/payroll";
@@ -2458,6 +2459,8 @@ export default function HomeV2() {
               year={year}
               setAttendance={setAttendance}
               onLog={log}
+              currentUserName={currentUser.name}
+              canApprovePenalty={allow("payroll.run")}
             />
           )}
 
@@ -18732,11 +18735,22 @@ function AttendancePage({
   year,
   setAttendance,
   onLog,
+  currentUserName,
+  canApprovePenalty,
 }: {
   employees: Employee[];
   attendance: AttendanceDay[];
   settings: PayrollSettings;
   year: number;
+  /** اسم من يُثبت الجزاء ومن يُقرّه — يُكتب في الصفّ وفي سجلّ التدقيق */
+  currentUserName: string;
+  /**
+   * أيملك إقرار الجزاء؟
+   *
+   * المهندس يرى التقصير ولا يملك المال، والإدارة تملكه ولا ترى الموقع.
+   * فمن يُدير المسيّر يُقرّ، وغيره يُثبت ويَنتظر.
+   */
+  canApprovePenalty: boolean;
   setAttendance: Dispatch<SetStateAction<AttendanceDay[]>>;
   onLog: (
     action: AuditAction,
@@ -19057,6 +19071,146 @@ function AttendancePage({
       }
     );
     setMessage(`أُضيف ${additions.length} يوماً لـ ${chosen.length} موظفاً`);
+  };
+
+  /*
+    الجزاء: مبلغٌ على يومٍ بعينه وسببٌ مكتوب.
+
+    ويُثبت في يومه لا في آخر الشهر — من أُثبت عليه بعد ثلاثين يوماً نسي
+    الواقعة وجادل فيها، ومن أُثبت عليه في حينه عَلِم.
+  */
+  const [penalty, setPenalty] = useState({
+    employeeId: "",
+    date: today,
+    amount: "",
+    reason: "",
+  });
+
+  /** جزاءات هذا الشهر، أحدثُها أولاً — المعلّق منها والمُقرّ */
+  const monthPenalties = attendance
+    .filter((a) => (a.penalty ?? 0) > 0 && a.date.startsWith(month))
+    .sort((x, y) => y.date.localeCompare(x.date));
+
+  const addPenalty = () => {
+    const employee = active.find((e) => e.id === penalty.employeeId);
+    if (!employee) return setMessage("اختر الموظف");
+    const amount = round3(Number(penalty.amount) || 0);
+    if (amount <= 0) return setMessage("مبلغ الجزاء أكبر من صفر");
+    /* لا جزاء بلا سببٍ مكتوب — الرقم وحده لا يُدافَع عنه بعد شهور */
+    const reason = penalty.reason.trim();
+    if (reason.length < 4) return setMessage("اكتب سبب الجزاء");
+    if (!penalty.date) return setMessage("حدّد يوم المخالفة");
+
+    /*
+      حدُّ القانون على المخالفة الواحدة: أجرُ خمسة أيام. ويُنبَّه ولا
+      يُمنع — فقد تكون الواقعة مما يُوجب أكثر فيُسوّى بغير الخصم،
+      والقرار لصاحبه، لكن ألّا يقع عن غير علم.
+    */
+    const cap = round3(dailyWage(employee, settings) * PENALTY_MAX_DAYS);
+    if (amount > cap) {
+      if (
+        !window.confirm(
+          `الجزاء ${fmt(amount)} د.ك يتجاوز حدّ القانون للمخالفة الواحدة — أجر ${PENALTY_MAX_DAYS} أيام (${fmt(
+            cap
+          )} د.ك).\n\nأتُثبته على أي حال؟`
+        )
+      ) {
+        return;
+      }
+    }
+
+    /*
+      من يملك الإقرار يُقرّه في حينه، ومن لا يملكه يُثبته معلّقاً.
+      فالمهندس يرى التقصير ولا يملك المال، والإدارة تملكه ولا ترى الموقع.
+    */
+    const settled = canApprovePenalty;
+    const existing = attendance.find(
+      (a) => a.employeeId === employee.id && a.date === penalty.date
+    );
+
+    const stamp = {
+      penalty: amount,
+      penaltyReason: reason,
+      penaltyBy: currentUserName,
+      penaltyApproved: settled ? true : undefined,
+      penaltyApprovedBy: settled ? currentUserName : undefined,
+      penaltyApprovedAt: settled ? new Date().toISOString() : undefined,
+    };
+
+    if (existing) {
+      setAttendance((prev) =>
+        prev.map((a) => (a.id === existing.id ? { ...a, ...stamp } : a))
+      );
+    } else {
+      /* يومٌ لم يُسجَّل حضورُه بعد: يُفتح له صفٌّ حاضراً ثم يُوضع عليه الجزاء */
+      const rest = dayName(penalty.date) === employee.restDay;
+      setAttendance((prev) => [
+        ...prev,
+        {
+          id: newId(),
+          employeeId: employee.id,
+          date: penalty.date,
+          status: rest ? "راحة أسبوعية" : "حاضر",
+          hours: rest ? 0 : settings.dailyHours,
+          overtimeHours: 0,
+          restDayHours: 0,
+          holidayHours: 0,
+          note: "",
+          ...stamp,
+        },
+      ]);
+    }
+
+    onLog(
+      "تعديل",
+      "بيانات النظام",
+      `جزاء ${fmt(amount)} د.ك — ${employee.name} — ${penalty.date}`,
+      { after: reason }
+    );
+    setPenalty({ employeeId: "", date: today, amount: "", reason: "" });
+    setMessage(
+      settled
+        ? `أُثبت الجزاء وأُقرّ — ${employee.name}`
+        : `أُثبت الجزاء — ينتظر إقرار الإدارة`
+    );
+  };
+
+  /** الإدارة تُقرّ المثبَت، فيدخل المسيّر */
+  const approvePenalty = (row: AttendanceDay) => {
+    setAttendance((prev) =>
+      prev.map((a) =>
+        a.id === row.id
+          ? {
+              ...a,
+              penaltyApproved: true,
+              penaltyApprovedBy: currentUserName,
+              penaltyApprovedAt: new Date().toISOString(),
+            }
+          : a
+      )
+    );
+    onLog("اعتماد", "بيانات النظام", `جزاء ${fmt(row.penalty ?? 0)} د.ك — ${row.date}`);
+  };
+
+  /** يُرفع الجزاء كلُّه — المُقرُّ وغيرُه، فيزول أثره من الأجر */
+  const dropPenalty = (row: AttendanceDay) => {
+    if (!window.confirm(`رفع الجزاء عن يوم ${row.date}؟`)) return;
+    setAttendance((prev) =>
+      prev.map((a) =>
+        a.id === row.id
+          ? {
+              ...a,
+              penalty: undefined,
+              penaltyReason: undefined,
+              penaltyBy: undefined,
+              penaltyApproved: undefined,
+              penaltyApprovedBy: undefined,
+              penaltyApprovedAt: undefined,
+            }
+          : a
+      )
+    );
+    onLog("حذف", "بيانات النظام", `رفع جزاء يوم ${row.date}`);
   };
 
   const applyBulk = () => {
@@ -19476,6 +19630,157 @@ function AttendancePage({
               />
             </Field>
           </div>
+        </div>
+
+        {/* ---------------- الجزاءات ---------------- */}
+        <div className="mb-5 rounded-xl border border-rose-200 bg-rose-50 p-4">
+          <p className="mb-1 font-bold">جزاء على مخالفة</p>
+          <p className="mb-3 text-sm text-slate-600">
+            خصمٌ على تقصيرٍ أو إهمالٍ في يومٍ عُمل — وهو غير خصم الغياب،
+            فذاك أجرُ يومٍ لم يُعمل. يُثبت <b>في يوم المخالفة</b>، ولا يدخل
+            المسيّر حتى تُقرّه الإدارة.
+          </p>
+
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+            <Field label="الموظف">
+              <select
+                value={penalty.employeeId}
+                onChange={(e) =>
+                  setPenalty({ ...penalty, employeeId: e.target.value })
+                }
+                className={inputClass}
+              >
+                <option value="">اختر الموظف</option>
+                {active.map((e) => (
+                  <option key={e.id} value={e.id}>
+                    {e.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+
+            <Field label="يوم المخالفة">
+              <input
+                type="date"
+                value={penalty.date}
+                onChange={(e) => setPenalty({ ...penalty, date: e.target.value })}
+                className={inputClass}
+              />
+            </Field>
+
+            <Field
+              label="المبلغ (د.ك)"
+              hint={
+                penalty.employeeId
+                  ? `حدّ القانون للمخالفة: ${fmt(
+                      round3(
+                        dailyWage(
+                          active.find((e) => e.id === penalty.employeeId)!,
+                          settings
+                        ) * PENALTY_MAX_DAYS
+                      )
+                    )}`
+                  : `أجر ${PENALTY_MAX_DAYS} أيام حدّاً`
+              }
+            >
+              <input
+                type="number"
+                step="0.001"
+                value={penalty.amount}
+                onChange={(e) =>
+                  setPenalty({ ...penalty, amount: e.target.value })
+                }
+                className={inputClass}
+              />
+            </Field>
+
+            <div className="flex items-end pb-3">
+              <button
+                onClick={addPenalty}
+                className="w-full rounded-lg bg-rose-700 px-5 py-3 font-bold text-white"
+              >
+                أثبت الجزاء
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-3">
+            <Field label="السبب" hint="مطلوب — ولا يُحفظ جزاءٌ بغيره">
+              <input
+                type="text"
+                value={penalty.reason}
+                onChange={(e) =>
+                  setPenalty({ ...penalty, reason: e.target.value })
+                }
+                placeholder="تركَ الموقع قبل الوقت دون إذن · أتلفَ عدّة بإهمال"
+                className={inputClass}
+              />
+            </Field>
+          </div>
+
+          {monthPenalties.length > 0 && (
+            <div className="mt-4 overflow-x-auto">
+              <p className="mb-2 text-sm font-bold">
+                جزاءات {monthLabel(month)} — {monthPenalties.length}
+              </p>
+              <table className="w-full text-right text-sm">
+                <thead>
+                  <tr className="border-b border-rose-200 text-slate-600">
+                    <th className="py-1 text-right">اليوم</th>
+                    <th className="py-1 text-right">الموظف</th>
+                    <th className="py-1 text-right">المبلغ</th>
+                    <th className="py-1 text-right">السبب</th>
+                    <th className="py-1 text-right">الحال</th>
+                    <th className="py-1 text-right"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {monthPenalties.map((row) => {
+                    const who = employees.find((e) => e.id === row.employeeId);
+                    return (
+                      <tr key={row.id} className="border-b border-rose-100">
+                        <td className="py-2 tabular-nums">{row.date}</td>
+                        <td className="py-2">{who?.name ?? "—"}</td>
+                        <td className="py-2 tabular-nums font-bold">
+                          {fmt(row.penalty ?? 0)}
+                        </td>
+                        <td className="py-2">{row.penaltyReason}</td>
+                        <td className="py-2">
+                          {row.penaltyApproved ? (
+                            <span className="text-green-700">
+                              مُقرّ — {row.penaltyApprovedBy}
+                            </span>
+                          ) : (
+                            <span className="text-amber-800">
+                              ينتظر الإقرار · أثبته {row.penaltyBy}
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-2">
+                          <div className="flex gap-2">
+                            {!row.penaltyApproved && canApprovePenalty && (
+                              <button
+                                onClick={() => approvePenalty(row)}
+                                className="rounded bg-green-600 px-3 py-1 text-xs font-bold text-white"
+                              >
+                                أقرّه
+                              </button>
+                            )}
+                            <button
+                              onClick={() => dropPenalty(row)}
+                              className="rounded bg-slate-200 px-3 py-1 text-xs font-bold"
+                            >
+                              ارفعه
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
         {/* ملخص الشهر */}
@@ -20104,6 +20409,7 @@ function PayrollPage({
                 <Th>خصم غياب</Th>
                 <Th>خصم مرضي</Th>
                 <Th>تأمينات</Th>
+                <Th>جزاءات</Th>
                 <Th>خصم آخر</Th>
                 <Th>سداد سلفة</Th>
                 <Th>الصافي</Th>
@@ -20144,6 +20450,25 @@ function PayrollPage({
                   <Td>{line.absenceDeduction ? fmt(line.absenceDeduction) : "—"}</Td>
                   <Td>{line.sickDeduction ? fmt(line.sickDeduction) : "—"}</Td>
                   <Td>{line.socialInsurance ? fmt(line.socialInsurance) : "—"}</Td>
+                  {/*
+                    الجزاء عمودٌ مستقلّ لا يُدسّ في «خصم آخر»: الموظف
+                    يرى في كشفه لماذا نقص أجره، والمدسوس في بندٍ عامّ
+                    يُورث خصومةً لا تنتهي.
+                  */}
+                  <Td>
+                    {line.penalties ? (
+                      <span
+                        className="font-bold text-rose-700"
+                        title={line.penaltyLines
+                          .map((x) => `${x.date}: ${fmt(x.amount)} — ${x.reason}`)
+                          .join("\n")}
+                      >
+                        {fmt(line.penalties)}
+                      </span>
+                    ) : (
+                      "—"
+                    )}
+                  </Td>
                   <Td>
                     {existing ? (
                       line.otherDeductions ? (
@@ -20558,10 +20883,21 @@ function PayslipSheet({
     ["العمل في العطلة الرسمية", line.holidayPay],
   ].filter(([, v]) => v !== 0) as [string, number][];
 
+  /*
+    الجزاءات تُفصَّل في الكشف: يومُها وسببُها لا مبلغُها وحده. فالموظف
+    يقرأ لماذا نقص أجره، ولا يُسأل عنه أحدٌ بعد شهر فلا يُعرف الجواب.
+  */
   const deductions: [string, number][] = [
     ["خصم الغياب", line.absenceDeduction],
     ["خصم الإجازة المرضية", line.sickDeduction],
     ["التأمينات الاجتماعية", line.socialInsurance],
+    ...line.penaltyLines.map(
+      (x) =>
+        [`جزاء ${x.date}${x.reason ? " — " + x.reason : ""}`, x.amount] as [
+          string,
+          number,
+        ]
+    ),
     ["خصومات أخرى", line.otherDeductions],
   ].filter(([, v]) => v !== 0) as [string, number][];
 

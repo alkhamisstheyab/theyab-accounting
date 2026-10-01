@@ -94,6 +94,17 @@ export type Employee = {
   notes: string;
 };
 
+/**
+ * حدُّ الجزاء في قانون العمل الكويتي (٦/٢٠١٠، المادة ٤٣).
+ *
+ * لا يُجاوز الجزاءُ عن المخالفة الواحدة أجرَ **خمسة أيام**، ولا يُجاوز
+ * مجموعُ ما يُخصم في الشهر أجرَ **خمسة أيام**.
+ *
+ * ويُنبَّه إليه ولا يُمنع: قد يكون في الواقعة ما يُوجب أكثر فيُفصل أو
+ * يُسوّى بغير الخصم، والقرار لصاحبه — لكن ألّا يقع عن غير علم.
+ */
+export const PENALTY_MAX_DAYS = 5;
+
 /** سلف الموظفين — يُقفَل بخصم السداد من الراتب */
 export const EMPLOYEE_ADVANCE_ACCOUNT = "1240";
 
@@ -233,6 +244,40 @@ export type AttendanceDay = {
   overtimeHours: number;
   /** ساعات عمل في يوم الراحة الأسبوعية */
   restDayHours: number;
+
+  /**
+   * جزاءٌ على مخالفةٍ وقعت في هذا اليوم — بالدينار.
+   *
+   * يُثبت في يومه لا في آخر الشهر: من أُثبت عليه بعد ثلاثين يوماً نسي
+   * الواقعة وجادل فيها، ومن أُثبت عليه في حينه عَلِم. ويُثبته المهندس
+   * المشرف أو الإدارة، ولا يدخل المسيّر حتى تُقرّه الإدارة.
+   *
+   * وهو غير خصم الغياب: ذاك أجرُ يومٍ لم يُعمل، وهذا جزاءٌ على تقصيرٍ
+   * في يومٍ عُمل.
+   */
+  penalty?: number;
+
+  /**
+   * سبب الجزاء — ولا يُحفظ جزاءٌ بغيره.
+   *
+   * الرقم بلا سببٍ مكتوب لا يُدافَع عنه أمام صاحبه بعد شهور، ولا أمام
+   * مفتّش العمل.
+   */
+  penaltyReason?: string;
+
+  /** من أثبته */
+  penaltyBy?: string;
+
+  /**
+   * إقرار الإدارة.
+   *
+   * المهندس يرى التقصير ولا يملك المال، والإدارة تملكه ولا ترى الموقع.
+   * فلا يُخصم من أجر رجلٍ إلا بتوقيعين — إلا أن يُثبته صاحب الإقرار
+   * نفسه فيُقرّ في حينه.
+   */
+  penaltyApproved?: boolean;
+  penaltyApprovedBy?: string;
+  penaltyApprovedAt?: string;
   /** ساعات عمل في عطلة رسمية */
   holidayHours: number;
   note: string;
@@ -324,6 +369,17 @@ export type PayrollLine = {
   gross: number;
   absenceDeduction: number;
   otherDeductions: number;
+
+  /**
+   * مجموع الجزاءات المُقرّة في هذا الشهر.
+   *
+   * مستقلٌّ عن «خصومات أخرى» عمداً: الموظف يرى في كشفه لماذا نقص أجره،
+   * وبأيّ يومٍ وبأيّ سبب. والمدسوس في بندٍ عامّ يُورث خصومةً لا تنتهي.
+   */
+  penalties: number;
+
+  /** تفصيل الجزاءات — يومها ومبلغها وسببها، ليُطبع في كشف الراتب */
+  penaltyLines: { date: string; amount: number; reason: string }[];
 
   /**
    * ما خُصم من الراتب سداداً لسلفةٍ سابقة.
@@ -447,12 +503,28 @@ export function computePayrollLine(input: {
   let overtimeHours = 0;
   let restDayHours = 0;
   let holidayHours = 0;
+  let penalties = 0;
+  const penaltyLines: { date: string; amount: number; reason: string }[] = [];
 
   // ترتيب الأيام المرضية يحدّد شريحتها، فالحساب يتبع التسلسل الزمني
   const sorted = [...attendance].sort((a, b) => a.date.localeCompare(b.date));
   let sickCounter = 0;
 
   for (const record of sorted) {
+    /*
+      الجزاء المُقرّ وحده يُخصم. والمُثبت الذي لم تُقرّه الإدارة يبقى
+      معلّقاً ولا يمسّ أجراً — كالحركة التي تنتظر اعتماداً.
+    */
+    const penalty = round3(record.penalty ?? 0);
+    if (penalty > 0 && record.penaltyApproved) {
+      penalties = round3(penalties + penalty);
+      penaltyLines.push({
+        date: record.date,
+        amount: penalty,
+        reason: record.penaltyReason ?? "",
+      });
+    }
+
     overtimeHours += record.overtimeHours || 0;
     restDayHours += record.restDayHours || 0;
     holidayHours += record.holidayHours || 0;
@@ -527,8 +599,21 @@ export function computePayrollLine(input: {
       sickDeduction +
       socialInsurance +
       otherDeductions +
-      advanceDeduction
+      advanceDeduction +
+      penalties
   );
+
+  /*
+    حدُّ القانون على الشهر: أجرُ خمسة أيام. ويُنبَّه ولا يُمنع — فالمنع
+    يُخفي الواقعة ولا يحلّها، والتنبيه يُبقي القرار لصاحبه.
+  */
+  if (penalties > round3(day * PENALTY_MAX_DAYS)) {
+    warnings.push(
+      `الجزاءات (${penalties}) تتجاوز حدّ الشهر — أجر ${PENALTY_MAX_DAYS} أيام (${round3(
+        day * PENALTY_MAX_DAYS
+      )})`
+    );
+  }
 
   if (
     settings.maxDeductionPercent > 0 &&
@@ -561,6 +646,8 @@ export function computePayrollLine(input: {
     absenceDeduction,
     otherDeductions,
     advanceDeduction,
+    penalties,
+    penaltyLines,
     socialInsurance,
     totalDeductions,
     net: round3(gross - totalDeductions),
@@ -702,6 +789,7 @@ export function payrollTotals(lines: PayrollLine[]) {
     gross: sum((l) => l.gross),
     deductions: sum((l) => l.totalDeductions),
     socialInsurance: sum((l) => l.socialInsurance),
+    penalties: sum((l) => l.penalties),
     net: sum((l) => l.net),
     count: lines.length,
   };

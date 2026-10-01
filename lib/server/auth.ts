@@ -380,9 +380,27 @@ export async function changeOwnPassword(
     return { ok: false, reason: "كلمة المرور الجديدة مطابقة للحالية" };
   }
 
+  const hash = await hashPassword(next);
+  /*
+   * الصفُّ له وجهان: أعمدةٌ يقرؤها الدخول، وكائنُ `data` يقرؤه المتصفّح.
+   *
+   * وكان التحديث يمسّ العمود وحده، فيبقى `data.mustChangePin` على `true`
+   * أبداً ولا يُرفع `rev` فلا تعلم المزامنة بشيء — فيظلّ كلُّ من وضع
+   * كلمته معلَّماً في شاشة المستخدمين بأنه «لم يضع رقمه بعد»، ولا يُعرف
+   * من أنجز ومن لم يُنجز.
+   *
+   * فيُكتب الوجهان معاً ويُرفع رقم التغيير، فتبلغ الأجهزةَ الحقيقةُ.
+   */
   await query(
-    `UPDATE users SET password_hash = $2, must_change_pin = false WHERE id = $1`,
-    [userId, await hashPassword(next)]
+    `UPDATE users
+        SET password_hash = $2,
+            must_change_pin = false,
+            data = data || jsonb_build_object('pinHash', $2::text,
+                                              'mustChangePin', false),
+            updated_at = now(),
+            rev = nextval('change_seq')
+      WHERE id = $1`,
+    [userId, hash]
   );
   return { ok: true };
 }
@@ -443,14 +461,20 @@ export async function resetUserPassword(userId: string): Promise<ResetOutcome> {
   if (!row) return { ok: false, reason: "الحساب غير موجود" };
 
   const password = temporaryPassword();
+  const hash = await hashPassword(password);
+  /* الوجهان معاً ورقمُ التغيير — انظر `changeOwnPassword` */
   await query(
     `UPDATE users
         SET password_hash = $2,
             must_change_pin = true,
             failed_attempts = 0,
-            locked_until = NULL
+            locked_until = NULL,
+            data = data || jsonb_build_object('pinHash', $2::text,
+                                              'mustChangePin', true),
+            updated_at = now(),
+            rev = nextval('change_seq')
       WHERE id = $1`,
-    [row.id, await hashPassword(password)]
+    [row.id, hash]
   );
 
   return { ok: true, name: row.name, password };

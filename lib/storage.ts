@@ -579,6 +579,18 @@ function migrateAttendance(raw: unknown): AttendanceDay[] {
         overtimeHours: Number(a.overtimeHours) || 0,
         restDayHours: Number(a.restDayHours) || 0,
         holidayHours: Number(a.holidayHours) || 0,
+        /*
+          الجزاء وسببه وإقراره.
+
+          ومن سُجّل قبل الحقل لا جزاء عليه — والغائب يبقى غائباً لا
+          يُكتب صفراً، فلا يظهر يومٌ نظيفٌ وكأنّ عليه جزاءً قُدِّر بلا شيء.
+        */
+        penalty: Number(a.penalty) || undefined,
+        penaltyReason: str(a.penaltyReason) || undefined,
+        penaltyBy: str(a.penaltyBy) || undefined,
+        penaltyApproved: a.penaltyApproved === true ? true : undefined,
+        penaltyApprovedBy: str(a.penaltyApprovedBy) || undefined,
+        penaltyApprovedAt: str(a.penaltyApprovedAt) || undefined,
         note: str(a.note),
       };
     })
