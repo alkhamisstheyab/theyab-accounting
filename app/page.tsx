@@ -15694,6 +15694,85 @@ function ApprovalsPage({
   const [projectFilter, setProjectFilter] = useState("الكل");
   const [note, setNote] = useState("");
   /*
+    تسويةُ المستحقّ بعد الصرف.
+
+    الحقول الثلاثة فوق الجدول تُلتقط لحظة اعتماد المهندس وحدها، وإلغاءُ
+    اعتماد دفعةٍ صُرف منها مبلغ ممنوع — بحقّ، فلا يُنزع الاستحقاق عن مالٍ
+    خرج. فكان كلُّ خصمٍ يُكتشف **بعد** أول دفعةٍ لا سبيل إلى تسجيله:
+    يُكتب في الحقل ولا يُحفظ، ولا يُقال لصاحبه لماذا.
+
+    وقع ذلك في عقد الحدادة (٣٠٠٣): دفعت الشركة أجرَ كرين الطبانات عن
+    المقاول، وأُريد إسقاطه من مستحقّه بعد أن صُرف له جزءٌ من الدفعة.
+
+    والصواب أن الخصم أمرٌ مستقلٌّ عن الاعتماد: الاعتمادُ شهادةٌ بإنجازٍ
+    وقع، والخصمُ تسويةٌ على المال. فلا يلزم نقضُ الأول لتسجيل الثاني.
+  */
+  const [editingDiscount, setEditingDiscount] = useState<{
+    contractId: string;
+    number: number;
+  } | null>(null);
+  const [discountDraft, setDiscountDraft] = useState({ amount: "", reason: "" });
+
+  /**
+   * يكتب خصماً على دفعةٍ معتمدة.
+   *
+   * ولا يُنقص المستحقَّ دون ما صُرف فعلاً: لو جاز ذلك لصار على المقاول
+   * دينٌ للشركة من حيث أُريد إسقاط حقّه — وتلك مسألةٌ أخرى تُسوّى بقيدٍ
+   * لا بخصمٍ على دفعة.
+   */
+  const saveDiscount = (
+    contract: Contractor,
+    number: number,
+    paid: number
+  ) => {
+    const amount = round3(Number(discountDraft.amount) || 0);
+    const reason = discountDraft.reason.trim();
+    const installment = contract.installments.find((i) => i.number === number);
+    if (!installment) return;
+    const value = Number(installment.value) || 0;
+
+    if (amount < 0) return window.alert("الخصم لا يكون سالباً");
+    if (amount > 0 && reason.length < 4) {
+      return window.alert("اكتب سبب الخصم — ولا يُحفظ خصمٌ بغيره");
+    }
+    if (round3(value - amount) < round3(paid)) {
+      return window.alert(
+        `الخصم ${fmt(amount)} يُنقص المستحقّ إلى ${fmt(
+          round3(value - amount)
+        )} د.ك، وقد صُرف منها ${fmt(paid)} د.ك.\n\nأقصى خصمٍ ممكن: ${fmt(
+          round3(value - paid)
+        )} د.ك.`
+      );
+    }
+
+    setContractors((prev) =>
+      prev.map((c) =>
+        c.id !== contract.id
+          ? c
+          : {
+              ...c,
+              installments: c.installments.map((i) =>
+                i.number !== number
+                  ? i
+                  : {
+                      ...i,
+                      deduction: amount ? String(amount) : undefined,
+                      deductionReason: amount ? reason : undefined,
+                    }
+              ),
+            }
+      )
+    );
+    onLog(
+      "تعديل",
+      "عقد",
+      `خصم ${fmt(amount)} د.ك على الدفعة ${number} — عقد ${contract.contractNumber}`,
+      { after: reason }
+    );
+    setEditingDiscount(null);
+    setDiscountDraft({ amount: "", reason: "" });
+  };
+  /*
     الخصم يُكتب مع الاعتماد لا بعده: المرحلة تُنجَز وفيها تقصيرٌ أو
     تأخير، فيشهد المهندس بالإنجاز ويحسم ما يستحقّه الحسم في آنٍ واحد،
     ثم تُقرّه الإدارة وهي تراه.
@@ -16120,6 +16199,88 @@ function ApprovalsPage({
                                   اعتماد الإنجاز
                                 </button>
                               ))}
+
+                            {/*
+                              تسوية المستحقّ: تُفتح على الدفعة المعتمدة
+                              ولو صُرف منها — فالخصم غير الاعتماد.
+                            */}
+                            {canConfirm && installment.approved && (
+                              <div className="mt-2">
+                                {editingDiscount?.contractId === contract.id &&
+                                editingDiscount?.number === installment.number ? (
+                                  <div className="rounded-lg border border-amber-300 bg-amber-50 p-2">
+                                    <input
+                                      type="number"
+                                      step="0.001"
+                                      value={discountDraft.amount}
+                                      onChange={(e) =>
+                                        setDiscountDraft((d) => ({
+                                          ...d,
+                                          amount: e.target.value,
+                                        }))
+                                      }
+                                      placeholder="الخصم (د.ك)"
+                                      className="mb-1 w-full rounded border border-slate-300 px-2 py-1 text-sm"
+                                    />
+                                    <input
+                                      type="text"
+                                      value={discountDraft.reason}
+                                      onChange={(e) =>
+                                        setDiscountDraft((d) => ({
+                                          ...d,
+                                          reason: e.target.value,
+                                        }))
+                                      }
+                                      placeholder="السبب — مطلوب"
+                                      className="mb-1 w-full rounded border border-slate-300 px-2 py-1 text-sm"
+                                    />
+                                    <div className="flex gap-1">
+                                      <button
+                                        onClick={() =>
+                                          saveDiscount(
+                                            contract,
+                                            installment.number,
+                                            paid
+                                          )
+                                        }
+                                        className="rounded bg-amber-700 px-3 py-1 text-xs font-bold text-white"
+                                      >
+                                        احفظ
+                                      </button>
+                                      <button
+                                        onClick={() => {
+                                          setEditingDiscount(null);
+                                          setDiscountDraft({ amount: "", reason: "" });
+                                        }}
+                                        className="rounded bg-slate-200 px-3 py-1 text-xs font-bold"
+                                      >
+                                        إلغاء
+                                      </button>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <button
+                                    onClick={() => {
+                                      setEditingDiscount({
+                                        contractId: contract.id,
+                                        number: installment.number,
+                                      });
+                                      setDiscountDraft({
+                                        amount: installment.deduction ?? "",
+                                        reason: installment.deductionReason ?? "",
+                                      });
+                                    }}
+                                    className="rounded-lg bg-amber-50 px-3 py-2 text-xs font-bold text-amber-900"
+                                  >
+                                    {Number(installment.deduction) > 0
+                                      ? `عدّل الخصم (${fmt(
+                                          Number(installment.deduction)
+                                        )})`
+                                      : "خصم على المستحقّ"}
+                                  </button>
+                                )}
+                              </div>
+                            )}
 
                             {/* الخطوة الثانية: لا تُعرض إلا بعد شهادة المهندس */}
                             {canConfirm && installment.approved && (

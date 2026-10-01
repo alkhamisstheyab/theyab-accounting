@@ -49,6 +49,7 @@
     "check:login-name": "node db/check-login-name.mjs",
     "check:reset-password": "node db/check-reset-password.mjs",
     "check:penalty": "node db/check-penalty.mjs",
+    "check:deduction": "node db/check-deduction-after-pay.mjs",
     "users:status": "node db/users-status.mjs",
     "check:merge-audit": "node db/check-merge-audit.mjs",
     "check:closed": "node db/check-closed-payments.mjs",
