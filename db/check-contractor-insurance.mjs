@@ -56,18 +56,25 @@ const project = (name, over = {}) => ({
 console.log("\nالصمت لا يُحسب تغطية:\n");
 
 check(
-  "عقدٌ لم يُؤشَّر له يُعدّ غيرَ مغطّى",
+  "عقدٌ لم يُحدَّد فيه شيء يُعدّ غيرَ مغطّى",
   uninsuredContracts([contract({ contractNumber: "1" })]).length === 1
 );
 check(
-  "وتأشيرُه يُخرجه",
-  uninsuredContracts([contract({ contractNumber: "1", contractorInsures: true })])
-    .length === 0
+  "و«منصوصٌ على المقاول» يُخرجه",
+  uninsuredContracts([
+    contract({ contractNumber: "1", insuranceDuty: "المقاول" }),
+  ]).length === 0
 );
 check(
-  "و«false» صراحةً كالصمت",
+  "و«لا تلزم» يُخرجه كذلك — فهو قرارٌ لا سهو",
   uninsuredContracts([
-    contract({ contractNumber: "1", contractorInsures: false }),
+    contract({ contractNumber: "1", insuranceDuty: "لا تلزم" }),
+  ]).length === 0
+);
+check(
+  "وقيمةٌ لا يعرفها النظام كالصمت",
+  uninsuredContracts([
+    contract({ contractNumber: "1", insuranceDuty: "ربما" }),
   ]).length === 1
 );
 
@@ -89,8 +96,8 @@ check(
 console.log("\nولا يُنبَّه على موقعٍ كلُّ عقوده مغطّاة:\n");
 
 const covered = [
-  contract({ contractNumber: "1", contractorInsures: true }),
-  contract({ contractNumber: "2", contractorInsures: true }),
+  contract({ contractNumber: "1", insuranceDuty: "المقاول" }),
+  contract({ contractNumber: "2", insuranceDuty: "لا تلزم" }),
 ];
 check(
   "فلا صفَّ له",
@@ -98,7 +105,7 @@ check(
 );
 
 const mixed = [
-  contract({ contractNumber: "1", contractorInsures: true }),
+  contract({ contractNumber: "1", insuranceDuty: "المقاول" }),
   contract({ contractNumber: "2" }),
 ];
 const rows = projectInsurance([project("مشروع أ")], "2026-10-01", mixed);
@@ -147,17 +154,29 @@ check(
 console.log("\nوالشاشة تقول ذلك عند كتابة العقد:\n");
 const page = fs.readFileSync("app/page.tsx", "utf8");
 check(
-  "خانةٌ في شروط التنفيذ",
-  page.includes("وثيقة التأمين على الطرف الثاني")
+  "ثلاثةُ أحوالٍ في شروط التنفيذ",
+  page.includes("وثيقة تأمين الموقع — على مَن تقع؟") &&
+    page.includes("منصوصٌ في العقد — على المقاول") &&
+    page.includes("لا تلزم وثيقة") &&
+    page.includes("غيرُ محدَّد — فهي علينا")
 );
 check("ولا تظهر في عقد العميل", page.includes('form.counterpartyType !== "عميل"'));
 check(
   "وتُفرّق بين النصّ وتحمُّل المسؤولية",
-  page.includes("لا مجرّد") && page.includes("يتحمّل مسؤولية إصابات عماله")
+  page.includes("لا مجرّد") &&
+    /يتحمّل\s+مسؤولية\s+إصابات\s+عماله/.test(page)
 );
 check(
-  "وتُنبَّه عند عدم التأشير",
-  page.includes("فوثيقة التأمين") && page.includes("على الشركة</u> في هذا الموقع")
+  "وتُنبَّه حين لا يُحدَّد شيء",
+  page.includes("ما لم يُحدَّد، فوثيقة التأمين")
+);
+check(
+  "والإعفاء يُطالَب بسببه",
+  page.includes("اكتب سبب الإعفاء من وثيقة التأمين — ولا يُحفظ إعفاءٌ بغيره")
+);
+check(
+  "والسبب يُمحى إن تُرك الإعفاء",
+  page.includes('choice.key === "لا تلزم" ? f.insuranceNote : ""')
 );
 
 /* ---- وعلى ملفّات الشركة ---- */

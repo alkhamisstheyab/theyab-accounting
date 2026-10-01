@@ -6102,7 +6102,8 @@ const BLANK_CONTRACT = {
   specialty: "",
   workType: "",
   contractType: "",
-  contractorInsures: false,
+  insuranceDuty: "",
+  insuranceNote: "",
 
   area: "",
   block: "",
@@ -6263,7 +6264,8 @@ function ContractorsPage({
       specialty: c.specialty,
       workType: c.workType,
       contractType: c.contractType,
-      contractorInsures: c.contractorInsures === true,
+      insuranceDuty: c.insuranceDuty ?? "",
+      insuranceNote: c.insuranceNote ?? "",
       area: c.area,
       block: c.block,
       plot: c.plot,
@@ -6364,6 +6366,15 @@ function ContractorsPage({
         !nearlyEqual(installmentsTotal, contractValue),
         `مجموع الدفعات (${fmt(installmentsTotal)}) لا يساوي قيمة العقد (${fmt(contractValue)})`,
       ],
+      /*
+        إعفاءُ عقدٍ من وثيقة التأمين حكمٌ لا نصّ — لا ورقةَ خلفه. فيُطالَب
+        بسببه كما يُطالَب كلُّ إسقاطٍ في هذا النظام.
+      */
+      [
+        form.insuranceDuty === "لا تلزم" &&
+          form.insuranceNote.trim().length < 4,
+        "اكتب سبب الإعفاء من وثيقة التأمين — ولا يُحفظ إعفاءٌ بغيره",
+      ],
     ];
 
     const failed = checks.find(([bad]) => bad);
@@ -6377,7 +6388,11 @@ function ContractorsPage({
       project: form.project,
       contractNumber: form.contractNumber.trim(),
       contractType: form.contractType.trim(),
-      contractorInsures: form.contractorInsures || undefined,
+      insuranceDuty:
+        form.insuranceDuty === "المقاول" || form.insuranceDuty === "لا تلزم"
+          ? form.insuranceDuty
+          : undefined,
+      insuranceNote: form.insuranceNote.trim() || undefined,
       workType: form.workType.trim(),
       contractValue,
       /* الصفّ التوثيقي ليس دفعة، فلا يُعدّ في عددها */
@@ -6756,35 +6771,88 @@ function ContractorsPage({
                   {form.counterpartyType !== "عميل" && (
                     <div
                       className={`mb-3 rounded-lg border p-3 ${
-                        form.contractorInsures
+                        form.insuranceDuty
                           ? "border-green-300 bg-green-50"
                           : "border-amber-300 bg-amber-50"
                       }`}
                     >
-                      <label className="flex items-start gap-2 text-sm font-medium">
-                        <input
-                          type="checkbox"
-                          className="mt-1"
-                          checked={form.contractorInsures}
-                          onChange={(e) =>
-                            setForm((f) => ({ ...f, contractorInsures: e.target.checked }))
-                          }
-                        />
-                        <span>
-                          العقد ينصّ على أن <b>وثيقة التأمين على الطرف الثاني</b>
-                          <div className="mt-1 text-xs font-normal text-slate-600">
-                            أشّرها إن كان في العقد بندٌ صريحٌ بذلك — لا مجرّد
-                            «يتحمّل مسؤولية إصابات عماله». فالأول يعني أن
-                            مؤمِّناً يدفع، والثاني أن ترجع عليه.
-                          </div>
-                        </span>
-                      </label>
+                      <p className="mb-1 text-sm font-bold">
+                        وثيقة تأمين الموقع — على مَن تقع؟
+                      </p>
+                      <p className="mb-2 text-xs text-slate-600">
+                        الشركة لا تُؤمّن على موقعٍ إلا إن كان التنفيذ بعمّالها.
+                      </p>
 
-                      {!form.contractorInsures && (
+                      <div className="flex flex-wrap gap-2">
+                        {[
+                          {
+                            key: "المقاول",
+                            label: "منصوصٌ في العقد — على المقاول",
+                          },
+                          { key: "لا تلزم", label: "لا تلزم وثيقة" },
+                          { key: "", label: "غيرُ محدَّد — فهي علينا" },
+                        ].map((choice) => (
+                          <button
+                            key={choice.key || "none"}
+                            onClick={() =>
+                              setForm((f) => ({
+                                ...f,
+                                insuranceDuty: choice.key,
+                                /* السبب لا معنى له إلا مع الإعفاء */
+                                insuranceNote:
+                                  choice.key === "لا تلزم" ? f.insuranceNote : "",
+                              }))
+                            }
+                            className={`rounded-lg px-4 py-2 text-sm ${
+                              form.insuranceDuty === choice.key
+                                ? "bg-slate-900 font-bold text-white"
+                                : "bg-white"
+                            }`}
+                          >
+                            {choice.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      {form.insuranceDuty === "المقاول" && (
+                        <p className="mt-2 text-xs text-slate-600">
+                          اخترها إن كان في العقد بندٌ صريح — لا مجرّد «يتحمّل
+                          مسؤولية إصابات عماله». فالأول يعني أن مؤمِّناً يدفع،
+                          والثاني أن ترجع عليه وهو قد يكون معسراً.
+                        </p>
+                      )}
+
+                      {form.insuranceDuty === "لا تلزم" && (
+                        <div className="mt-2">
+                          {/*
+                            هذا حكمٌ لا نصّ — لا ورقةَ خلفه. فيُطالَب بسببه
+                            كما يُطالَب كلُّ إسقاطٍ في هذا النظام، وإلا
+                            سُئل عنه بعد سنتين فلم يُعرف جوابه.
+                          */}
+                          <Field
+                            label="سبب الإعفاء"
+                            hint="مطلوب — توريدٌ بلا عمالة في الموقع · عملُ يومٍ واحد · وما أشبه"
+                          >
+                            <input
+                              type="text"
+                              value={form.insuranceNote}
+                              onChange={(e) =>
+                                setForm((f) => ({
+                                  ...f,
+                                  insuranceNote: e.target.value,
+                                }))
+                              }
+                              className={inputClass}
+                            />
+                          </Field>
+                        </div>
+                      )}
+
+                      {!form.insuranceDuty && (
                         <p className="mt-2 text-sm font-bold text-amber-900">
-                          ⚠ ما لم يُنصّ عليه، فوثيقة التأمين{" "}
-                          <u>على الشركة</u> في هذا الموقع — سجّلها في المشروع،
-                          أو أضِف البند إلى العقد قبل توقيعه.
+                          ⚠ ما لم يُحدَّد، فوثيقة التأمين <u>على الشركة</u> في
+                          هذا الموقع — أضِف البند إلى العقد قبل توقيعه، أو
+                          سجّل الوثيقة في المشروع، أو أعفِه بسببٍ مكتوب.
                         </p>
                       )}
                     </div>
