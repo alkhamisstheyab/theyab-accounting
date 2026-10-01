@@ -142,6 +142,7 @@ import {
   ALL_PERMISSIONS,
   PAGE_PERMISSION,
   PERMISSION_CATALOGUE,
+  permissionLabel,
   Permission,
   ROLES,
   RoleKey,
@@ -220,6 +221,7 @@ import {
 } from "@/lib/dues";
 import { spendByQuarter, workSplit } from "@/lib/quarters";
 import { matchPerson } from "@/lib/people-match";
+import { roleDrift, withRoleTemplate } from "@/lib/role-drift";
 import {
   isPayrollAdminWithoutBucket,
   isPayrollSiteWithoutBucket,
@@ -2417,6 +2419,7 @@ export default function HomeV2() {
               users={users}
               setUsers={setUsers}
               currentUserId={currentUserId}
+              onLog={log}
             />
           )}
 
@@ -15078,10 +15081,18 @@ function UsersPage({
   users,
   setUsers,
   currentUserId,
+  onLog,
 }: {
   users: User[];
   setUsers: Dispatch<SetStateAction<User[]>>;
   currentUserId: string | null;
+  /* منحُ صلاحيةٍ تغييرٌ في سلطة، فلا يمضي بلا أثرٍ يُقرأ */
+  onLog: (
+    action: AuditAction,
+    entity: AuditEntity,
+    summary: string,
+    change?: { before?: string; after?: string }
+  ) => void;
 }) {
   const [form, setForm] = useState(BLANK_USER);
   const [permissions, setPermissions] = useState<Permission[]>(
@@ -15297,11 +15308,85 @@ function UsersPage({
         title="المستخدمون والصلاحيات"
         subtitle={`${users.filter((u) => u.active).length} مستخدماً نشطاً`}
       >
-        <Banner tone="warn">
-          الصلاحيات هنا تنظّم الواجهة ولا تحمي البيانات: التحقق يجري داخل
-          المتصفح، ومن يفتح أدوات المطوّر يستطيع تجاوزه. تصبح حماية حقيقية عند
-          نقل النظام إلى خادم.
-        </Banner>
+{/*
+          كان هنا تحذيرٌ بأن الصلاحيات تنظّم الواجهة ولا تحمي البيانات،
+          وأن التحقق في المتصفّح. وذلك صحيحٌ يوم كُتب وباطلٌ اليوم:
+          الفحص الحقيقي صار على الخادم — `requirePermission` في كل طريق،
+          و`READ_RULES` تحجب ما لا يُقرأ. فإخفاء الزرّ زينة، والمنع عند
+          الخادم.
+        */}
+
+        {/*
+          الصلاحيات تُنسخ على المستخدم يوم إنشائه ولا تُقرأ من قالب دوره
+          بعده. فمن أُنشئ قبل أن تُضاف صلاحيةٌ إلى قالبه لا يأخذها أبداً.
+
+          ووقع ذلك: أُضيفت المستحقات إلى قالب «مهندس مشرف» بعد إنشاء
+          المهندسَين، فكانت الشاشة التي صُنعت لهما تغيب من قائمتهما — ولم
+          يُعلم حتى شكا أحدهما بعد يومٍ من فتح النظام.
+
+          والنسخُ مقصود: منحُ صلاحيةٍ بلا قرار أخطرُ من حجبها. فالعلاج أن
+          يُكشف الفرق لصاحب القرار لا أن يُسدّ من تلقائه.
+        */}
+        {(() => {
+          const behind = users.filter(
+            (u) => u.active && roleDrift(u.role, u.permissions).missing.length > 0
+          );
+          if (behind.length === 0) return null;
+          return (
+            <Banner tone="warn">
+              <b>{behind.length}</b>{" "}
+              {behind.length === 1 ? "مستخدماً ينقصه" : "مستخدمين ينقصهم"} صلاحياتٌ
+              أُضيفت إلى دورهم بعد إنشائهم — فشاشاتٌ بُنيت لهم لا تظهر في
+              قائمتهم، ولا يعلم ذلك أحدٌ حتى يشكو صاحبُه.
+              <div className="mt-2 space-y-1 text-sm">
+                {behind.map((u) => (
+                  <div key={u.id}>
+                    <b>{u.name}</b> ({roleDefinition(u.role).label}) — ينقصه:{" "}
+                    {roleDrift(u.role, u.permissions)
+                      .missing.map(permissionLabel)
+                      .join("، ")}
+                  </div>
+                ))}
+              </div>
+              <button
+                onClick={() => {
+                  if (
+                    !window.confirm(
+                      `منح ${behind.length} مستخدماً ما نقص من قالب دورهم؟\n\nولا يُنزع منهم شيء — من وُسّع عليه بقرارٍ يبقى كما هو.`
+                    )
+                  ) {
+                    return;
+                  }
+                  const ids = new Set(behind.map((u) => u.id));
+                  setUsers((prev) =>
+                    prev.map((u) =>
+                      ids.has(u.id)
+                        ? {
+                            ...u,
+                            permissions: withRoleTemplate(u.role, u.permissions),
+                          }
+                        : u
+                    )
+                  );
+                  for (const u of behind) {
+                    onLog(
+                      "تعديل",
+                      "بيانات النظام",
+                      `منح ${u.name} ما نقص من قالب «${roleDefinition(u.role).label}»`,
+                      {
+                        after: roleDrift(u.role, u.permissions).missing.join("، "),
+                      }
+                    );
+                  }
+                  setMessage(`مُنح ${behind.length} مستخدماً ما نقصهم`);
+                }}
+                className="mt-3 rounded-lg bg-amber-700 px-5 py-2 font-bold text-white"
+              >
+                امنحهم ما نقص
+              </button>
+            </Banner>
+          );
+        })()}
 
         {users.length === 0 && (
           <Banner tone="warn">
@@ -15597,6 +15682,23 @@ function UsersPage({
                         {user.mustChangePin && (
                           <span className="mr-2 rounded bg-amber-100 px-2 py-1 text-xs text-amber-900">
                             لم يضع رقمه بعد
+                          </span>
+                        )}
+                        {/*
+                          الصلاحيات تُنسخ يوم الإنشاء ولا تُقرأ من القالب
+                          بعده. فمن أُنشئ قبل أن تُضاف صلاحيةٌ إلى دوره لا
+                          يأخذها أبداً، ولا يُنبَّه إلى ذلك أحد — حتى يشكو
+                          صاحبُه أن شاشةً لا تظهر له.
+                        */}
+                        {roleDrift(user.role, user.permissions).missing.length >
+                          0 && (
+                          <span className="mr-2 rounded bg-rose-100 px-2 py-1 text-xs text-rose-900">
+                            ينقصه{" "}
+                            {
+                              roleDrift(user.role, user.permissions).missing
+                                .length
+                            }{" "}
+                            من دوره
                           </span>
                         )}
                       </Td>
