@@ -292,6 +292,25 @@ export type Contractor = {
   terminationAfterDays: number;
   warrantyYears: number;
 
+  /**
+   * أينصّ العقد على أن وثيقة التأمين على الطرف الثاني؟
+   *
+   * قاعدة الشركة: لا تُؤمّن على مشروعٍ إلا إن كان التنفيذ بعمّالها.
+   * والتنفيذ كلُّه بمقاولين بعقود، فالوثيقة على المنفّذ — **بشرط أن
+   * ينصّ عقدُه على ذلك**.
+   *
+   * وفرقُ النصّ عن عدمه عمليٌّ لا لفظي: «يتحمّل مسؤولية إصابات عماله»
+   * تعني أن تَرجع عليه، و«له وثيقة» تعني أن مؤمِّناً يدفع. فإن أُصيب
+   * عاملُه ولا وثيقةَ له ولا مال، رجع الأمر إلى الشركة بوصفها المقاول
+   * الرئيسي، وبقي لها حقُّ الرجوع عليه وهو معسر.
+   *
+   * فمن لم يُؤشَّر له هنا فالوثيقة على الشركة، ويُنبَّه إليه **عند كتابة
+   * العقد** لا بعد وقوع الحادث.
+   *
+   * ولا معنى له في عقد العميل: ذاك من يدفع لنا، لا من ينفّذ.
+   */
+  contractorInsures?: boolean;
+
   /** التمهيد */
   preamble: string;
   /** البنود الفنية: الشدة الخشبية، الصب، التسليح، البناء… */
@@ -1146,6 +1165,8 @@ function migrateContractor(raw: unknown): Contractor {
     terminationAfterDays:
       Number(c.terminationAfterDays) || CONTRACT_DEFAULTS.terminationAfterDays,
     warrantyYears: Number(c.warrantyYears) || CONTRACT_DEFAULTS.warrantyYears,
+    /* من كُتب قبل الحقل: لا نصَّ له حتى يُؤشَّر — فالصمت لا يُحسب تغطية */
+    contractorInsures: c.contractorInsures === true ? true : undefined,
 
     preamble: str(c.preamble),
     clauses: Array.isArray(c.clauses)

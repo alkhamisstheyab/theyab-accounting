@@ -1781,6 +1781,7 @@ export default function HomeV2() {
             <ProjectsPage
               projects={projects}
               movements={movements}
+              contractors={contractors}
               year={year}
               today={todayISO()}
               canManage={allow("projects.manage")}
@@ -4257,7 +4258,7 @@ function MovementForm({
           ).map(([key, label]) => (
             <Field key={key} label={label}>
               <select
-                value={form[key]}
+                value={form[key] as string}
                 onChange={(e) => set(key, e.target.value)}
                 className={inputClass}
               >
@@ -5375,6 +5376,7 @@ function ReportsPage({
 function ProjectsPage({
   projects,
   movements,
+  contractors,
   year,
   today,
   canManage,
@@ -5382,6 +5384,11 @@ function ProjectsPage({
   openProject,
 }: {
   projects: Project[];
+  /*
+    العقود — لا يُنبَّه على موقعٍ كلُّ عقوده تُلقي وثيقة التأمين على
+    منفّذها. فقاعدة الشركة ألّا تُؤمّن إلا إن كان التنفيذ بعمّالها.
+  */
+  contractors: Contractor[];
   /** كل الحركات في كل السنوات — ميزانية المشروع تُقاس على عمره لا على سنة */
   movements: Movement[];
   year: number;
@@ -5407,7 +5414,7 @@ function ProjectsPage({
   });
 
   const insurance = new Map(
-    projectInsurance(projects, today).map((r) => [r.project.id, r])
+    projectInsurance(projects, today, contractors).map((r) => [r.project.id, r])
   );
 
   const openPolicy = (project: Project) => {
@@ -6095,6 +6102,7 @@ const BLANK_CONTRACT = {
   specialty: "",
   workType: "",
   contractType: "",
+  contractorInsures: false,
 
   area: "",
   block: "",
@@ -6255,6 +6263,7 @@ function ContractorsPage({
       specialty: c.specialty,
       workType: c.workType,
       contractType: c.contractType,
+      contractorInsures: c.contractorInsures === true,
       area: c.area,
       block: c.block,
       plot: c.plot,
@@ -6368,6 +6377,7 @@ function ContractorsPage({
       project: form.project,
       contractNumber: form.contractNumber.trim(),
       contractType: form.contractType.trim(),
+      contractorInsures: form.contractorInsures || undefined,
       workType: form.workType.trim(),
       contractValue,
       /* الصفّ التوثيقي ليس دفعة، فلا يُعدّ في عددها */
@@ -6685,7 +6695,7 @@ function ContractorsPage({
                   <Field key={key} label={label}>
                     <input
                       type="text"
-                      value={form[key]}
+                      value={form[key] as string}
                       onChange={(e) => set(key, e.target.value)}
                       className={inputClass}
                     />
@@ -6711,7 +6721,7 @@ function ContractorsPage({
                       <Field key={key} label={label}>
                         <input
                           type="text"
-                          value={form[key]}
+                          value={form[key] as string}
                           onChange={(e) => set(key, e.target.value)}
                           className={inputClass}
                         />
@@ -6736,6 +6746,49 @@ function ContractorsPage({
                   <p className="mb-2 text-sm font-bold text-slate-600">
                     شروط التنفيذ
                   </p>
+
+                  {/*
+                    قاعدة الشركة: لا تُؤمّن على موقعٍ إلا إن كان التنفيذ
+                    بعمّالها. والتنفيذ كلُّه بمقاولين، فالوثيقة على المنفّذ
+                    — بشرط أن ينصّ عقدُه. ومن لم ينصّ فالوثيقة علينا في
+                    موقعه، ويُقال ذلك هنا لا بعد وقوع الحادث.
+                  */}
+                  {form.counterpartyType !== "عميل" && (
+                    <div
+                      className={`mb-3 rounded-lg border p-3 ${
+                        form.contractorInsures
+                          ? "border-green-300 bg-green-50"
+                          : "border-amber-300 bg-amber-50"
+                      }`}
+                    >
+                      <label className="flex items-start gap-2 text-sm font-medium">
+                        <input
+                          type="checkbox"
+                          className="mt-1"
+                          checked={form.contractorInsures}
+                          onChange={(e) =>
+                            setForm((f) => ({ ...f, contractorInsures: e.target.checked }))
+                          }
+                        />
+                        <span>
+                          العقد ينصّ على أن <b>وثيقة التأمين على الطرف الثاني</b>
+                          <div className="mt-1 text-xs font-normal text-slate-600">
+                            أشّرها إن كان في العقد بندٌ صريحٌ بذلك — لا مجرّد
+                            «يتحمّل مسؤولية إصابات عماله». فالأول يعني أن
+                            مؤمِّناً يدفع، والثاني أن ترجع عليه.
+                          </div>
+                        </span>
+                      </label>
+
+                      {!form.contractorInsures && (
+                        <p className="mt-2 text-sm font-bold text-amber-900">
+                          ⚠ ما لم يُنصّ عليه، فوثيقة التأمين{" "}
+                          <u>على الشركة</u> في هذا الموقع — سجّلها في المشروع،
+                          أو أضِف البند إلى العقد قبل توقيعه.
+                        </p>
+                      )}
+                    </div>
+                  )}
                   <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
                     {(
                       [
@@ -6750,7 +6803,7 @@ function ContractorsPage({
                         <input
                           type="number"
                           min="0"
-                          value={form[key]}
+                          value={form[key] as string}
                           onChange={(e) => set(key, e.target.value)}
                           className={inputClass}
                         />

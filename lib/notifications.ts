@@ -127,15 +127,49 @@ export type InsuranceRow = {
   daysLeft: number;
 };
 
+/**
+ * العقود التي لا تُلقي وثيقة التأمين على منفّذها.
+ *
+ * قاعدة الشركة: لا تُؤمّن على مشروعٍ إلا إن كان التنفيذ بعمّالها.
+ * والتنفيذ كلُّه بمقاولين، فالوثيقة على المنفّذ — بشرط أن ينصّ عقدُه.
+ *
+ * فمن نصَّ عقدُه فليس علينا منه شيء، ومن لم ينصّ فالوثيقةُ علينا في
+ * موقعه. وعقدُ العميل لا يدخل: ذاك من يدفع لنا لا من ينفّذ.
+ */
+export function uninsuredContracts(contractors: Contractor[]): Contractor[] {
+  return contractors.filter(
+    (c) => c.counterpartyType !== "عميل" && c.contractorInsures !== true
+  );
+}
+
+/** أسماء المشاريع التي فيها عقدٌ غيرُ مغطّى */
+const projectsNeedingPolicy = (contractors: Contractor[]): Set<string> =>
+  new Set(
+    uninsuredContracts(contractors)
+      .map((c) => (c.project ?? "").trim())
+      .filter(Boolean)
+  );
+
 export function projectInsurance(
   projects: Project[],
-  today: string
+  today: string,
+  contractors: Contractor[] = []
 ): InsuranceRow[] {
+  /*
+    لا يُنبَّه على مشروعٍ كلُّ عقوده تُلقي الوثيقة على منفّذها — ولا على
+    مشروعٍ لا عقدَ منفّذٍ له أصلاً، فلا شيء يُحكم به.
+
+    وكان يُنبَّه على كل مشروعٍ نشطٍ بلا وثيقة، فظهرت سبعةُ مشاريع
+    «غير مسجّلة» وليس على الشركة فيها شيء — والتنبيه الذي لا يُعمل به
+    يُعلّم قارئه أن يتخطّى التنبيهات كلَّها.
+  */
+  const needs = projectsNeedingPolicy(contractors);
   const rows: InsuranceRow[] = [];
   for (const project of projects) {
     if (project.status && project.status !== "نشط") continue;
     /* «عام» و«مصروفات مشتركة» وعاءان محاسبيان لا موقعَ لهما */
     if (isNonProject(project.name)) continue;
+    if (!needs.has(project.name.trim())) continue;
     const end = project.insuranceEnd ?? "";
     if (!end) {
       rows.push({ project, state: "غير مسجّل", daysLeft: 0 });
@@ -346,7 +380,11 @@ export function buildNotices(input: NoticeInput): Notice[] {
 
   /* ---- تأمين المواقع ---- */
 
-  const insurance = projectInsurance(input.projects, input.today);
+  const insurance = projectInsurance(
+    input.projects,
+    input.today,
+    input.contractors
+  );
 
   const lapsed = insurance.filter((r) => r.state === "منتهٍ");
   if (lapsed.length > 0) {
@@ -388,11 +426,35 @@ export function buildNotices(input: NoticeInput): Notice[] {
       title: `${uninsured.length} مشروعاً بلا وثيقة تأمين مسجّلة`,
       detail:
         uninsured.map((r) => r.project.name).join(" · ") +
-        " — سجّل الوثيقة وتاريخ انتهائها ليُنبَّه إليها قبل انقضائها.",
+        " — وفيها عقدٌ لا يُلقي الوثيقة على منفّذه، فهي على الشركة.",
       page: "المشاريع",
       count: uninsured.length,
       needs: "projects.manage",
-  });
+    });
+  }
+
+  /*
+    العقود التي لا تنصّ: تُعرض بأسمائها لا بعددها، فالعلاج فيها أمران —
+    إمّا أن يُضاف إلى العقد نصٌّ يُلقي الوثيقة على منفّذه، وإمّا أن
+    تُشترى وثيقةٌ للموقع. وكلاهما قرارٌ يُتّخذ بعينه.
+  */
+  const unclear = uninsuredContracts(input.contractors);
+  if (unclear.length > 0) {
+    notices.push({
+      id: "contracts-no-insurance-clause",
+      tone: "warn",
+      title: `${unclear.length} عقداً لا ينصّ على تأمين منفّذه`,
+      detail:
+        unclear
+          .slice(0, 6)
+          .map((c) => `${c.contractNumber} — ${c.name}`)
+          .join(" · ") +
+        (unclear.length > 6 ? ` · وغيرها` : "") +
+        " — فالوثيقة على الشركة في مواقعها حتى يُنصّ عليها في العقد.",
+      page: "المقاولون",
+      count: unclear.length,
+      needs: "contractors.view",
+    });
   }
 
   /* ---- وثائق العمالة ---- */
