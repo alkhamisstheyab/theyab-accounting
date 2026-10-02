@@ -15943,6 +15943,76 @@ function ApprovalsPage({
    * دينٌ للشركة من حيث أُريد إسقاط حقّه — وتلك مسألةٌ أخرى تُسوّى بقيدٍ
    * لا بخصمٍ على دفعة.
    */
+  /**
+   * يُقفل عقداً أُنهي بالتراضي.
+   *
+   * العقد يُنهى قبل تمامه، فتبقى دفعاتٌ لم تُنفَّذ ولا تُدفع. والشاشة لا
+   * تقبل خصماً إلا على دفعةٍ معتمدة، والاعتماد شهادةٌ بإنجازٍ وقع — فمن
+   * اعتمد دفعةً لم تُنفَّذ ليُسقطها كذَب في الدفتر ليُصلح رقماً.
+   *
+   * ووقع ذلك في عقدَي م. عبدالعزيز العمر على قسيمة بوعباس (٥٠٠٥ و٥٠٠٦):
+   * أُنهيا باتفاقٍ موقَّع في ٠٣/٠٩/٢٠٢٦، وعشرٌ من إحدى عشرة دفعةً غيرُ
+   * معتمدة — ومنها دفعتا الطابوق اللتان لم تُنفَّذا، وهما سببُ الإنهاء.
+   *
+   * فهذا بابٌ ثالث: يُسقط ما بقي من كل دفعةٍ **بلا اعتماد** — لأن شيئاً
+   * لم يُنجَز فيُشهد به — ويكتب سبباً واحداً في الجميع. ولا يمسّ المدفوع:
+   * كلُّ دفعةٍ تُقفل على ما صُرف عليها، فيصير المستحقّ مساوياً للمصروف.
+   */
+  const terminateContract = (contract: Contractor) => {
+    const paidOn = contractPayments(movements, contract.contractNumber);
+    const shortfalls = contract.installments.map((i) => {
+      const paid = paidOn.byInstallment.get(i.number) ?? 0;
+      return round3((Number(i.value) || 0) - (Number(i.deduction) || 0) - paid);
+    });
+    const total = round3(shortfalls.reduce((a, b) => a + Math.max(b, 0), 0));
+    if (total <= 0) {
+      window.alert("لا باقيَ في هذا العقد — فهو مُقفلٌ أصلاً");
+      return;
+    }
+
+    const reason = window.prompt(
+      `إقفال عقد ${contract.contractNumber} بالتراضي — يسقط ${fmt(
+        total
+      )} د.ك من المستحقّ على ${
+        shortfalls.filter((x) => x > 0).length
+      } دفعة.\n\nاكتب سبب الإنهاء — يُحفظ مع كل دفعة:`,
+      ""
+    );
+    if (reason === null) return;
+    if (reason.trim().length < 8) {
+      window.alert("اكتب سبب الإنهاء — ولا يُقفل عقدٌ بغيره");
+      return;
+    }
+
+    setContractors((prev) =>
+      prev.map((c) =>
+        c.id !== contract.id
+          ? c
+          : {
+              ...c,
+              installments: c.installments.map((i, index) => {
+                const short = shortfalls[index];
+                if (short <= 0) return i;
+                const already = Number(i.deduction) || 0;
+                return {
+                  ...i,
+                  deduction: String(round3(already + short)),
+                  deductionReason: reason.trim(),
+                };
+              }),
+            }
+      )
+    );
+    onLog(
+      "تعديل",
+      "عقد",
+      `إقفال عقد ${contract.contractNumber} بالتراضي — أُسقط ${fmt(
+        total
+      )} د.ك من المستحقّ`,
+      { after: reason.trim() }
+    );
+  };
+
   const saveDiscount = (
     contract: Contractor,
     number: number,
@@ -16224,6 +16294,27 @@ function ApprovalsPage({
                   نسبة الإنجاز المعتمد: {progress.toFixed(1)}%
                 </p>
               </div>
+
+              {/*
+                الإقفال بالتراضي: لمن يملك إقرار الدفعات، فهو تغييرٌ في
+                المال لا شهادةٌ فنية.
+              */}
+              {canConfirm && (
+                <div className="mb-4 rounded-xl border border-slate-300 bg-slate-50 p-3">
+                  <p className="mb-1 text-sm font-bold">أُنهي هذا العقد؟</p>
+                  <p className="mb-2 text-xs text-slate-600">
+                    يُسقط ما بقي من كل دفعةٍ لم تُنفَّذ بسببٍ واحدٍ يُحفظ معها،
+                    <b> بلا اعتماد إنجازٍ لم يقع</b>. والمدفوع لا يُمسّ: تُقفل
+                    كلُّ دفعةٍ على ما صُرف عليها.
+                  </p>
+                  <button
+                    onClick={() => terminateContract(contract)}
+                    className="rounded-lg bg-slate-800 px-5 py-2 text-sm font-bold text-white"
+                  >
+                    أقفل العقد بالتراضي
+                  </button>
+                </div>
+              )}
 
               {canApprove && (
                 <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-3">
