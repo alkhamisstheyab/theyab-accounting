@@ -6442,6 +6442,76 @@ function ContractorsPage({
   const payments = (c: Contractor) => contractPayments(movements, c.contractNumber);
 
   /*
+    لوحةُ تحديد وثيقة التأمين.
+
+    ثلاثون عقداً دخلت النظام قبل أن تُبنى الخانة، فكلُّها «غيرُ محدَّد»
+    — والمرور عليها عقداً عقداً من نموذج التعديل يعني فتح ثلاثين نموذجاً
+    كامل الحقول لتأشير خانةٍ واحدة. فتُجمع هنا، ومعها نصُّ ما في كلٍّ من
+    بنود السلامة والمسؤولية، ليُحكم على بيّنةٍ لا على تذكّر.
+
+    والمختارون يُحدَّدون جملةً إن كانوا على حالٍ واحدة — توريداتٌ بلا
+    عمالة في الموقع مثلاً — فالسببُ حينئذٍ واحدٌ يُكتب مرّة.
+  */
+  const [picked, setPicked] = useState<string[]>([]);
+  const needsDuty = contractors.filter(
+    (c) => c.counterpartyType !== "عميل" && !c.insuranceDuty
+  );
+
+  /** نصُّ ما في العقد من بندِ سلامةٍ أو مسؤولية — ليُقرأ قبل الحكم */
+  const safetyHint = (c: Contractor): string => {
+    const all = [
+      ...(c.clauses ?? []).map((x) => `${x.title ?? ""} ${x.body ?? ""}`),
+      ...(c.obligations ?? []),
+    ];
+    const hit = all.find((t) => /تأمين|سلامة|إصاب|اصاب|مسؤولي/.test(t));
+    return hit ? hit.trim().slice(0, 150) : "";
+  };
+
+  const setDuty = (ids: string[], duty: "المقاول" | "لا تلزم", note: string) => {
+    setContractors((prev) =>
+      prev.map((c) =>
+        ids.includes(c.id)
+          ? {
+              ...c,
+              insuranceDuty: duty,
+              insuranceNote: duty === "لا تلزم" ? note : undefined,
+            }
+          : c
+      )
+    );
+    const names = contractors
+      .filter((c) => ids.includes(c.id))
+      .map((c) => c.contractNumber)
+      .join("، ");
+    onLog(
+      "تعديل",
+      "عقد",
+      `وثيقة التأمين «${duty}» على ${ids.length} عقداً: ${names}`,
+      note ? { after: note } : undefined
+    );
+    setPicked((prev) => prev.filter((id) => !ids.includes(id)));
+  };
+
+  /** يسأل عن السبب ثم يُثبت — والإعفاء لا يمضي بلا سبب */
+  const applyDuty = (ids: string[], duty: "المقاول" | "لا تلزم") => {
+    if (ids.length === 0) return;
+    if (duty === "لا تلزم") {
+      const note = window.prompt(
+        `إعفاء ${ids.length} عقداً من وثيقة التأمين.\n\nاكتب السبب — يُحفظ مع كلٍّ منها:`,
+        ""
+      );
+      if (note === null) return;
+      if (note.trim().length < 4) {
+        window.alert("اكتب سبب الإعفاء — ولا يُحفظ إعفاءٌ بغيره");
+        return;
+      }
+      setDuty(ids, duty, note.trim());
+      return;
+    }
+    setDuty(ids, duty, "");
+  };
+
+  /*
     السداد من خارج حسابات الشركة: دعم الدولة يُدفع للمورّد مباشرةً عن
     العميل، فلا قيد له في الدفاتر ولا أثر في القوائم — وإنما يُكتب في
     سجلّ العقد وحده لئلا يظهر العقد مستحقاً وقد سُدّد.
@@ -6572,6 +6642,104 @@ function ContractorsPage({
           )
         }
       />
+
+      {canManage && needsDuty.length > 0 && (
+        <Panel
+          title="وثيقة التأمين — عقودٌ لم يُحدَّد فيها شيء"
+          subtitle={`${needsDuty.length} عقداً · وما لم يُحدَّد فالوثيقة على الشركة في موقعه`}
+        >
+          <Banner tone="warn">
+            الشركة لا تُؤمّن على موقعٍ إلا إن كان التنفيذ بعمّالها. فحدِّد لكل
+            عقدٍ حالَه: <b>منصوصٌ على المقاول</b> إن كان في ورقته بندٌ صريح،
+            أو <b>لا تلزم</b> بسببٍ مكتوب. ويُعرض تحت كلٍّ ما فيه من بند
+            سلامةٍ أو مسؤولية — فاقرأه قبل أن تحكم،{" "}
+            <b>فتحمُّل المسؤولية غير وجود الوثيقة</b>.
+          </Banner>
+
+          {picked.length > 0 && (
+            <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-slate-300 bg-slate-50 p-3">
+              <span className="font-bold">{picked.length} مختاراً:</span>
+              <button
+                onClick={() => applyDuty(picked, "المقاول")}
+                className="rounded-lg bg-green-700 px-4 py-2 text-sm font-bold text-white"
+              >
+                منصوصٌ على المقاول
+              </button>
+              <button
+                onClick={() => applyDuty(picked, "لا تلزم")}
+                className="rounded-lg bg-slate-700 px-4 py-2 text-sm font-bold text-white"
+              >
+                لا تلزم وثيقة
+              </button>
+              <button
+                onClick={() => setPicked([])}
+                className="rounded-lg bg-slate-200 px-4 py-2 text-sm font-bold"
+              >
+                أفرغ الاختيار
+              </button>
+            </div>
+          )}
+
+          <div className="space-y-2">
+            {needsDuty.map((c) => {
+              const hint = safetyHint(c);
+              return (
+                <div
+                  key={c.id}
+                  className="rounded-xl border border-slate-200 p-3"
+                >
+                  <div className="flex flex-wrap items-start gap-3">
+                    <input
+                      type="checkbox"
+                      className="mt-1"
+                      checked={picked.includes(c.id)}
+                      onChange={(e) =>
+                        setPicked((prev) =>
+                          e.target.checked
+                            ? [...prev, c.id]
+                            : prev.filter((x) => x !== c.id)
+                        )
+                      }
+                    />
+                    <div className="min-w-[14rem] flex-1">
+                      <div className="font-bold">
+                        {c.contractNumber} — {c.name}
+                      </div>
+                      <div className="text-xs text-slate-500">
+                        {c.counterpartyType} · {c.workType} · {c.project} ·{" "}
+                        {fmt(c.contractValue)} د.ك
+                      </div>
+                      {hint ? (
+                        <div className="mt-1 text-xs text-slate-600">
+                          في العقد: «{hint}»
+                        </div>
+                      ) : (
+                        <div className="mt-1 text-xs text-amber-800">
+                          لا بندَ سلامةٍ ولا مسؤوليةٍ في العقد
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => applyDuty([c.id], "المقاول")}
+                        className="rounded-lg bg-green-50 px-3 py-2 text-xs font-bold text-green-800"
+                      >
+                        على المقاول
+                      </button>
+                      <button
+                        onClick={() => applyDuty([c.id], "لا تلزم")}
+                        className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-bold"
+                      >
+                        لا تلزم
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </Panel>
+      )}
 
       <Panel
         title="عقود المقاولين"

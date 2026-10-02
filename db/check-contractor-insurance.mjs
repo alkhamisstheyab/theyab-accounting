@@ -201,6 +201,37 @@ if (BACKUP && fs.existsSync(BACKUP)) {
   );
 }
 
+console.log("\nولوحةٌ تمرّ على الكلّ في موضعٍ واحد:\n");
+check(
+  "لوحةٌ تجمع ما لم يُحدَّد",
+  page.includes("وثيقة التأمين — عقودٌ لم يُحدَّد فيها شيء")
+);
+check(
+  "وتُعرض بنود السلامة ليُحكم على بيّنة",
+  page.includes("const safetyHint = (c: Contractor)")
+);
+check(
+  "وتقول إن لا بندَ فيه",
+  page.includes("لا بندَ سلامةٍ ولا مسؤوليةٍ في العقد")
+);
+check(
+  "ويُحدَّد الواحد أو الجملة",
+  page.includes("const applyDuty = (ids: string[]")
+);
+check(
+  "والإعفاء جملةً يُطالَب بسببه",
+  page.includes("اكتب السبب — يُحفظ مع كلٍّ منها")
+);
+check(
+  "ويُسجَّل في سجلّ التدقيق",
+  /وثيقة التأمين «\$\{duty\}» على \$\{ids\.length\} عقدا/.test(page)
+);
+check(
+  "ولمن يملك إدارة العقود وحده",
+  page.includes("{canManage && needsDuty.length > 0 && (")
+);
+
+
 console.log(
   bad === 0
     ? "\n✓ ما نُصّ عليه ليس علينا، وما سكت عنه يُنبَّه إليه"
