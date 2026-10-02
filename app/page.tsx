@@ -173,6 +173,7 @@ import {
   Material,
   MaterialReceipt,
   Project,
+  PROJECT_STATUSES,
   User,
   YearLocks,
   backupFileName,
@@ -1787,6 +1788,7 @@ export default function HomeV2() {
               canManage={allow("projects.manage")}
               setProjects={setProjects}
               openProject={(p) => setPage("حركات المشروع:" + p.name)}
+              onLog={log}
             />
           )}
 
@@ -5382,6 +5384,7 @@ function ProjectsPage({
   canManage,
   setProjects,
   openProject,
+  onLog,
 }: {
   projects: Project[];
   /*
@@ -5396,6 +5399,13 @@ function ProjectsPage({
   today: string;
   /** تعديل بيانات المشروع ووثيقة تأمينه */
   canManage: boolean;
+  /* إقفالُ مشروعٍ وتغييرُ ميزانيته قرارٌ يُسأل عنه، فلا يمضي بلا أثر */
+  onLog: (
+    action: AuditAction,
+    entity: AuditEntity,
+    summary: string,
+    change?: { before?: string; after?: string }
+  ) => void;
   setProjects: Dispatch<SetStateAction<Project[]>>;
   openProject: (project: Project) => void;
 }) {
@@ -5412,6 +5422,69 @@ function ProjectsPage({
     insuranceValue: "",
     insuranceNote: "",
   });
+
+  /*
+    تعديل المشروع.
+
+    لم يكن له تعديلٌ أصلاً: تُنشأ البطاقة بحالة «نشط» ثم لا تُمسّ، فبقيت
+    المشاريع المُسلَّمة نشطةً — يُنبَّه على تأمين موقعٍ لا عمل فيه،
+    وتُحسب ميزانيةٌ لم تعد تُقاس. ومن أراد تصحيح ميزانيةٍ دخلت خطأً لم
+    يجد إلا أن يحذف المشروع وينشئه، فتذهب وثيقته معه.
+  */
+  const [editing, setEditing] = useState<string | null>(null);
+  const [draft, setDraft] = useState({
+    budget: "",
+    startDate: "",
+    endDate: "",
+    status: "نشط",
+  });
+
+  const openEdit = (project: Project) => {
+    setEditing(project.id);
+    setDraft({
+      budget: String(project.budget || ""),
+      startDate: project.startDate ?? "",
+      endDate: project.endDate ?? "",
+      status: project.status || "نشط",
+    });
+  };
+
+  /*
+    ولا يُعدَّل الاسم من هنا.
+
+    الحركةُ تحمل اسم المشروع نصّاً لا معرّفه، وكذلك العقد. فتغييرُ الاسم
+    يُيتّم ألفاً وخمسَ مئةِ حركةٍ إن لم تُنقل معه — ومن غيّره ثم نسي
+    فقدها من تقرير ربحيته ولا يُنبَّه. فذاك بابٌ يُفتح بعدته، لا عَرَضاً
+    في نموذجٍ يُقفَل به مشروع.
+  */
+  const saveEdit = (project: Project) => {
+    /* الإقفال يحتاج تاريخاً: «انقضى» بلا «متى» لا يُفيد شيئاً */
+    if (draft.status !== "نشط" && !draft.endDate) {
+      window.alert("حدّد تاريخ التسليم أو التوقّف");
+      return;
+    }
+
+    setProjects((prev) =>
+      prev.map((x) =>
+        x.id !== project.id
+          ? x
+          : {
+              ...x,
+              budget: round3(Number(draft.budget) || 0),
+              startDate: draft.startDate,
+              endDate: draft.endDate || undefined,
+              status: draft.status,
+            }
+      )
+    );
+    onLog("تعديل", "مشروع", `${project.name} — الحالة «${draft.status}»`, {
+      before: `ميزانية ${fmt(project.budget)} · ${project.status}`,
+      after: `ميزانية ${fmt(round3(Number(draft.budget) || 0))} · ${
+        draft.status
+      }${draft.endDate ? ` · انتهى ${draft.endDate}` : ""}`,
+    });
+    setEditing(null);
+  };
 
   const insurance = new Map(
     projectInsurance(projects, today, contractors).map((r) => [r.project.id, r])
@@ -5527,6 +5600,18 @@ function ProjectsPage({
                     <span className="text-slate-500">
                       {count} حركة · {years.join("، ")}
                     </span>
+                    {canManage && (
+                      <button
+                        onClick={() =>
+                          editing === project.id
+                            ? setEditing(null)
+                            : openEdit(project)
+                        }
+                        className="rounded-lg bg-blue-50 px-3 py-2 text-blue-700"
+                      >
+                        {editing === project.id ? "إغلاق" : "تعديل"}
+                      </button>
+                    )}
                     <button
                       onClick={() => {
                         if (window.confirm(`حذف المشروع «${project.name}»؟`)) {
@@ -5541,6 +5626,73 @@ function ProjectsPage({
                     </button>
                   </div>
                 </div>
+
+                {editing === project.id && canManage && (
+                  <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50 p-4">
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+                      <Field
+                        label="الميزانية (د.ك)"
+                        hint="قيمة العقد مع صاحب المشروع"
+                      >
+                        <input
+                          type="number"
+                          step="0.001"
+                          value={draft.budget}
+                          onChange={(e) =>
+                            setDraft((x) => ({ ...x, budget: e.target.value }))
+                          }
+                          className={inputClass}
+                        />
+                      </Field>
+                      <Field label="تاريخ البدء">
+                        <input
+                          type="date"
+                          value={draft.startDate}
+                          onChange={(e) =>
+                            setDraft((x) => ({ ...x, startDate: e.target.value }))
+                          }
+                          className={inputClass}
+                        />
+                      </Field>
+                      <Field label="الحالة">
+                        <select
+                          value={draft.status}
+                          onChange={(e) =>
+                            setDraft((x) => ({ ...x, status: e.target.value }))
+                          }
+                          className={inputClass}
+                        >
+                          {PROJECT_STATUSES.map((st) => (
+                            <option key={st}>{st}</option>
+                          ))}
+                        </select>
+                      </Field>
+                      <Field
+                        label="تاريخ التسليم"
+                        hint="مطلوبٌ لغير النشط"
+                      >
+                        <input
+                          type="date"
+                          value={draft.endDate}
+                          onChange={(e) =>
+                            setDraft((x) => ({ ...x, endDate: e.target.value }))
+                          }
+                          className={inputClass}
+                        />
+                      </Field>
+                    </div>
+                    <p className="mt-2 text-xs text-slate-600">
+                      المشروع غير النشط لا يُنبَّه على تأمين موقعه — فلا عمل
+                      فيه يُؤمَّن عليه.
+                    </p>
+                    <button
+                      onClick={() => saveEdit(project)}
+                      className="mt-3 rounded-lg bg-blue-600 px-6 py-2 font-bold text-white"
+                    >
+                      احفظ
+                    </button>
+                  </div>
+                )}
 
                 <div className="mt-3 grid grid-cols-2 gap-3 text-sm md:grid-cols-5">
                   {[

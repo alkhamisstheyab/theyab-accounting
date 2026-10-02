@@ -53,6 +53,7 @@
     "check:role-drift": "node db/check-role-drift.mjs",
     "check:insurance": "node db/check-contractor-insurance.mjs",
     "check:terminate": "node db/check-terminate.mjs",
+    "check:project-edit": "node db/check-project-edit.mjs",
     "users:status": "node db/users-status.mjs",
     "check:merge-audit": "node db/check-merge-audit.mjs",
     "check:closed": "node db/check-closed-payments.mjs",

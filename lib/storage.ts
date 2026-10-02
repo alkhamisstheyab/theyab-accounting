@@ -68,6 +68,15 @@ export const COUNTERPARTY_TYPES: CounterpartyType[] = [
 export const isIncomingContract = (type: CounterpartyType): boolean =>
   type === "عميل";
 
+/**
+ * حالات المشروع.
+ *
+ * وكانت تُكتب «نشط» عند الإنشاء ثم لا تُمسّ — إذ لم يكن للمشروع تعديلٌ
+ * أصلاً. فبقيت المشاريع المُسلَّمة نشطةً في الدفاتر، تُنبَّه على تأمين
+ * موقعٍ لا عمل فيه، وتدخل في الحساب وقد انقضت.
+ */
+export const PROJECT_STATUSES = ["نشط", "مكتمل", "متوقّف", "ملغي"] as const;
+
 export type Project = {
   id: string;
   name: string;
@@ -76,6 +85,8 @@ export type Project = {
   /** تاريخ بدء التنفيذ */
   startDate: string;
   status: string;
+  /** تاريخ التسليم — يُكتب عند الإقفال، فيُعرف متى انقضى لا أنه انقضى */
+  endDate?: string;
 
   /* --------------------------------------------------------------
    * تأمين الموقع على العاملين.
@@ -1121,6 +1132,7 @@ function migrateProject(raw: unknown): Project {
     status: str(p.status, "نشط") || "نشط",
     insurer: str(p.insurer) || undefined,
     policyNumber: str(p.policyNumber) || undefined,
+    endDate: str(p.endDate) || undefined,
     insuranceStart: str(p.insuranceStart) || undefined,
     insuranceEnd: str(p.insuranceEnd) || undefined,
     insuranceValue: Number(p.insuranceValue) > 0
