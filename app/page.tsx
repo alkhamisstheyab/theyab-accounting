@@ -5711,12 +5711,22 @@ function ProjectsPage({
                   ))}
                 </div>
 
-                {/* تأمين الموقع على العاملين — وثيقةٌ لها مدّة تنتهي */}
+{/*
+                  تأمين الموقع على العاملين — وثيقةٌ لها مدّة تنتهي.
+
+                  واللوحة تُعرض لكل مشروعٍ نشط، لا للمنبَّه عليه وحده:
+                  التنبيهُ غيرُ التسجيل. فمن أراد أن يحفظ وثيقةً لا
+                  يُمنع، ولو لم يكن على الشركة في موقعه شيء — وعقدُ بدر
+                  الأسد خيرُ شاهد، إذ تلتزم الشركة فيه بالتأمين نصّاً
+                  وتوقيعاً وليس في موقعه عقدُ منفّذٍ غيرُ محدَّد.
+                */}
                 {(() => {
                   const row = insurance.get(project.id);
                   if (!row) return null;
-                  const tone =
-                    row.state === "منتهٍ"
+                  const quiet = !row.alert && row.state === "غير مسجّل";
+                  const tone = quiet
+                    ? "border-slate-200 bg-white text-slate-500"
+                    : row.state === "منتهٍ"
                       ? "border-red-300 bg-red-50 text-red-800"
                       : row.state === "يقترب"
                         ? "border-amber-300 bg-amber-50 text-amber-900"
@@ -5728,6 +5738,12 @@ function ProjectsPage({
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <span>
                           <b>تأمين الموقع:</b>{" "}
+                          {quiet && (
+                            <span className="text-xs">
+                              لا وثيقة — ولا يُنبَّه عليه، فعقودُ منفّذيه
+                              تُلقي الوثيقة عليهم.{" "}
+                            </span>
+                          )}
                           {row.state === "غير مسجّل" ? (
                             <>لا وثيقة مسجّلة — سجّلها ليُنبَّه إليها قبل انتهائها.</>
                           ) : (

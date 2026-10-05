@@ -93,15 +93,22 @@ check(
   ]).length === 1
 );
 
-console.log("\nولا يُنبَّه على موقعٍ كلُّ عقوده مغطّاة:\n");
+console.log("\nواللوحة لكل مشروعٍ نشط — والتنبيه غيرُ التسجيل:\n");
 
 const covered = [
   contract({ contractNumber: "1", insuranceDuty: "المقاول" }),
   contract({ contractNumber: "2", insuranceDuty: "لا تلزم" }),
 ];
+const coveredRows = projectInsurance([project("مشروع أ")], "2026-10-01", covered);
+check("له صفٌّ تُعرض به لوحة التسجيل", coveredRows.length === 1);
+check("ولا يُنبَّه عليه", coveredRows[0]?.alert === false);
 check(
-  "فلا صفَّ له",
-  projectInsurance([project("مشروع أ")], "2026-10-01", covered).length === 0
+  "ومشروعٌ بلا عقدٍ منفّذٍ أصلاً كذلك",
+  (() => {
+    const r = projectInsurance([project("مشروع ب")], "2026-10-01", covered);
+    return r.length === 1 && r[0].alert === false;
+  })(),
+  "فمن التزم بالتأمين في عقد عميلٍ يُسجّل وثيقته"
 );
 
 const mixed = [
@@ -109,7 +116,7 @@ const mixed = [
   contract({ contractNumber: "2" }),
 ];
 const rows = projectInsurance([project("مشروع أ")], "2026-10-01", mixed);
-check("وعقدٌ واحدٌ غيرُ مغطّى يكفي للتنبيه", rows.length === 1);
+check("وعقدٌ واحدٌ غيرُ مغطّى يكفي للتنبيه", rows.length === 1 && rows[0].alert === true);
 check("وحالُه «غير مسجّل» ما دامت الوثيقة غائبة", rows[0]?.state === "غير مسجّل");
 
 console.log("\nومن سجّل وثيقةً يُنبَّه قبل انقضائها:\n");
@@ -120,6 +127,17 @@ const soon = projectInsurance(
   mixed
 );
 check("يقترب", soon[0]?.state === "يقترب", String(soon[0]?.daysLeft));
+check(
+  "ومن سجّل وثيقةً يُنبَّه عليها ولو كانت عقودُه مغطّاة — فالمال أُنفق فيها",
+  (() => {
+    const r = projectInsurance(
+      [project("مشروع أ", { insuranceEnd: "2026-10-20" })],
+      "2026-10-01",
+      covered
+    );
+    return r[0]?.alert === true;
+  })()
+);
 const gone = projectInsurance(
   [project("مشروع أ", { insuranceEnd: "2026-09-01" })],
   "2026-10-01",
@@ -200,6 +218,15 @@ if (BACKUP && fs.existsSync(BACKUP)) {
     after.length <= before.length
   );
 }
+
+check(
+  "واللوحة لا تختفي عمّن لا يُنبَّه عليه",
+  page.includes("const quiet = !row.alert && row.state === \"غير مسجّل\";")
+);
+check(
+  "ويُقال له لماذا لا يُنبَّه",
+  page.includes("لا وثيقة — ولا يُنبَّه عليه، فعقودُ منفّذيه")
+);
 
 console.log("\nولوحةٌ تمرّ على الكلّ في موضعٍ واحد:\n");
 check(

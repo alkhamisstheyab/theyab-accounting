@@ -125,6 +125,22 @@ export type InsuranceRow = {
   state: InsuranceState;
   /** موجبٌ قبل الانتهاء، سالبٌ بعده، وصفرٌ لغير المسجّل */
   daysLeft: number;
+
+  /**
+   * أيُنبَّه على هذا الموقع؟
+   *
+   * والتنبيهُ غيرُ التسجيل، وقد خُلطا فأضرّ الخلطُ: جُعل الصفُّ لا
+   * يُنشأ إلا لمشروعٍ يُنبَّه عليه، فاختفت لوحةُ تسجيل الوثيقة من
+   * المشاريع التي ليس علينا فيها شيء — ومن أراد أن يحفظ وثيقةً مُنع.
+   *
+   * ووقع ذلك في مشروع بدر الأسد: عقدُه ينصّ على أن **الشركة** تتحمّل
+   * التأمين على سلامة العمال، فهي أوجبُ ما يُسجَّل — وليس فيه عقدُ
+   * منفّذٍ غيرُ محدَّد، فلم يكن له صفٌّ ولا لوحة.
+   *
+   * فصار لكل مشروعٍ نشطٍ صفُّه — تُعرض به اللوحة — ويُقيَّد التنبيه
+   * بهذا الحقل وحده.
+   */
+  alert: boolean;
 };
 
 /**
@@ -178,10 +194,17 @@ export function projectInsurance(
     if (project.status && project.status !== "نشط") continue;
     /* «عام» و«مصروفات مشتركة» وعاءان محاسبيان لا موقعَ لهما */
     if (isNonProject(project.name)) continue;
-    if (!needs.has(project.name.trim())) continue;
+
     const end = project.insuranceEnd ?? "";
+    /*
+      مَن له وثيقةٌ يُنبَّه على انقضائها كائناً ما كان عقدُه — فالمال
+      أُنفق فيها، وانقضاؤها بلا علمٍ هو الذي بُني التنبيه له. ومن لا
+      وثيقة له لا يُنبَّه إلا إن كان في موقعه عقدٌ غيرُ محدَّد.
+    */
+    const owed = needs.has(project.name.trim());
+
     if (!end) {
-      rows.push({ project, state: "غير مسجّل", daysLeft: 0 });
+      rows.push({ project, state: "غير مسجّل", daysLeft: 0, alert: owed });
       continue;
     }
     const daysLeft = daysBetween(today, end);
@@ -194,6 +217,7 @@ export function projectInsurance(
             ? "يقترب"
             : "سارٍ",
       daysLeft,
+      alert: true,
     });
   }
   return rows.sort((a, b) => a.daysLeft - b.daysLeft);
@@ -395,7 +419,7 @@ export function buildNotices(input: NoticeInput): Notice[] {
     input.contractors
   );
 
-  const lapsed = insurance.filter((r) => r.state === "منتهٍ");
+  const lapsed = insurance.filter((r) => r.alert && r.state === "منتهٍ");
   if (lapsed.length > 0) {
     notices.push({
       id: "insurance-expired",
@@ -412,7 +436,7 @@ export function buildNotices(input: NoticeInput): Notice[] {
     });
   }
 
-  const expiring = insurance.filter((r) => r.state === "يقترب");
+  const expiring = insurance.filter((r) => r.alert && r.state === "يقترب");
   if (expiring.length > 0) {
     notices.push({
       id: "insurance-expiring",
@@ -427,7 +451,7 @@ export function buildNotices(input: NoticeInput): Notice[] {
     });
   }
 
-  const uninsured = insurance.filter((r) => r.state === "غير مسجّل");
+  const uninsured = insurance.filter((r) => r.alert && r.state === "غير مسجّل");
   if (uninsured.length > 0) {
     notices.push({
       id: "insurance-missing",
