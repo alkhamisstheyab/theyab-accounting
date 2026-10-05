@@ -327,10 +327,28 @@ export async function login(
   }
 
   await transaction(async (run) => {
+    /*
+      لحظةُ الدخول تُكتب في الوجهين ويُرفع رقم التغيير.
+
+      وكانت تُكتب في العمود وحده، والمتصفّح يقرأ `data` — فظهر في شاشة
+      المستخدمين أن ستةً «لم يدخلوا قطّ» وقد دخلوا كلُّهم، وسأل صاحب
+      الشركة عن مهندسةٍ دخلت صباحَ يومها.
+
+      وتُرك ذلك عمداً أولَ مرّة خشيةَ أن يُرسَل صفُّ كل مستخدمٍ إلى كل
+      جهازٍ مع كل دخول — وذاك تقديرٌ لم يصحّ: ستةُ صفوفٍ صغيرة، وثمنُ
+      تركها أن يُقرأ في الشاشة خلافُ الحقيقة.
+    */
     await run(
-      `UPDATE users SET failed_attempts = 0, locked_until = NULL,
-              last_seen_at = now()
-       WHERE id = $1`,
+      `UPDATE users
+          SET failed_attempts = 0,
+              locked_until = NULL,
+              last_seen_at = now(),
+              data = data || jsonb_build_object('lastSeenAt',
+                       to_char(now() AT TIME ZONE 'UTC',
+                               'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')),
+              updated_at = now(),
+              rev = nextval('change_seq')
+        WHERE id = $1`,
       [row.id]
     );
     // تنظيف الجلسات المنتهية عند كل دخول — أرخص من مهمة مجدولة

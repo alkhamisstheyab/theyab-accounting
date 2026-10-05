@@ -9,6 +9,10 @@
  * على `true` عند كل من وضع كلمته — فظلّوا في شاشة المستخدمين معلَّمين
  * بأنهم «لم يضعوا رقمهم بعد»، ولا يُعرف من أنجز ومن لم يُنجز.
  *
+ * ثم تبيّن أن **لحظة الدخول** كذلك: تُكتب في العمود ولا تُكتب في
+ * الكائن، فظهر ستةُ مستخدمين «لم يدخلوا قطّ» وقد دخلوا كلُّهم — وسأل
+ * صاحب الشركة عن مهندسةٍ دخلت صباحَ يومها.
+ *
  * وأُصلح المنبع في `lib/server/auth.ts` فصار يكتب الوجهين معاً، وهذا
  * يُصلح ما مضى. ويُرفع معه رقمُ التغيير فتبلغ الأجهزةَ الحقيقةُ.
  *
@@ -45,10 +49,17 @@ const { rows: drift } = await client.query(`
   SELECT name,
          must_change_pin                              AS column_value,
          (data ->> 'mustChangePin') = 'true'          AS data_value,
-         (data ->> 'pinHash') IS DISTINCT FROM password_hash AS hash_drift
+         (data ->> 'pinHash') IS DISTINCT FROM password_hash AS hash_drift,
+         to_char(last_seen_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI') AS column_seen,
+         left(data ->> 'lastSeenAt', 16)                                AS data_seen,
+         (data ->> 'lastSeenAt') IS DISTINCT FROM
+           to_char(last_seen_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+                                                                        AS seen_drift
     FROM users
    WHERE (data ->> 'mustChangePin') IS DISTINCT FROM must_change_pin::text
       OR (data ->> 'pinHash') IS DISTINCT FROM password_hash
+      OR (data ->> 'lastSeenAt') IS DISTINCT FROM
+           to_char(last_seen_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
    ORDER BY name
 `);
 
@@ -67,6 +78,13 @@ for (const r of drift) {
     );
   }
   if (r.hash_drift) bits.push("وتجزئةُ الكائن قديمة");
+  if (r.seen_drift) {
+    bits.push(
+      `ولحظةُ الدخول: العمود ${r.column_seen ?? "—"} والمعروض ${
+        r.data_seen ?? "لم يدخل قطّ"
+      }`
+    );
+  }
   console.log(`  ${JSON.stringify(r.name)} — ${bits.join(" · ")}`);
 }
 
@@ -78,12 +96,18 @@ if (!APPLY) {
 
 const { rowCount } = await client.query(`
   UPDATE users
-     SET data = data || jsonb_build_object('pinHash', password_hash,
-                                           'mustChangePin', must_change_pin),
+     SET data = data || jsonb_build_object(
+           'pinHash', password_hash,
+           'mustChangePin', must_change_pin,
+           'lastSeenAt', COALESCE(
+             to_char(last_seen_at AT TIME ZONE 'UTC',
+                     'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'), '')),
          updated_at = now(),
          rev = nextval('change_seq')
    WHERE (data ->> 'mustChangePin') IS DISTINCT FROM must_change_pin::text
       OR (data ->> 'pinHash') IS DISTINCT FROM password_hash
+      OR (data ->> 'lastSeenAt') IS DISTINCT FROM
+           to_char(last_seen_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
 `);
 
 console.log(`\n✓ أُصلح ${rowCount} صفّاً — ويبلغ الأجهزةَ عند أول مزامنة\n`);
