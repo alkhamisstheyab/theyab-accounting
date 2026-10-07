@@ -159,16 +159,41 @@ const linked = movements.map((m) =>
 const before = contractPayments(movements, contract.contractNumber);
 const after = contractPayments(linked, contract.contractNumber);
 
-check("قبل الربط لا مقبوض", before.total === 0, fmt(before.total));
+/*
+  المقياس هو الفرق لا الصفر.
+
+  كانت الشروط تفترض أن العقد المختار خالٍ من القبض: «قبل الربط لا
+  مقبوض». وكان صادقاً يوم كُتب، إذ لم يكن قبضٌ مربوطٌ بعقدٍ بعد. ثم
+  رُبطت مقبوضات العملاء بعقودها فصار في العقد مالٌ، فأخفقت الشروط على
+  استعمالٍ صحيحٍ للميزة نفسها التي تفحصها.
+
+  والمفحوض الحقيقي أن الربط يزيد المقبوض **بقيمة الحركة وحدها** — لا
+  أكثر فيُحسب مرتين، ولا أقلّ فيضيع بعضُه. وذاك يصحّ على عقدٍ خالٍ
+  وعلى عقدٍ فيه عشر دفعات.
+*/
+const near = (x, y) => Math.abs(x - y) < 0.0005;
+
 check(
-  "وبعده المقبوض موجبٌ بقيمة الدفعة",
-  after.total === receipt.amount,
-  `${fmt(after.total)} · الحركة ${fmt(receipt.amount)}`
+  "والربط يزيد المقبوض بقيمة الحركة وحدها",
+  near(after.total - before.total, receipt.amount),
+  `قبله ${fmt(before.total)} · بعده ${fmt(after.total)} · الحركة ${fmt(
+    receipt.amount
+  )}`
+);
+check(
+  "والمقبوض بعده موجب",
+  after.total > 0,
+  fmt(after.total)
 );
 check(
   "ويُنسب إلى دفعته المحدّدة",
-  after.byInstallment.get(1) === receipt.amount,
-  fmt(after.byInstallment.get(1) ?? 0)
+  near(
+    (after.byInstallment.get(1) ?? 0) - (before.byInstallment.get(1) ?? 0),
+    receipt.amount
+  ),
+  `قبله ${fmt(before.byInstallment.get(1) ?? 0)} · بعده ${fmt(
+    after.byInstallment.get(1) ?? 0
+  )}`
 );
 check(
   "فينقص المتبقي على العميل",
@@ -187,9 +212,9 @@ const reversal = {
 };
 const withReversal = contractPayments([...linked, reversal], contract.contractNumber);
 check(
-  "وإلغاء القبض يُخصم فيعود المقبوض صفراً",
-  withReversal.total === 0,
-  fmt(withReversal.total)
+  "وإلغاء القبض يُخصم فيعود المقبوض إلى ما كان",
+  near(withReversal.total, before.total),
+  `${fmt(withReversal.total)} وكان ${fmt(before.total)}`
 );
 
 console.log("\nما لا يجوز أن يتغيّر:\n");

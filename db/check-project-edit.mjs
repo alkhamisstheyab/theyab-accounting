@@ -46,7 +46,12 @@ check(
 console.log("\nوزرُّ تعديلٍ في كل بطاقة:\n");
 
 check("للبطاقة زرُّ تعديل", page.includes('{editing === project.id ? "إغلاق" : "تعديل"}'));
-check("ولمن يملك إدارة المشاريع وحده", page.includes("{canManage && (\n                      <button\n                        onClick={() =>\n                          editing === project.id"));
+check(
+  "ولمن يملك إدارة المشاريع وحده",
+  /\{canManage && \(\s+<button\s+onClick=\{\(\) =>\s+editing === project\.id/.test(
+    page
+  )
+);
 check(
   "ويُعدَّل فيه الميزانية والحالة والتاريخان",
   /الميزانية \(د\.ك\)/.test(page) &&

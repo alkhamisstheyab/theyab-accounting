@@ -648,9 +648,28 @@ export function isExpired(quotation: Quotation, today: string): boolean {
 }
 
 /**
+ * المسودّة لا تُمحى ولو عدّ عليها العدّاد.
+ *
+ * المحو جزاءُ عرضٍ خرج إلى العميل فلم يُجَب عليه حتى انقضى. والمسودة
+ * لم تخرج: هي عملٌ في اليد، وحسابُ بنودها ساعاتٌ من عمل المهندس.
+ *
+ * وكان يقع خلافُ ذلك: الختمُ يبقى على العرض إن رُجع إلى مسودة ليُصحَّح
+ * — وذلك مقصود، فلا يبدأ شهرٌ جديد بتصحيح حرف — ثم يُقاس المحو على
+ * الختم وحده، فتُمحى المسودة بعد ثلاثين يوماً من تقديمها الأوّل. وكان
+ * في الدفاتر عرضُ «بوخميس» (Q-2026-010) يُمحى في ١٠ أكتوبر ٢٠٢٦، ولم
+ * يُحفظ عليه شيء.
+ *
+ * فالعدّاد يبقى يعدّ — يُعرض في الشاشة ليُعلم عمرُ العرض — ولا يكون
+ * المحو إلا لما خرج فعلاً.
+ */
+export const isPurgeableQuotation = (quotation: Quotation): boolean =>
+  quotation.status !== "مسودة" && !isBindingQuotation(quotation);
+
+/**
  * يفصل ما انقضت مدّته عمّا بقي.
  *
  * والمقبول يُستثنى فيبقى وإن انقضت مدّته — يُعلَّم «منتهٍ» ولا يُمحى.
+ * وكذلك المسودة: لم تخرج إلى العميل، فلا يُمحى عملٌ في اليد.
  */
 export function partitionExpired(
   quotations: Quotation[],
@@ -659,7 +678,7 @@ export function partitionExpired(
   const kept: Quotation[] = [];
   const expired: Quotation[] = [];
   for (const q of quotations) {
-    if (isExpired(q, today) && !isBindingQuotation(q)) expired.push(q);
+    if (isExpired(q, today) && isPurgeableQuotation(q)) expired.push(q);
     else kept.push(q);
   }
   return { kept, expired };

@@ -210,9 +210,13 @@ check(
   "المزامنة تبدأ بعد الدخول",
   page.includes("if (!session || ownCopy === null || started.current) return;")
 );
+/*
+  الصفحة بنهايات CRLF، و«\n» في نصٍّ مطلوبٍ حرفياً لا يُطابقها — فأخفق
+  الشرط على شيفرةٍ صحيحة. والمسافاتُ بين السطرين تُتسامح.
+*/
 check(
   "وبعد أن تكون للجهاز نسخة",
-  page.includes("markOwned();\n      startSync();")
+  /markOwned\(\);\s+startSync\(\);/.test(page)
 );
 check("وتقف عند الخروج", page.includes("stopSync();"));
 check("وحالة الخادم في شريط كل مستخدم", page.includes("{serverState.phase}"));

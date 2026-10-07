@@ -86,11 +86,21 @@ check(
   "ومجموعه ستة آلاف كما سُدِّد",
   fmt(backTargets.reduce((s, i) => s + Number(i.externalPaid), 0)) === fmt(AMOUNT)
 );
+/*
+  «لم تُمسّ» تُقاس بما كانت عليه لا بالعدم.
+
+  كان الشرط أن تكون بقيةُ الدفعات خاليةً من السداد الخارجي — وكان
+  صادقاً يوم كُتب. ثم سُجّل دعمُ الدولة على عقد التكييف (٢٠٠٩) فعلاً،
+  وهو العقد الذي يختاره هذا الفحص نفسه، فصارت دفعاتُه الثلاث تحمل
+  سداداً خارجياً. فأخفق الفحص على ما بُني لأجله.
+*/
+const untouched = (c) =>
+  c.installments
+    .filter((i) => !target.some((t) => t.number === i.number))
+    .map((i) => [i.number, i.externalPaid ?? null, i.externalNote ?? null]);
 check(
   "ودفعات العقد الأخرى لم تُمسّ",
-  back.installments
-    .filter((i) => !target.some((t) => t.number === i.number))
-    .every((i) => i.externalPaid === undefined)
+  JSON.stringify(untouched(back)) === JSON.stringify(untouched(contract))
 );
 check(
   "والعقود الأخرى كما هي",
@@ -135,10 +145,21 @@ const external = back.installments
   .reduce((s, i) => s + (Number(i.externalPaid) || 0), 0);
 const remaining = Number((contract.contractValue - paid - external).toFixed(3));
 
+/* وما كان على بقية الدفعات يبقى محسوباً — فالمقيس ما أُضيف */
+const externalElsewhere = contract.installments
+  .filter(isPayableInstallment)
+  .filter((i) => !target.some((t) => t.number === i.number))
+  .reduce((t, i) => t + (Number(i.externalPaid) || 0), 0);
+
 check(
   "المتبقي ينقص بقيمة السداد الخارجي",
-  remaining === Number((contract.contractValue - paid - AMOUNT).toFixed(3)),
-  `${fmt(remaining)} د.ك من ${fmt(contract.contractValue)}`
+  remaining ===
+    Number(
+      (contract.contractValue - paid - AMOUNT - externalElsewhere).toFixed(3)
+    ),
+  `${fmt(remaining)} د.ك من ${fmt(contract.contractValue)}${
+    externalElsewhere > 0 ? ` · وعلى غيرها ${fmt(externalElsewhere)}` : ""
+  }`
 );
 check(
   "ولا يُخلط بالمدفوع المحسوب من القيود",

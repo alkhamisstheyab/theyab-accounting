@@ -50,11 +50,27 @@ console.log("\nقبل الإصلاح — الحذف وحده:\n");
 
 check("النسخة كما هي بلا يتيم", orphanContractLinks(movements, numbers(contractors)).length === 0);
 
+/*
+  العقد قد يكون عليه حركاتٌ مربوطةٌ سلفاً، فيُيتّمها حذفُه كلَّها.
+
+  كان الشرط «يتيمةٌ واحدة» — وكان صادقاً يوم كُتب إذ لم يكن على العقد
+  ربطٌ سابق. ثم رُبطت دفعاتُ العملاء بعقودها، فصار على العقد المختار
+  (٤٠٠١) حركةٌ مربوطة، فيُيتّم حذفُه اثنتين فأخفق الشرط.
+
+  والمفحوص أدقّ من العدد: أن كلَّ ما كان مربوطاً بالعقد يصير يتيماً —
+  لا تُفلت منه واحدة — ومنها الحركة التي رُبطت في هذه التجربة.
+*/
+const wasLinked = linked.filter(
+  (m) => m.contractNumber === contract.contractNumber
+);
 const orphans = orphanContractLinks(linked, numbers(remaining));
 check(
-  "حذف العقد وحده يترك الحركة يتيمة — وهذا ما يُمسَك",
-  orphans.length === 1 && orphans[0].id === receipt.id,
-  `${orphans[0]?.fiscalYear}/${orphans[0]?.entryNo} → ${orphans[0]?.contractNumber}`
+  "حذف العقد وحده يترك حركاتِه يتيمةً — وهذا ما يُمسَك",
+  orphans.length === wasLinked.length &&
+    orphans.some((m) => m.id === receipt.id),
+  `${orphans.length} يتيمة → ${contract.contractNumber}: ${orphans
+    .map((m) => `${m.fiscalYear}/${m.entryNo}`)
+    .join("، ")}`
 );
 check(
   "واليتيمة لا تظهر بين غير المرتبطة — فتضيع",
@@ -62,11 +78,12 @@ check(
 );
 
 /* العقد الجديد بالرقم نفسه يلتقطها صامتاً */
+const before = contractPayments(movements, contract.contractNumber);
 const reborn = contractPayments(linked, contract.contractNumber);
 check(
   "ولو أُنشئ عقدٌ بالرقم نفسه لحسبها مدفوعةً عليه",
-  reborn.total === receipt.amount,
-  `${reborn.total}`
+  Math.abs(reborn.total - before.total - receipt.amount) < 0.0005,
+  `${reborn.total} وكان ${before.total} · الحركة ${receipt.amount}`
 );
 
 console.log("\nبعد الإصلاح — الحذف يفكّ الربط:\n");

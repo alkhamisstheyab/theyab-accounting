@@ -53,24 +53,47 @@ const contract =
   contractors.find((c) => c.contractNumber === "5001") ??
   contractors.find((c) => c.counterpartyType === "عميل");
 
-const receipts = approved
+/*
+  القبض صار مربوطاً بعقده في الدفاتر، فيُقرأ كما هو.
+
+  كان هذا الفحص يبحث عن قبضٍ **غير مربوط** على مشروع العقد ثم يربطه
+  كما تفعل الشاشة — إذ لم يكن في النسخة قبضٌ مربوطٌ يوم كُتب. ثم رُبط
+  قبضُ العملاء كلُّه بعقوده، فلم يجد الفحص ما يربطه فأخفق على نجاح.
+
+  والمفحوص لم يتغيّر: أن المقبوض على العقد يُجمع على عمره كلِّه لا على
+  السنة المختارة. فإن وُجد مربوطاً قُرئ، وإن لم يوجد رُبط كما كان.
+*/
+const alreadyLinked = approved
+  .filter(
+    (m) => m.contractNumber === contract.contractNumber && m.creditCode === "4110"
+  )
+  .sort((a, b) => a.date.localeCompare(b.date));
+
+const toLink = approved
   .filter(
     (m) => m.creditCode === "4110" && m.project === contract.project && !m.contractNumber
   )
   .sort((a, b) => a.date.localeCompare(b.date));
 
+const receipts = alreadyLinked.length > 0 ? alreadyLinked : toLink;
+
 const years = [...new Set(receipts.map((m) => m.fiscalYear))].sort();
 check(
   "قبضٌ على العقد في أكثر من سنة — وهي الحال التي شُكي منها",
   years.length > 1,
-  `${contract.contractNumber} · ${years.join(" و")} · ${receipts.length} قبضاً`
+  `${contract.contractNumber} · ${years.join(" و")} · ${receipts.length} قبضاً${
+    alreadyLinked.length > 0 ? " — مربوطٌ في الدفاتر" : " — يُربط هنا"
+  }`
 );
 
-const linked = approved.map((m) =>
-  receipts.some((r) => r.id === m.id)
-    ? { ...m, contractNumber: contract.contractNumber }
-    : m
-);
+const linked =
+  alreadyLinked.length > 0
+    ? approved
+    : approved.map((m) =>
+        receipts.some((r) => r.id === m.id)
+          ? { ...m, contractNumber: contract.contractNumber }
+          : m
+      );
 
 const lifetime = contractPayments(linked, contract.contractNumber).total;
 const whole = receipts.reduce((s, m) => s + m.amount, 0);

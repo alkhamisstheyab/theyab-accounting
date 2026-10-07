@@ -196,11 +196,25 @@ check(
       (m.contractNumber ?? "") === (before.contractNumber ?? "");
   })
 );
+/*
+  المقياس الزيادة لا العدد المطلق.
+
+  كان الشرط أن يكون عددُ ما يحمل الاسم الصحيح بعد التوحيد مساوياً
+  لعدد الصيغ المُوحَّدة — وذلك يصحّ لو لم يكن في الدفاتر حركةٌ تحمله
+  أصلاً. وقد صار يحمله سبعُ حركات، فأخفق الشرط على توحيدٍ ناجح.
+
+  والمفحوص أن كلَّ صيغةٍ انتقلت، فلم تبقَ واحدةٌ ولم يُمسَّ غيرُها:
+  يزيد الاسمُ الصحيح بعدد ما انتقل، ويخلو من الصيغ القديمة.
+*/
+const named = (list) =>
+  list.filter((m) => (m.party ?? "").trim() === "عبداللطيف ابواحمد").length;
 check(
   "ويجتمع عمله تحت اسمٍ واحد",
-  unified.filter((m) => (m.party ?? "").trim() === "عبداللطيف ابواحمد").length ===
-    hits.length,
-  `${hits.length} حركة بمجموع ${hits.reduce((x, m) => x + m.amount, 0).toFixed(3)} د.ك`
+  named(unified) === named(state.movements) + hits.length &&
+    unified.every((m) => !spellings.includes((m.party ?? "").trim())),
+  `${hits.length} حركة بمجموع ${hits
+    .reduce((x, m) => x + m.amount, 0)
+    .toFixed(3)} د.ك — صار ${named(unified)} بعد ${named(state.movements)}`
 );
 check("ويُقال في المعاينة إلى أي اسمٍ تنتقل", page.includes("ويصير اسم صاحبها كلِّها"));
 check(

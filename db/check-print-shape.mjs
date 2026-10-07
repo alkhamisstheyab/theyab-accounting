@@ -187,15 +187,39 @@ check(
 );
 
 /* ------------------------------------------------------------------ */
-/* الأوراق المصمّمة: الفاتورة والسندات وعرض السعر وقسيمة الراتب         */
+/* الأوراق المصمّمة: السند وعرض السعر وورقة التحويل وقسيمة الراتب      */
 /* ------------------------------------------------------------------ */
 /*
   كانت تخرج عند الطباعة بشكلٍ وألوانٍ غير التي صُمّمت: قاعدة جداول
   التقارير تطوّق خلاياها بإطاراتٍ رمادية، والمتصفّح يحذف ألوان خلفيتها
   (الشريط الذهبي، التذييل البيج، صفّ الإجمالي الكحلي).
 */
+/*
+  وعددُها يُعدّ ولا يُثبَّت على رقمٍ يُنسى: كان الشرط «ثلاث» فبُنيت ورقة
+  التحويل رابعةً، فأخفق الفحص على بناءٍ صحيح. فالمعدود أسماؤها: كلُّ
+  مكوّنٍ اسمه «*Sheet» ويُطبع، يلزمه الوسم — ومن أضاف خامسةً بلا وسمٍ
+  أخفق الفحص عليه، وهو المطلوب.
+*/
+const SHEETS = ["DocSheet", "QuotationSheet", "TransferSheet", "PayslipSheet"];
 const marked = (page.match(/voucher-body designed-sheet/g) ?? []).length;
-check("الأوراق المصمّمة الثلاث معلَّمة", marked === 3, `${marked}`);
+const unmarked = SHEETS.filter((name) => {
+  const at = page.indexOf(`function ${name}(`);
+  if (at < 0) return true;
+  /* الوسم في جذر المكوّن، فيقع قبل المكوّن الذي يليه */
+  const nextAt = page.slice(at + 1).search(/\nfunction [A-Z]/);
+  const body = page.slice(at, nextAt < 0 ? undefined : at + 1 + nextAt);
+  return !body.includes("voucher-body designed-sheet");
+});
+check(
+  `الأوراق المصمّمة معلَّمة كلُّها (${SHEETS.length})`,
+  unmarked.length === 0,
+  unmarked.length === 0 ? `${marked} وسماً` : `بلا وسم: ${unmarked.join("، ")}`
+);
+check(
+  "ولا وسمَ زائدٌ على ورقةٍ ليست منها",
+  marked === SHEETS.length,
+  `${marked} من ${SHEETS.length}`
+);
 check(
   "والعقد غير معلَّم — قواعده له وحده",
   !/contract-sheet[^"]*designed-sheet|designed-sheet[^"]*contract-sheet/.test(page)

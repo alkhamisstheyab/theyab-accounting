@@ -119,11 +119,42 @@ if (BACKUP && fs.existsSync(BACKUP)) {
     orphans.length === 0,
     orphans.length ? orphans.join("، ") : "لا متروك"
   );
+  /*
+    المفحوص أن الاسمين يجتمعان على رجلٍ واحد — لا أن رصيدَه قائم.
+
+    كان الشرط أن تكون سلفةُ مصطفى غيرَ صفر، وكان صادقاً يوم كُتب: قُيّدت
+    سلفتُه باسمٍ قصير («مصطفى الأنصاري») فلم تجد صاحبها ذا الأسماء
+    الأربعة، فظهرت ذمّتُه صفراً وهي قائمة. ثم بُنيت المطابقة بالاسمين،
+    فظهرت السلفة، فخُصمت في مسيّر سبتمبر ٢٠٢٦ — فصار الرصيد صفراً
+    بالسداد لا بالخفاء. فأخفق الشرط على نجاحٍ تامّ.
+
+    والصحيح أن يُفحص ما لا يزول: قيدُ السلفة بالاسم القصير وقيدُ سدادها
+    بالاسم الكامل يُنسبان إلى الموظف نفسه، ومجموعُهما هو ذمّتُه — صفراً
+    كانت أو قائمة.
+  */
+  const advanceRows = d.movements.filter(
+    (m) =>
+      m.approval === "معتمدة" &&
+      (m.debitCode === ADVANCE || m.creditCode === ADVANCE) &&
+      /مصطفى/.test(m.person || "")
+  );
+  const spellings = [...new Set(advanceRows.map((m) => (m.person || "").trim()))];
+  const owners = new Set(
+    advanceRows.map((m) => matchPerson((m.person || "").trim(), d.employees)?.id)
+  );
   check(
-    "وسلفة مصطفى ظهرت بعد أن كانت تختفي",
-    (byId.get("emp-005") ?? 0) !== 0 ||
-      d.movements.every((m) => m.creditCode !== ADVANCE || !/مصطفى/.test(m.person || "")),
-    `${(byId.get("emp-005") ?? 0).toFixed(3)} د.ك`
+    "وقيود مصطفى كلُّها على رجلٍ واحد — قصيرُ الاسم وكاملُه",
+    advanceRows.length > 0 && owners.size === 1 && !owners.has(undefined),
+    `${advanceRows.length} قيداً بـ${spellings.length} صيغة: ${spellings.join(
+      " · "
+    )} ← ذمّته ${(byId.get("emp-005") ?? 0).toFixed(3)} د.ك`
+  );
+  check(
+    "والمطابقة الحرفية كانت تُسقط القصير — فهذا فحصٌ يفحص",
+    spellings.some((n) => !d.employees.some((e) => e.name.trim() === n)),
+    spellings
+      .filter((n) => !d.employees.some((e) => e.name.trim() === n))
+      .join(" · ") || "كلُّها مطابقةٌ حرفياً — الفحص لا يفحص"
   );
 
   /* ولا اسمَ موظفٍ يشتبه بآخر — فالمطابقة بالاسمين تقتضي تمايزهم */

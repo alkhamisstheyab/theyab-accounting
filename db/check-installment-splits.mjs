@@ -194,11 +194,41 @@ check(
     .map((x) => `${x.number}: ${fmt(x.amount)}`)
     .join(" · ")
 );
+/*
+  المحذور مصفوفةٌ فارغة لا مصفوفةٌ موجودة.
+
+  كان الشرط «ولا حركةَ أخرى تحمل الحقل أصلاً» — وكان صادقاً يوم كُتب
+  إذ لم يكن في الدفاتر توزيعٌ واحد. ثم وُزّعت سبعُ حركاتٍ على دفعاتها،
+  فأخفق الفحص على استعمالٍ صحيحٍ للميزة التي يفحصها.
+
+  والمحذور الحقيقي أن يُكتب `installmentSplits: []` على حركةٍ لا توزيع
+  فيها، فيُظنّ لها توزيعٌ ويُقرأ مجموعُه صفراً. فذاك المفحوص.
+*/
 check(
-  "والحركات الأخرى بلا توزيع — لا مصفوفاتٍ فارغة",
+  "ولا حركةَ تحمل مصفوفةً فارغة",
+  reread.movements.every(
+    (m) => m.installmentSplits === undefined || m.installmentSplits.length > 0
+  ),
   reread.movements
-    .filter((m) => m.id !== source.id)
-    .every((m) => m.installmentSplits === undefined)
+    .filter((m) => m.installmentSplits?.length === 0)
+    .map((m) => `${m.fiscalYear}/${m.entryNo}`)
+    .join("، ")
+);
+
+/* وكلُّ توزيعٍ في الدفاتر مجموعُه مبلغُ حركته — وإلا ضاع فرقٌ بلا دفعة */
+const offBalance = reread.movements.filter((m) => {
+  const parts = m.installmentSplits ?? [];
+  if (parts.length === 0) return false;
+  const sum = Math.round(parts.reduce((t, x) => t + (Number(x.amount) || 0), 0) * 1000) / 1000;
+  return sum !== Math.round(m.amount * 1000) / 1000;
+});
+check(
+  "ومجموع كل توزيعٍ في الدفاتر يساوي مبلغ حركته",
+  offBalance.length === 0,
+  offBalance
+    .map((m) => `${m.fiscalYear}/${m.entryNo}`)
+    .join("، ") ||
+    `${reread.movements.filter((m) => m.installmentSplits?.length > 0).length} حركة موزَّعة`
 );
 
 console.log("\nوالشاشتان تكتبانه:\n");
