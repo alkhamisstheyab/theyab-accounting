@@ -18,6 +18,7 @@ import {
   ItemDefinition,
   Movement,
   OpeningBalances,
+  contractPayments,
   PaymentMethod,
   YearOpening,
   fiscalYearOf,
@@ -229,6 +230,94 @@ export const installmentNet = (i: Installment): number =>
 /** الدفعة مستحقة متى اعتمد المهندس إنجازها وأقرّتها الإدارة */
 export const isInstallmentDue = (installment: Installment): boolean =>
   installment.approved && installment.confirmed;
+
+/**
+ * حالُ العقد مالياً: هل بقي فيه شيء؟
+ *
+ * لم يكن للعقد حالٌ قطّ. المشروع له حال (نشط · مكتمل · متوقّف · ملغي)،
+ * والعقد يُكتب فيبقى معروضاً في الشاشة أبداً — وشاشةُ العقود لا تُرشّح
+ * إلا بالمشروع. فلمّا بلغت العقود سبعةً وأربعين، صار المنتهي يُزاحم
+ * الجاري ويضيع بينهما ما يحتاج متابعة. وسأل صاحب الشركة: «كيف أقفل
+ * عقد ٢٠٠٢؟» وقد أُقفل — ولم يكن في الشاشة ما يقول ذلك.
+ *
+ * والمدار على المال لا على الحقل: لا يُحفظ شيء، بل يُحسب في كل عرض من
+ * الدفعات والقيود المرتبطة. فلا هجرةَ بيانات، ولا حقلٌ يُكتب ولا يُقرأ.
+ *
+ * والقاعدة: المستحقّ = مجموع الدفعات ناقص الخصوم، والباقي = المستحقّ
+ * ناقص المدفوع. فإن لم يبقَ شيءٌ فقد انتهى.
+ *
+ * وثلاثُ دقائق فيها:
+ *
+ *   • **لا يُشترط الاعتماد.** عقدا عبدالعزيز العمر (٥٠٠٥ · ٥٠٠٦) أُقفلا
+ *     بالتراضي فأُسقط الباقي **بلا اعتماد إنجازٍ لم يقع** — وهما أوثقُ
+ *     ما أُقفل في الدفاتر. فلو شُرط الاعتماد بقيا مفتوحَين أبداً.
+ *
+ *   • **والخلوّ ليس انتهاءً.** ثلاثةُ عقود في الدفاتر (٦٠٠٢ · ٦٠٠٥ ·
+ *     ٥٠١٠) قيمتُها صفرٌ ولا دفعةَ فيها — فُتحت ولم تُكتب. ولو قيست
+ *     بالباقي لظهرت منتهيةً وهي لم تبدأ. فيُشترط جدولٌ له قيمة.
+ *
+ *   • **والجدولُ الناقص لا يُحكم به.** إن لم يبلغ مجموعُ الدفعات قيمةَ
+ *     العقد فالجدول لم يُستوفَ، فلا يُقال «انتهى» عن عقدٍ بقيت قيمتُه
+ *     خارج دفعاته. وهذا لا يمنع عقداً اليوم — فحِستها كلَّها فوجدت
+ *     الجدول مساوياً للقيمة في السبعة والأربعين — وإنما يحرس الغد.
+ *
+ * ويبقى فرقٌ لا يُطوى: أن يُدفع العقد كلُّه وفيه دفعاتٌ لم يشهد المهندس
+ * بإنجازها. فذاك هو ما وُضعت دورةُ الاعتماد له، فيُعدّ ويُقال.
+ */
+export type ContractSettlement = {
+  /** مجموع قيم الدفعات القابلة للصرف */
+  valued: number;
+  /** مجموع خصوم المهندس والإقفال */
+  writtenOff: number;
+  /** المستحقّ: القيمة ناقص الخصوم */
+  net: number;
+  /** ما دُفع فعلاً — أو ما قُبض إن كان عقد عميل */
+  paid: number;
+  /** الباقي: المستحقّ ناقص المدفوع، ويكون سالباً إن زاد المدفوع */
+  remaining: number;
+  /** لم يبقَ فيه شيء */
+  settled: boolean;
+  /** جدولُه لم يُكتب: لا قيمةَ ولا دفعة */
+  unwritten: boolean;
+  /** دفعاتٌ دخلها مالٌ ولم يشهد المهندس بإنجازها */
+  paidUnapproved: number;
+};
+
+export function contractSettlement(
+  movements: Movement[],
+  contract: Contractor
+): ContractSettlement {
+  const payable = (contract.installments ?? []).filter(isPayableInstallment);
+  const valued = round3(
+    payable.reduce((sum, i) => sum + installmentValue(i), 0)
+  );
+  const writtenOff = round3(
+    payable.reduce((sum, i) => sum + installmentDeduction(i), 0)
+  );
+  const net = round3(valued - writtenOff);
+
+  const payments = contractPayments(movements, contract.contractNumber);
+  const paid = payments.total;
+  const remaining = round3(net - paid);
+
+  /* الجدول يُستوفى متى بلغ قيمةَ العقد — والمقارنة بالفلس لا بالدينار */
+  const covers = valued > 0 && round3(valued - contract.contractValue) >= -0.001;
+
+  const paidUnapproved = payable.filter(
+    (i) => !i.approved && (payments.byInstallment.get(i.number) ?? 0) > 0
+  ).length;
+
+  return {
+    valued,
+    writtenOff,
+    net,
+    paid,
+    remaining,
+    settled: covers && remaining <= 0,
+    unwritten: payable.length === 0 || valued <= 0,
+    paidUnapproved,
+  };
+}
 
 /** بند فني أو التزام في العقد — عنوان ونص */
 export type ContractClause = {

@@ -169,6 +169,7 @@ import {
   Installment,
   isPayableInstallment,
   installmentNet,
+  contractSettlement,
   installmentDeduction,
   Material,
   MaterialReceipt,
@@ -16410,9 +16411,33 @@ function ApprovalsPage({
   const [deductionReason, setDeductionReason] = useState("");
   const [message, setMessage] = useState("");
 
-  const visible = contractors.filter(
+  /*
+    العقد المنتهي يُخفى افتراضاً — ولا يُطوى ذكرُه.
+
+    العقود سبعةٌ وأربعون وأحدَ عشرَ منها لم يبقَ فيه شيء، وكانت تُعرض
+    كلُّها في عمودٍ واحد لا يفرّق بين ما انتهى وما يحتاج متابعة. فصار
+    المعروضُ «الجارية»، ويُقال تحت المرشِّح كم أُخفي حتى لا يُظنّ عقدٌ
+    ضائعاً — فالإخفاء الصامت أسوأ من الزحام.
+  */
+  const [stateFilter, setStateFilter] = useState("الجارية");
+
+  const settlements = useMemo(() => {
+    const map = new Map<string, ReturnType<typeof contractSettlement>>();
+    for (const c of contractors) map.set(c.id, contractSettlement(movements, c));
+    return map;
+  }, [contractors, movements]);
+
+  const inProject = contractors.filter(
     (c) => projectFilter === "الكل" || c.project === projectFilter
   );
+  const settledCount = inProject.filter((c) => settlements.get(c.id)?.settled)
+    .length;
+  const visible = inProject.filter((c) => {
+    const done = settlements.get(c.id)?.settled ?? false;
+    if (stateFilter === "الجارية") return !done;
+    if (stateFilter === "المنتهية") return done;
+    return true;
+  });
 
   const setApproval = (
     contractId: string,
@@ -16549,7 +16574,7 @@ function ApprovalsPage({
           </Banner>
         )}
 
-        <div className="max-w-sm">
+        <div className="grid max-w-2xl grid-cols-1 gap-4 md:grid-cols-2">
           <Field label="تصفية بالمشروع">
             <select
               value={projectFilter}
@@ -16560,6 +16585,24 @@ function ApprovalsPage({
               {[...new Set(contractors.map((c) => c.project))].map((p) => (
                 <option key={p}>{p}</option>
               ))}
+            </select>
+          </Field>
+          <Field
+            label="حال العقد"
+            hint={
+              stateFilter === "الجارية" && settledCount > 0
+                ? `${settledCount} عقداً منتهياً مُخفىً — اخترْ «المنتهية» أو «الكل» لعرضه`
+                : "المنتهي: لا مستحقَّ باقياً فيه — دُفع كلُّه أو أُسقط باقيه"
+            }
+          >
+            <select
+              value={stateFilter}
+              onChange={(e) => setStateFilter(e.target.value)}
+              className={inputClass}
+            >
+              <option value="الجارية">الجارية — فيها باقٍ</option>
+              <option value="المنتهية">المنتهية — لا باقيَ فيها</option>
+              <option value="الكل">الكل</option>
             </select>
           </Field>
         </div>
@@ -16580,6 +16623,9 @@ function ApprovalsPage({
       ) : (
         visible.map((contract) => {
           const payments = contractPayments(movements, contract.contractNumber);
+          const settle =
+            settlements.get(contract.id) ??
+            contractSettlement(movements, contract);
 
           const approvedValue = round3(
             contract.installments
@@ -16597,6 +16643,43 @@ function ApprovalsPage({
               title={`${contract.project} — عقد ${contract.contractNumber}`}
               subtitle={`${contract.name} · ${contract.workType}`}
             >
+              {/*
+                وسمُ الحال: يُقال قبل الأرقام، فهو أوّلُ ما يُسأل عنه.
+
+                و«منتهٍ» وحدَه ناقص: أن يُدفع العقد كلُّه وفيه دفعاتٌ لم
+                يشهد المهندس بإنجازها أمرٌ لأجله وُضعت دورةُ الاعتماد —
+                فيُقال معه، ولا يُسوّى بين الحالين بلونٍ واحد.
+              */}
+              {settle.settled &&
+                (settle.paidUnapproved > 0 ? (
+                  <Banner tone="warn">
+                    <b>مُنتهٍ مالياً</b> — لا مستحقَّ باقياً فيه. ومنه{" "}
+                    {settle.paidUnapproved} دفعةً دخلها مالٌ ولم يشهد المهندس
+                    بإنجازها
+                    {settle.writtenOff > 0 && (
+                      <>
+                        {" "}
+                        · وأُسقط من باقيه{" "}
+                        <b>
+                          <Money value={settle.writtenOff} /> د.ك
+                        </b>
+                      </>
+                    )}
+                    .
+                  </Banner>
+                ) : (
+                  <Banner tone="ok">
+                    <b>مُنتهٍ</b> — دفعاتُه معتمدةٌ ولا مستحقَّ باقياً فيه.
+                  </Banner>
+                ))}
+
+              {settle.unwritten && (
+                <Banner tone="warn">
+                  <b>لم يُكتب جدولُه</b> — لا قيمةَ لهذا العقد ولا دفعةَ فيه،
+                  فلا يُقاس إنجازُه ولا يُستحقّ عليه صرف. اكتب دفعاته أو احذفه.
+                </Banner>
+              )}
+
               <div className="mb-4 grid grid-cols-2 gap-3 text-sm md:grid-cols-4">
                 {[
                   ["قيمة العقد", contract.contractValue],
@@ -16634,8 +16717,12 @@ function ApprovalsPage({
               {/*
                 الإقفال بالتراضي: لمن يملك إقرار الدفعات، فهو تغييرٌ في
                 المال لا شهادةٌ فنية.
+
+                ولا تُعرض على عقدٍ انتهى: لا باقيَ فيه يُسقَط، وكانت تُعرض
+                فيُضغط الزرّ فيردّ «لا باقيَ في هذا العقد» — فلا تُعرض
+                لوحةٌ لا تفعل شيئاً.
               */}
-              {canConfirm && (
+              {canConfirm && !settle.settled && (
                 <div className="mb-4 rounded-xl border border-slate-300 bg-slate-50 p-3">
                   <p className="mb-1 text-sm font-bold">أُنهي هذا العقد؟</p>
                   <p className="mb-2 text-xs text-slate-600">

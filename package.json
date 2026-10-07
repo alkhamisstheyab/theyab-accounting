@@ -19,7 +19,8 @@
     "check:external": "node db/check-external-settlement.mjs",
     "check:lifetime": "node db/check-contract-lifetime.mjs",
     "check:deduction": "node db/check-deduction.mjs",
-    "check:insurance": "node db/check-site-insurance.mjs",
+    "check:deduction-paid": "node db/check-deduction-after-pay.mjs",
+    "check:insurance": "node db/check-contractor-insurance.mjs",
     "check:splits": "node db/check-installment-splits.mjs",
     "check:duplicates": "node db/check-duplicates.mjs",
     "check:orphans": "node db/check-orphan-links.mjs",
@@ -49,16 +50,15 @@
     "check:login-name": "node db/check-login-name.mjs",
     "check:reset-password": "node db/check-reset-password.mjs",
     "check:penalty": "node db/check-penalty.mjs",
-    "check:deduction": "node db/check-deduction-after-pay.mjs",
     "check:role-drift": "node db/check-role-drift.mjs",
-    "check:insurance": "node db/check-contractor-insurance.mjs",
     "check:terminate": "node db/check-terminate.mjs",
     "check:project-edit": "node db/check-project-edit.mjs",
     "users:status": "node db/users-status.mjs",
     "check:merge-audit": "node db/check-merge-audit.mjs",
     "check:closed": "node db/check-closed-payments.mjs",
     "check:frozen": "node db/check-frozen-address.mjs",
-    "check:admin-general": "node db/check-admin-to-general.mjs"
+    "check:admin-general": "node db/check-admin-to-general.mjs",
+    "check:settled": "node db/check-contract-settled.mjs"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

@@ -44,8 +44,8 @@ check(
 check("ويكتب الخصم وسببه وحدهما", /deduction:/.test(fn) && /deductionReason:/.test(fn));
   /* الصفحة بنهايات CRLF، فالمطابقة بتعبيرٍ يتسامح في فواصل الأسطر */
 check(
-  "ولمن يملك إقرار الدفعات",
-  /\{canConfirm && \(\s+<div className="mb-4 rounded-xl border border-slate-300/.test(
+  "ولمن يملك إقرار الدفعات — ولا تُعرض على عقدٍ انتهى",
+  /\{canConfirm && !settle\.settled && \(\s+<div className="mb-4 rounded-xl border border-slate-300/.test(
     page
   )
 );
