@@ -198,6 +198,7 @@ import {
 import {
   fetchServerState,
   pushDeletions,
+  adoptExtra,
   onIncoming,
   type Incoming,
   record as recordForSync,
@@ -1416,6 +1417,11 @@ export default function HomeV2() {
                 {serverState.pending > 0 && (
                   <div className="mt-1 text-amber-300">
                     {serverState.pending} في الانتظار
+                  </div>
+                )}
+                {serverState.adopted > 0 && (
+                  <div className="mt-1 leading-5 text-green-300">
+                    وصلك {serverState.adopted} صفاً كان على الخادم ولم يكن عندك
                   </div>
                 )}
                 {serverState.refused.length > 0 && (
@@ -17379,15 +17385,45 @@ function ServerMatchPage({
   };
 
   /*
-    الزائد على الخادم: صفوفٌ حُذفت من الجهاز ولم يبلغه حذفها — يقع حين
-    يُغلق المتصفّح قبل أن تُرسل. وسجلّ التدقيق ليس منها: لا يُحذف منه
-    شيء، بل يُستردّ.
+    الزائد على الخادم: له سببان لا واحد.
+
+    كان يُحمل على سببٍ واحد — «صفوفٌ حذفتها من جهازك ولم يبلغه حذفها» —
+    وكان ذلك صحيحاً يوم كان الجهازُ واحداً. ثم فُتح النظام لستّة، فصار
+    للزيادة سببٌ ثانٍ أكثرُ وقوعاً: **صفٌّ كتبه غيرك ولم يصل جهازك**.
+    والسحبُ تزايديٌّ لا يرجع إلى ما مضى عن مؤشّره، فيبقى الصفُّ هناك.
+
+    ووقع: مستحقٌّ كتبه م. نوح لأبي شمس (٦٠ د.ك · ٣ أكتوبر ٢٠٢٦) لم يصل
+    جهاز صاحب الشركة، فظهر «زائداً على الخادم». ولو ضُغط زرُّ الحذف
+    لمُحي عملُ المهندس — ونصُّ التأكيد يُطمئن صاحبَه أنه يحذف حذفَ
+    نفسه.
+
+    فصار البابان معروضين، والضمُّ أوّلُهما: يُضيف ولا يحذف، فهو آمنٌ
+    دائماً. والحذفُ ثانٍ، ونصُّه يقول الاحتمالين ولا يَزعم أحدهما.
   */
   const staleOnServer = (fields ?? []).filter(
     (f) => f.field !== "audit" && f.extra.length > 0
   );
   const staleCount = staleOnServer.reduce((n, f) => n + f.extra.length, 0);
   const [purging, setPurging] = useState(false);
+  const [pulling, setPulling] = useState(false);
+
+  const pullExtra = async () => {
+    setPulling(true);
+    setProblem("");
+    try {
+      const done = await adoptExtra(local);
+      setFields(null);
+      setNote(
+        done > 0
+          ? `ضُمّ ${done} صفاً من الخادم إلى جهازك — اضغط «قارن الآن»`
+          : "لا زائدَ يُضمّ — اضغط «قارن الآن»"
+      );
+    } catch (error) {
+      setProblem(error instanceof Error ? error.message : "تعذّر الضمّ");
+    } finally {
+      setPulling(false);
+    }
+  };
 
   const purgeStale = async () => {
     const where = staleOnServer
@@ -17395,7 +17431,7 @@ function ServerMatchPage({
       .join(" · ");
     if (
       !window.confirm(
-        `حذف ${staleCount} صفاً من الخادم؟\n\n${where}\n\nهي صفوفٌ حذفتها من جهازك ولم يبلغ الخادم حذفها. ولا يُحذف من الخادم غيرها، ولا يُمسّ جهازك.`
+        `حذف ${staleCount} صفاً من الخادم؟\n\n${where}\n\nتأكّد قبل هذا: للزيادة سببان. إمّا أنك حذفتها من جهازك ولم يبلغ الخادم حذفها — فالحذف صواب. وإمّا أنها عملُ غيرك لم يصل جهازك — فالحذف يمحو عمله.\n\nوإن لم تكن على يقين فاضغط «أضِفها إلى جهازي» أولاً وانظر ما هي.\n\nولا يُحذف من الخادم غيرها، ولا يُمسّ جهازك.`
       )
     ) {
       return;
@@ -17588,23 +17624,42 @@ function ServerMatchPage({
           {staleCount > 0 ? (
             <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-4">
               <p className="mb-2 font-bold text-amber-900">
-                في الخادم {staleCount} صفاً حذفتَه من جهازك
+                في الخادم {staleCount} صفاً ليس في جهازك
               </p>
               <p className="mb-3 text-sm text-amber-900">
                 {staleOnServer
                   .map((f) => `${FIELD_LABELS[f.field] ?? f.field}: ${f.extra.length}`)
                   .join(" · ")}
-                . حُذفت من الجهاز ولم يبلغ الخادمَ حذفُها — يقع ذلك إن أُغلق
-                المتصفّح قبل أن تُرسل. والجهاز هو المرجع، فتُحذف من الخادم.
+                .
               </p>
-              <button
-                type="button"
-                onClick={purgeStale}
-                disabled={purging}
-                className="rounded-lg bg-amber-700 px-5 py-2 font-bold text-white disabled:cursor-not-allowed disabled:bg-slate-300"
-              >
-                {purging ? "يحذف…" : `احذفها من الخادم (${staleCount})`}
-              </button>
+              <p className="mb-3 text-sm text-amber-900">
+                <b>ولهذا سببان، فانظر أيُّهما قبل أن تختار:</b> إمّا أنك حذفتها
+                من جهازك ولم يبلغ الخادمَ حذفُها — يقع إن أُغلق المتصفّح قبل أن
+                تُرسل — <b>وإمّا أنها عملُ غيرك لم يصل جهازك</b>، فالسحبُ يسأل
+                عمّا بعد رقمٍ ولا يرجع إلى ما مضى عنه.
+              </p>
+              <p className="mb-3 text-sm font-bold text-amber-900">
+                فإن لم تكن على يقينٍ فاضممها إلى جهازك وانظر ما هي — والضمُّ
+                يُضيف ولا يحذف، فلا يُفقد به شيء.
+              </p>
+              <div className="flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={pullExtra}
+                  disabled={pulling}
+                  className="rounded-lg bg-green-700 px-5 py-2 font-bold text-white disabled:cursor-not-allowed disabled:bg-slate-300"
+                >
+                  {pulling ? "يضمّ…" : `أضِفها إلى جهازي (${staleCount})`}
+                </button>
+                <button
+                  type="button"
+                  onClick={purgeStale}
+                  disabled={purging}
+                  className="rounded-lg border border-amber-700 px-5 py-2 font-bold text-amber-900 disabled:cursor-not-allowed disabled:border-slate-300 disabled:text-slate-400"
+                >
+                  {purging ? "يحذف…" : `احذفها من الخادم (${staleCount})`}
+                </button>
+              </div>
             </div>
           ) : null}
 

@@ -74,6 +74,13 @@ export type SyncStatus = {
    * محفوظاً وهو في جهازه وحده.
    */
   refused: { field: string; reason: string }[];
+  /**
+   * صفوفٌ كانت على الخادم وليست في الجهاز فضُمّت إليه.
+   *
+   * تُعرض لصاحبها: عملُ غيره وصله متأخّراً، وربما كان ينتظره — كمستحقٍّ
+   * كتبه مهندسٌ ولم يجده في شاشة الإقرار.
+   */
+  adopted: number;
 };
 
 let status: SyncStatus = {
@@ -84,6 +91,7 @@ let status: SyncStatus = {
   lastSyncAt: "",
   renumbered: [],
   refused: [],
+  adopted: 0,
   lastError: "",
 };
 
@@ -91,6 +99,8 @@ let status: SyncStatus = {
 let snapshot: AppState | null = null;
 /** آخر ما عند المتصفّح، ينتظر دوره */
 let latest: AppState | null = null;
+/** ضمٌّ طُلب قبل أن تُعرَف حالةُ الجهاز، فيُنفَّذ عند أول حفظ */
+let adoptWanted = false;
 
 /**
  * الصفوف التي رآها هذا الجهاز.
@@ -332,6 +342,14 @@ export async function connect(): Promise<boolean> {
       lastError: "",
       lastSyncAt: new Date().toISOString(),
     });
+    /*
+      وما عند الخادم ولم يصل الجهاز يُضمّ إليه الآن.
+
+      يقع بعد نشر الحال، فالضمُّ ينشر عددَه فوقه. ولا يُنتظر به السحبُ
+      التزايديّ: هو لا يرجع إلى ما مضى عن مؤشّره.
+    */
+    adoptFromSnapshot();
+
     /* ما تغيّر في المتصفّح قبل الاتصال يُرسل الآن */
     if (latest) schedule(0);
     return true;
@@ -354,6 +372,66 @@ export async function fetchServerState(): Promise<AppState> {
 /* ------------------------------------------------------------------ */
 
 /**
+ * يضمّ إلى الجهاز ما عند الخادم وليس عنده.
+ *
+ * السحبُ تزايديّ: يسأل «ما بعد الرقم كذا». فإن سقط صفٌّ من الجهاز —
+ * بتحميل نسخةٍ أقدم للمقارنة، أو بمسح بيانات المتصفّح، أو بحفظٍ أخفق —
+ * ومضى المؤشّرُ عن رقمه، لم يعد إليه السحبُ أبداً. فيبقى الصفُّ على
+ * الخادم لا بابَ له يدخل منه.
+ *
+ * وكانت القراءةُ الكاملة تقع في كل اتصال وتُستعمل **صورةً للمقارنة**
+ * لا تُطبَّق على الشاشة — فيُعرَف الفرقُ ولا يُسَدّ.
+ *
+ * ووقع ذلك: كتب م. نوح مستحقّاً لأبي شمس (٦٠ د.ك · ٣ أكتوبر ٢٠٢٦)
+ * فلم يصل جهاز صاحب الشركة، وسأل عنه فلم يجده في شاشة الاعتماد. وهو
+ * الحركةُ الوحيدةُ التي تنتظر إقراراً في الدفاتر كلِّها، ولولا أن
+ * عُدَّت الصفوفُ لما عُلم بغيابها.
+ *
+ * والضمُّ **يُضيف ولا يحذف ولا يكتب فوق شيء**، فهو آمنٌ دائماً. ويُستثنى
+ * منه ما حذفه هذا الجهاز ولم يُرسل حذفَه بعد، وإلا بُعث ما دُفن.
+ */
+function adoptFromSnapshot(): number {
+  if (!snapshot || !applier) return 0;
+  if (!latest) {
+    /* الشاشة لم تُبلّغ بحالتها بعد — يُنتظر أول حفظ */
+    adoptWanted = true;
+    return 0;
+  }
+
+  const tombs = readTombs();
+  const upserts: Record<string, Record<string, unknown>[]> = {};
+  let rows = 0;
+
+  for (const collection of ROW_COLLECTIONS) {
+    const field = collection.field as string;
+    /* ما لا يُقرأ لا يُضمّ: المجموعة المحجوبة تصل فارغةً فلا تُحسب نقصاً */
+    if (hidden.has(field)) continue;
+
+    const here = new Set(
+      ((latest[collection.field] ?? []) as Record<string, unknown>[]).map((r) =>
+        collection.keyOf(r)
+      )
+    );
+    const buried = new Set(tombs[field] ?? []);
+    const gained = (
+      (snapshot[collection.field] ?? []) as Record<string, unknown>[]
+    ).filter((r) => {
+      const key = collection.keyOf(r);
+      return !here.has(key) && !buried.has(key);
+    });
+    if (gained.length > 0) {
+      upserts[field] = gained;
+      rows += gained.length;
+    }
+  }
+
+  if (rows === 0) return 0;
+  applier({ upserts, deletes: {}, rev: status.rev });
+  publish({ adopted: status.adopted + rows });
+  return rows;
+}
+
+/**
  * يُبلَّغ بكل حفظ.
  *
  * ولا يرسل مع كل حفظ: الحفظ يقع مع كل حرف يُكتب في نموذج، والإرسال
@@ -370,6 +448,11 @@ export function record(state: AppState): void {
   */
   latest = state;
   remember(state);
+  /* ضمٌّ طُلب قبل أن تُعرَف الحالة — الآن تُعرف */
+  if (adoptWanted) {
+    adoptWanted = false;
+    adoptFromSnapshot();
+  }
   if (!status.enabled) return;
   if (snapshot) {
     publish({ pending: countChanges(sendable(snapshot, state)) });
@@ -660,6 +743,20 @@ function schedulePull(): void {
     pullTimer = null;
     void pull().finally(schedulePull);
   }, PULL_MS);
+}
+
+/**
+ * يضمّ الزائد على الخادم إلى الجهاز — بطلبٍ صريح.
+ *
+ * يُقرأ الخادم من جديد ثم يُضمّ ما ليس في الجهاز. ويُنادى من شاشة
+ * المقارنة حين يُظهر التقرير زيادةً، فهو البابُ المقابل للحذف: أحدهما
+ * يُسلّم للخادم والآخر يُسلّم للجهاز، ولا يُقال «زائد» إلا ويُسأل:
+ * أيُّهما أحدثُ عهداً بالحقيقة؟
+ */
+export async function adoptExtra(local: AppState): Promise<number> {
+  snapshot = await fetchServerState();
+  latest = local;
+  return adoptFromSnapshot();
 }
 
 /**
