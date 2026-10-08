@@ -6513,6 +6513,11 @@ function ContractorsPage({
     setInstallments((c.installments ?? []).map((i) => ({ ...i })));
     setError("");
     setShowForm(true);
+    /* ويُقفز إليه — فالنموذج تحت اللوحة والقائمة، ولا يُترك يبحث عنه */
+    window.setTimeout(
+      () => formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+      0
+    );
   };
 
   const setCount = (raw: string) => {
@@ -6981,7 +6986,21 @@ function ContractorsPage({
           title={`${selected.documentType} ${selected.contractNumber} — ${selected.name}`}
           subtitle={`${selected.project} · ${selected.workType}`}
         >
-          <div className="mb-4 flex gap-3">
+          {/*
+            «تعديل» هنا كذلك.
+
+            كان في آخر أعمدة الجدول وحده — والجدولُ عشرةُ أعمدةٍ يُمرَّر
+            أفقياً، فالزرُّ يختفي يساراً. وسأل صاحب الشركة: «العقد غير
+            موجود، أين أجده لتصحيحه؟» وهو أمامه، وزرُّه وراء حافّة
+            الشاشة. فصار في لوحة العقد المفتوح — وهي أوّل ما يُرى.
+          */}
+          <div className="mb-4 flex flex-wrap items-center gap-3">
+            <button
+              onClick={() => openEdit(selected)}
+              className="rounded-lg bg-blue-600 px-5 py-2 font-bold text-white"
+            >
+              ✎ عدّل هذا العقد
+            </button>
             <button
               onClick={() => onPrint(selected)}
               className="rounded-lg bg-slate-900 px-5 py-2 font-bold text-white"

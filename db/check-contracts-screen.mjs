@@ -99,6 +99,23 @@ if (BACKUP && fs.existsSync(BACKUP)) {
   check("والحدُّ أقلُّ من عددها — فالفحص يفحص", d.contractors.length > 25);
 }
 
+console.log("\nو«تعديل» في متناول اليد:\n");
+
+check(
+  "زرُّ التعديل في لوحة العقد المفتوح",
+  /onClick=\{\(\) => openEdit\(selected\)\}/.test(page),
+  "وكان في آخر أعمدة جدولٍ يُمرَّر أفقياً فيختفي"
+);
+check(
+  "ولم يُفقد من الجدول",
+  /onClick=\{\(\) => openEdit\(c\)\}/.test(page)
+);
+check(
+  "وفتحُ النموذج يَقفز إليه",
+  /setShowForm\(true\);\s+\/\* ويُقفز إليه/.test(page),
+  "فالنموذج تحت اللوحة والقائمة"
+);
+
 console.log(
   bad === 0
     ? "\n✓ ما يُفتح يُرى في مكانه، والقائمة تُطلب ولا تُفتَّش"
