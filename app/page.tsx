@@ -8624,11 +8624,39 @@ function ContractSheet({
           {contract.nationality && <p>الجنسية : {contract.nationality}</p>}
         </div>
 
-        {/* التمهيد */}
+{/*
+          التمهيد.
+
+          وسطورُه تبقى سطوراً: كان يُطبع في فقرةٍ واحدة فتُبتلع فواصلُ
+          الأسطر، وتمهيدُ بعض الملاحق ثلاثةُ أسطر — سببُ الملحق، ثم ما
+          يشمله التسعير، ثم المبلغ. فكانت تخرج جملةً واحدةً متّصلة،
+          والورقةُ ثلاثةُ أسطر.
+        */}
         {contract.preamble && (
           <div className="mb-5">
             <h2 className="mb-2 text-center text-lg font-bold" style={{ color: CONTRACT_RED }}>تمهيد</h2>
-            <p className="text-sm leading-loose">{contract.preamble}</p>
+            <p className="whitespace-pre-line text-sm leading-loose">
+              {contract.preamble}
+            </p>
+          </div>
+        )}
+
+        {/*
+          ملاحظةُ الملحق تُطبع — ولم تكن تُطبع قطّ.
+
+          ملاحظاتُ عقد العميل تظهر في بند «قيمة العقد»، وذاك البندُ لا
+          يُطبع في الملحق. والشرط كان «وليس بعقد عميل»، فملحقُ العميل
+          يسقط بين الاثنين: لا بندَ قيمةٍ يحمل ملاحظته، ولا هذا الموضع
+          يقبلها. فكانت ملاحظةُ ملحق ٥٠٠٤ — وفيها ما يشمله التسعير
+          ومدّةُ الزيادة — غائبةً عن الورقة المطبوعة كلِّها.
+
+          وموضعُها بعد التمهيد، فهناك تضعها الأوراق المبرمة.
+        */}
+        {contract.notes && isClient && isAddendum && (
+          <div className="mb-5">
+            <p className="whitespace-pre-line text-sm leading-loose">
+              {contract.notes}
+            </p>
           </div>
         )}
 
@@ -8744,7 +8772,15 @@ function ContractSheet({
             إجمالي — فالعقد المبرم لا إجمالي فيه، ومجموع دفعاته الموجبة
             هو القيمة النهائية المنصوص عليها في «ثانياً».
           */}
-          {isClient ? (
+          {/*
+            جدولُ الأعمال ذو الأعمدة الستة للعقد الأصل وحده.
+
+            هو مبنيٌّ لمراحله وبنوده وموادّه، والملحقُ ليس كذلك: دفعاتٌ
+            معدودةٌ بشرطٍ وقيمة، لا مراحلَ ولا مواد. فكان يُطبع بستة
+            أعمدةٍ أربعةٌ منها خالية، والورقةُ المبرمة جدولُ دفعاتٍ
+            بأربعة أعمدةٍ وسطرِ إجمالي — وهو الجدولُ المعدّ هنا أصلاً.
+          */}
+          {isClient && !isAddendum ? (
             <ClientWorksTable installments={contract.installments} />
           ) : (
             <table className="works-table mt-3 w-full border-collapse text-right text-sm">

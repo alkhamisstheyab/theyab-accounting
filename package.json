@@ -59,7 +59,8 @@
     "check:frozen": "node db/check-frozen-address.mjs",
     "check:admin-general": "node db/check-admin-to-general.mjs",
     "check:settled": "node db/check-contract-settled.mjs",
-    "check:adopt": "node db/check-adopt-extra.mjs"
+    "check:adopt": "node db/check-adopt-extra.mjs",
+    "check:annex": "node db/check-annex-print.mjs"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
