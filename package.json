@@ -60,7 +60,8 @@
     "check:admin-general": "node db/check-admin-to-general.mjs",
     "check:settled": "node db/check-contract-settled.mjs",
     "check:adopt": "node db/check-adopt-extra.mjs",
-    "check:annex": "node db/check-annex-print.mjs"
+    "check:annex": "node db/check-annex-print.mjs",
+    "check:engineer": "node db/check-engineer-reaches.mjs"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

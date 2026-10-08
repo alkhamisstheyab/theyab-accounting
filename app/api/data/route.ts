@@ -18,6 +18,7 @@ import {
   readableState,
   type ChangeShape,
 } from "@/lib/server/permits";
+import { certifyOnly } from "@/lib/server/certify";
 import { readState } from "@/lib/server/state";
 import { applyChangesIn, currentRev, type ChangeSet } from "@/lib/server/writes";
 
@@ -81,22 +82,60 @@ export async function POST(request: Request) {
       ما جاز يُكتب، وما لا يجوز يُردّ باسمه. ولو رُدّ الطلب كلّه لصفٍّ
       واحدٍ فيه لوقف رفعُ عمل صاحبه كلِّه، وهو لا يدري.
     */
-    const { allowed, refused } = allowedChanges(changes, user.permissions);
-    if (nothingToWrite(allowed)) {
+const { allowed, refused } = allowedChanges(changes, user.permissions);
+
+    /*
+      شهادةُ المهندس تمرّ وإن رُدّت كتابتُه.
+
+      الكتابة في العقود تطلب «إدارة المقاولين»، والمهندس لا يملكها ولا
+      يصحّ أن يملكها. فكان اعتمادُه يُردّ كلُّه: يعتمد في جهازه فتظهر
+      الدفعة معتمدةً أمامه، ولا يصل الخادمَ شيء، ولا يعلم صاحبُ الشركة
+      أن أحداً اعتمد.
+
+      فيُقرأ الصفُّ المحفوظ ويُؤخذ من الوارد حقولُ الشهادة وحدها — وما
+      سواها يبقى كما هو عند الخادم. ولا يُحتاج إلى الثقة بما أرسل.
+    */
+    const certifying =
+      refused.some((r) => r.field === "contractors") &&
+      (user.permissions.includes("contracts.approve") ||
+        user.permissions.includes("contracts.confirm"));
+
+    /* الكاتب اسمه لا معرّفه: السجل يُقرأ بعد سنوات وقد زال الحساب */
+    const result = await inTransaction(async (db) => {
+      const toWrite = { ...(allowed as ChangeSet) };
+      let certified = 0;
+
+      if (certifying) {
+        const sent = (changes.upserts?.contractors ?? []) as unknown[];
+        const merged = await certifyOnly(db, sent, user.permissions);
+        if (merged.length > 0) {
+          toWrite.upserts = { ...(toWrite.upserts ?? {}), contractors: merged };
+          certified = merged.length;
+        }
+      }
+
+      if (nothingToWrite(toWrite)) return null;
+      /* الفرز يختار مجموعاتٍ من الطلب ولا يمسّ صفوفها، فهي كما وصلت */
+      const counts = await applyChangesIn(db, toWrite, user.name);
+      return { ...counts, certified, rev: await currentRev(db) };
+    });
+
+    if (!result) {
       return NextResponse.json(
         { error: refused[0]?.reason ?? "لا شيء في الطلب", refused },
         { status: refused.length > 0 ? 403 : 200 }
       );
     }
 
-    /* الكاتب اسمه لا معرّفه: السجل يُقرأ بعد سنوات وقد زال الحساب */
-    const result = await inTransaction(async (db) => {
-      /* الفرز يختار مجموعاتٍ من الطلب ولا يمسّ صفوفها، فهي كما وصلت */
-      const counts = await applyChangesIn(db, allowed as ChangeSet, user.name);
-      return { ...counts, rev: await currentRev(db) };
-    });
+    /*
+      ما مرّ بالشهادة لا يُقال لصاحبه إنه رُدّ: كُتب منه ما يملكه، وبقي
+      ما لا يملكه عند الخادم كما هو. ولو عُدّ مردوداً لظنّ عملَه ضائعاً.
+    */
+    const told = result.certified > 0
+      ? refused.filter((r) => r.field !== "contractors")
+      : refused;
 
-    return NextResponse.json({ ...result, refused });
+    return NextResponse.json({ ...result, refused: told });
   } catch (error) {
     return fail(error);
   }

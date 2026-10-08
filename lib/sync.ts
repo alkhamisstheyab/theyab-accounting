@@ -540,12 +540,29 @@ async function flush(): Promise<void> {
   const state = latest;
   const changes = sendable(snapshot, state);
 
-  /* ما لا يقرؤه صاحب الجهاز لا يُرسل — وليس نقصاً عنده بل حجاباً */
+  /*
+    ما لا يقرؤه صاحب الجهاز لا يُرسل — وليس نقصاً عنده بل حجاباً.
+
+    ويُستثنى **ما يُضاف إلى سجلّ التدقيق**: المهندس لا يقرأ السجلّ،
+    فكان جهازُه لا يرسل قيوده — فلا أثرَ لعمله فيه البتّة. ولا يُقرأ
+    سجلُّ التدقيق ليُعرف عملُ كاتبه وحده، بل ليُعرف عملُ الناس كلِّهم،
+    فمن لا يُكتب فيه كأنه لم يعمل. وسأل صاحب الشركة: «دخلتُ التدقيق ولم
+    يظهر لي أن نوحاً أدخل أي عملية» — ولم يكن في السجلّ منه قيدٌ واحد
+    منذ فُتح النظام.
+
+    والإضافةُ آمنة: السجلّ لا يُحذف منه شيء عند الخادم، والحذفُ منه
+    مردودٌ على الجميع ولو كان المالك. فيُرسل ما يُضاف، ولا يُرسل حذف.
+  */
+  const sendsAnyway = (part: string, field: string) =>
+    part === "upserts" && field === "audit";
+
   for (const part of ["upserts", "deletes", "whole"] as const) {
     const group = changes[part];
     if (!group) continue;
     for (const field of Object.keys(group)) {
-      if (hidden.has(field)) delete (group as Record<string, unknown>)[field];
+      if (hidden.has(field) && !sendsAnyway(part, field)) {
+        delete (group as Record<string, unknown>)[field];
+      }
     }
     if (Object.keys(group).length === 0) delete changes[part];
   }

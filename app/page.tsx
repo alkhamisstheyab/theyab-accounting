@@ -16449,8 +16449,17 @@ function ApprovalsPage({
     تأخير، فيشهد المهندس بالإنجاز ويحسم ما يستحقّه الحسم في آنٍ واحد،
     ثم تُقرّه الإدارة وهي تراه.
   */
-  const [deduction, setDeduction] = useState("");
-  const [deductionReason, setDeductionReason] = useState("");
+  /*
+      وهي لكلِّ عقدٍ على حدة.
+
+      كانت حالةً واحدةً للشاشة كلِّها، والخانات تُرسم داخل بطاقة كل
+      عقد — فما يُكتب في بطاقةٍ يظهر في البطاقات كلِّها، ويُطبَّق على
+      أيِّ دفعةٍ تُعتمد بعده أيّاً كان عقدُها. فكتب المهندس خصم مئة
+      دينار على عقدٍ فرآه على عقدٍ آخر، وهو مالٌ يُحسم من مستحقّ رجل.
+    */
+  const [deductionBy, setDeductionBy] = useState<Record<string, string>>({});
+  const [reasonBy, setReasonBy] = useState<Record<string, string>>({});
+  const [noteBy, setNoteBy] = useState<Record<string, string>>({});
   const [message, setMessage] = useState("");
 
   /*
@@ -16486,6 +16495,9 @@ function ApprovalsPage({
     installmentNumber: number,
     approved: boolean
   ) => {
+    const note = noteBy[contractId] ?? "";
+    const deduction = deductionBy[contractId] ?? "";
+    const deductionReason = reasonBy[contractId] ?? "";
     setContractors((prev) =>
       prev.map((contract) =>
         contract.id !== contractId
@@ -16546,9 +16558,15 @@ function ApprovalsPage({
       }
     );
 
-    setNote("");
-    setDeduction("");
-    setDeductionReason("");
+    /* تُمسح خانات هذا العقد وحده — ولا تُمسّ خانات غيره */
+    const clear = (prev: Record<string, string>) => {
+      const next = { ...prev };
+      delete next[contractId];
+      return next;
+    };
+    setNoteBy(clear);
+    setDeductionBy(clear);
+    setReasonBy(clear);
     setMessage(
       approved
         ? `اعتُمد إنجاز الدفعة ${installmentNumber} — تنتظر إقرار الإدارة`
@@ -16789,8 +16807,10 @@ function ApprovalsPage({
                   >
                     <input
                       type="text"
-                      value={note}
-                      onChange={(e) => setNote(e.target.value)}
+                      value={noteBy[contract.id] ?? ""}
+                      onChange={(e) =>
+                        setNoteBy((p) => ({ ...p, [contract.id]: e.target.value }))
+                      }
                       placeholder="مثال: عُوين الموقع وتم صب السقف بالكامل"
                       className={inputClass}
                     />
@@ -16802,8 +16822,13 @@ function ApprovalsPage({
                     <input
                       type="number"
                       step="0.001"
-                      value={deduction}
-                      onChange={(e) => setDeduction(e.target.value)}
+                      value={deductionBy[contract.id] ?? ""}
+                      onChange={(e) =>
+                        setDeductionBy((p) => ({
+                          ...p,
+                          [contract.id]: e.target.value,
+                        }))
+                      }
                       placeholder="0.000"
                       className={inputClass}
                     />
@@ -16814,8 +16839,10 @@ function ApprovalsPage({
                   >
                     <input
                       type="text"
-                      value={deductionReason}
-                      onChange={(e) => setDeductionReason(e.target.value)}
+                      value={reasonBy[contract.id] ?? ""}
+                      onChange={(e) =>
+                        setReasonBy((p) => ({ ...p, [contract.id]: e.target.value }))
+                      }
                       placeholder="مثال: تأخير عشرة أيام عن الموعد"
                       className={inputClass}
                     />
