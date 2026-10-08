@@ -16498,6 +16498,47 @@ function ApprovalsPage({
     const note = noteBy[contractId] ?? "";
     const deduction = deductionBy[contractId] ?? "";
     const deductionReason = reasonBy[contractId] ?? "";
+
+    /*
+      خصمُ الاعتماد لا يَنزل بالمستحقّ دون المصروف.
+
+      كان الحارس على «تسوية المستحقّ» وحدها — وهي الخصم بعد الصرف —
+      ولم يكن على خصم الاعتماد. فاعتمد مهندسٌ دفعةً قيمتُها سبعُ مئةٍ
+      وقد صُرفت كلُّها، وحسم عليها مئة، فصار المستحقّ ستّ مئةٍ والمقبوض
+      سبعَ مئة: زيادةٌ على مستحقٍّ لا وجه لها، ولا يُلغى اعتمادُها لأن
+      المال خرج. وهو الباب نفسه فليكن له الحارس نفسه.
+    */
+    if (approved) {
+      const amount = round3(Number(deduction) || 0);
+      if (amount > 0) {
+        const target = contractors.find((c) => c.id === contractId);
+        const row = target?.installments.find(
+          (i) => i.number === installmentNumber
+        );
+        const value = round3(Number(row?.value) || 0);
+        const spent = target
+          ? round3(
+              contractPayments(movements, target.contractNumber).byInstallment.get(
+                installmentNumber
+              ) ?? 0
+            )
+          : 0;
+        if (deductionReason.trim().length < 4) {
+          window.alert("اكتب سبب الخصم — ولا يُحفظ خصمٌ بغيره");
+          return;
+        }
+        if (round3(value - amount) < spent) {
+          window.alert(
+            `الخصم ${fmt(amount)} يُنقص المستحقّ إلى ${fmt(
+              round3(value - amount)
+            )} د.ك، وقد صُرف من هذه الدفعة ${fmt(spent)} د.ك.\n\nأقصى خصمٍ ممكن: ${fmt(
+              round3(value - spent)
+            )} د.ك.`
+          );
+          return;
+        }
+      }
+    }
     setContractors((prev) =>
       prev.map((contract) =>
         contract.id !== contractId
@@ -16800,7 +16841,14 @@ function ApprovalsPage({
               )}
 
               {canApprove && (
-                <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-3">
+                <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <p className="mb-2 text-xs leading-5 text-slate-600">
+                    <b>تُكتب هنا قبل الاعتماد، وتُحفظ بزرّ «اعتماد الإنجاز»</b> في
+                    صفّ المرحلة أسفلُ — <b>وليس لها زرُّ حفظٍ هنا</b>. وأمّا خصمٌ
+                    على مرحلةٍ <b>اعتُمدت من قبل</b> فموضعُه زرّ «خصم على
+                    المستحقّ» في صفّها، وله لوحتُه وزرُّ حفظه.
+                  </p>
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                   <Field
                     label="ملاحظة الاعتماد"
                     hint="تُحفظ مع الدفعة التي تعتمدها بعد كتابتها"
@@ -16817,7 +16865,7 @@ function ApprovalsPage({
                   </Field>
                   <Field
                     label="خصم على الدفعة (د.ك)"
-                    hint="تقصيرٌ أو تأخير — يُنقص المستحق ولا يمسّ قيمة العقد"
+                    hint="تقصيرٌ أو تأخير — يُنقص المستحق ولا يمسّ قيمة العقد، ولا يَنزل به دون ما صُرف"
                   >
                     <input
                       type="number"
@@ -16847,6 +16895,7 @@ function ApprovalsPage({
                       className={inputClass}
                     />
                   </Field>
+                  </div>
                 </div>
               )}
 
