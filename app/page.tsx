@@ -6342,6 +6342,28 @@ function ContractorsPage({
   ) => void;
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  /*
+    بحثٌ على القائمة — وثمانيةٌ وأربعون عقداً لا تُفتَّش بالعين.
+
+    يُطابق الرقم والاسم والمشروع ونوع العمل، بعد تسوية الهمزات
+    والتاءات، فمن كتب «عواطف» وجد «مشروع عواطف القرطاس».
+  */
+  const [search, setSearch] = useState("");
+  const [hideSettled, setHideSettled] = useState(true);
+  /*
+    اختيارُ العقد يَقفز إليه.
+
+    اللوحةُ فوق القائمة، فمن اختار عقداً من وسط الجدول بقي حيث هو
+    والعملُ فوقه. فيُنقل إليه — ولا يُترك يبحث عمّا فتحه.
+  */
+  const detailRef = useRef<HTMLDivElement | null>(null);
+  const pick = (id: string) => {
+    setSelectedId(id);
+    window.setTimeout(
+      () => detailRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }),
+      0
+    );
+  };
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(BLANK_CONTRACT);
@@ -6384,6 +6406,33 @@ function ContractorsPage({
   const formRef = useRef<HTMLDivElement | null>(null);
 
   const selected = contractors.find((c) => c.id === selectedId) ?? null;
+
+  /* ما يُعرض في القائمة بعد البحث وإخفاء المنتهي */
+  const settlements = useMemo(() => {
+    const map = new Map<string, ReturnType<typeof contractSettlement>>();
+    for (const c of contractors) map.set(c.id, contractSettlement(movements, c));
+    return map;
+  }, [contractors, movements]);
+
+  const listed = useMemo(() => {
+    const q = normalizeArabic(search.trim());
+    return contractors.filter((c) => {
+      if (hideSettled && c.id !== selectedId && settlements.get(c.id)?.settled) {
+        return false;
+      }
+      if (!q) return true;
+      const hay = normalizeArabic(
+        [c.contractNumber, c.name, c.project, c.workType, c.specialty]
+          .filter(Boolean)
+          .join(" ")
+      );
+      return hay.includes(q);
+    });
+  }, [contractors, search, hideSettled, selectedId, settlements]);
+
+  const settledCount = contractors.filter(
+    (c) => settlements.get(c.id)?.settled
+  ).length;
   const isAddendum = form.documentType === "ملحق عقد";
 
   useEffect(() => {
@@ -6916,732 +6965,18 @@ function ContractorsPage({
         </Panel>
       )}
 
-      <Panel
-        title="عقود المقاولين"
-        subtitle={`${contractors.length} مستند — «المدفوع» محسوب من قيود الدفع المرتبطة`}
-      >
-        <button
-          onClick={showForm ? () => setShowForm(false) : openNew}
-          className="mb-5 rounded-lg bg-blue-600 px-6 py-3 font-bold text-white"
-        >
-          {showForm ? "إخفاء النموذج" : "عقد أو ملحق جديد"}
-        </button>
+      {/*
+        العقد المختار فوق القائمة لا تحتها.
 
-        {showForm && (
-          <div
-            ref={formRef}
-            className="mb-6 space-y-5 rounded-xl border-2 border-blue-300 p-5"
-          >
-            <h4 className="font-bold">
-              {editingId
-                ? `تعديل ${form.documentType} ${form.contractNumber}${
-                    form.name ? " — " + form.name : ""
-                  }`
-                : "مستند جديد"}
-            </h4>
+        كانت القائمة أوّل الصفحة بثمانيةٍ وأربعين عقداً، ولوحةُ العقد
+        المختار تحتها كلِّها — فمن أراد ربط دفعةٍ نزل ليجد عقده، ثم نزل
+        ثانيةً ليعمل عليه. وشكا صاحب الشركة منه.
 
-            {/* بيانات أساسية */}
-            <div>
-              <p className="mb-2 text-sm font-bold text-slate-600">بيانات أساسية</p>
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-                <Field label="نوع المستند">
-                  <select
-                    value={form.documentType}
-                    onChange={(e) => set("documentType", e.target.value)}
-                    className={inputClass}
-                  >
-                    {DOCUMENT_TYPES.map((t) => (
-                      <option key={t}>{t}</option>
-                    ))}
-                  </select>
-                </Field>
-
-                <Field label="نوع الطرف الثاني">
-                  <select
-                    value={form.counterpartyType}
-                    onChange={(e) =>
-                      set("counterpartyType", e.target.value as CounterpartyType)
-                    }
-                    className={inputClass}
-                  >
-                    {COUNTERPARTY_TYPES.map((t) => (
-                      <option key={t}>{t}</option>
-                    ))}
-                  </select>
-                </Field>
-
-                {isAddendum && (
-                  <Field label="رقم العقد الأصلي">
-                    <select
-                      value={form.parentContractNumber}
-                      onChange={(e) => set("parentContractNumber", e.target.value)}
-                      className={inputClass}
-                    >
-                      <option value="">اختر العقد</option>
-                      {contractors
-                        .filter((c) => c.documentType !== "ملحق عقد")
-                        .map((c) => (
-                          <option key={c.id} value={c.contractNumber}>
-                            {c.contractNumber} — {c.name} ({c.project})
-                          </option>
-                        ))}
-                    </select>
-                  </Field>
-                )}
-
-                <Field label="رقم المستند">
-                  <input
-                    type="text"
-                    value={form.contractNumber}
-                    onChange={(e) => set("contractNumber", e.target.value)}
-                    className={inputClass}
-                  />
-                </Field>
-
-                <Field label="التاريخ">
-                  <input
-                    type="date"
-                    value={form.contractDate}
-                    onChange={(e) => set("contractDate", e.target.value)}
-                    className={inputClass}
-                  />
-                </Field>
-
-                <Field label="المشروع">
-                  <select
-                    value={form.project}
-                    onChange={(e) => set("project", e.target.value)}
-                    className={inputClass}
-                  >
-                    <option value="">اختر المشروع</option>
-                    {projects.map((p) => (
-                      <option key={p.id} value={p.name}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-
-                <Field label="نوع الأعمال">
-                  <input
-                    type="text"
-                    value={form.workType}
-                    onChange={(e) => set("workType", e.target.value)}
-                    placeholder="هيكل أسود"
-                    className={inputClass}
-                  />
-                </Field>
-              </div>
-            </div>
-
-            {/* الطرف الثاني */}
-            <div>
-              <p className="mb-2 text-sm font-bold text-slate-600">
-                الطرف الثاني (المقاول)
-              </p>
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-                {(
-                  [
-                    ["name", "الاسم"],
-                    ["civilId", "الرقم المدني"],
-                    ["passportNumber", "رقم الجواز"],
-                    ["nationality", "الجنسية"],
-                    ["phone", "رقم الهاتف"],
-                    ["specialty", "التخصص"],
-                  ] as [keyof typeof BLANK_CONTRACT, string][]
-                ).map(([key, label]) => (
-                  <Field key={key} label={label}>
-                    <input
-                      type="text"
-                      value={form[key] as string}
-                      onChange={(e) => set(key, e.target.value)}
-                      className={inputClass}
-                    />
-                  </Field>
-                ))}
-              </div>
-            </div>
-
-            {!isAddendum && (
-              <>
-                {/* موقع العمل */}
-                <div>
-                  <p className="mb-2 text-sm font-bold text-slate-600">موقع العمل</p>
-                  <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-                    {(
-                      [
-                        ["area", "المنطقة"],
-                        ["block", "القطعة"],
-                        ["plot", "القسيمة"],
-                        ["licenseNumber", "رقم الرخصة"],
-                      ] as [keyof typeof BLANK_CONTRACT, string][]
-                    ).map(([key, label]) => (
-                      <Field key={key} label={label}>
-                        <input
-                          type="text"
-                          value={form[key] as string}
-                          onChange={(e) => set(key, e.target.value)}
-                          className={inputClass}
-                        />
-                      </Field>
-                    ))}
-                    <div className="md:col-span-2">
-                      <Field label="وصف المبنى">
-                        <input
-                          type="text"
-                          value={form.buildingDescription}
-                          onChange={(e) => set("buildingDescription", e.target.value)}
-                          placeholder="نصف سرداب + أرضي + أول + ثاني + سطح"
-                          className={inputClass}
-                        />
-                      </Field>
-                    </div>
-                  </div>
-                </div>
-
-                {/* الشروط */}
-                <div>
-                  <p className="mb-2 text-sm font-bold text-slate-600">
-                    شروط التنفيذ
-                  </p>
-
-                  {/*
-                    قاعدة الشركة: لا تُؤمّن على موقعٍ إلا إن كان التنفيذ
-                    بعمّالها. والتنفيذ كلُّه بمقاولين، فالوثيقة على المنفّذ
-                    — بشرط أن ينصّ عقدُه. ومن لم ينصّ فالوثيقة علينا في
-                    موقعه، ويُقال ذلك هنا لا بعد وقوع الحادث.
-                  */}
-                  {form.counterpartyType !== "عميل" && (
-                    <div
-                      className={`mb-3 rounded-lg border p-3 ${
-                        form.insuranceDuty
-                          ? "border-green-300 bg-green-50"
-                          : "border-amber-300 bg-amber-50"
-                      }`}
-                    >
-                      <p className="mb-1 text-sm font-bold">
-                        وثيقة تأمين الموقع — على مَن تقع؟
-                      </p>
-                      <p className="mb-2 text-xs text-slate-600">
-                        الشركة لا تُؤمّن على موقعٍ إلا إن كان التنفيذ بعمّالها.
-                      </p>
-
-                      <div className="flex flex-wrap gap-2">
-                        {[
-                          {
-                            key: "المقاول",
-                            label: "منصوصٌ في العقد — على المقاول",
-                          },
-                          { key: "لا تلزم", label: "لا تلزم وثيقة" },
-                          { key: "", label: "غيرُ محدَّد — فهي علينا" },
-                        ].map((choice) => (
-                          <button
-                            key={choice.key || "none"}
-                            onClick={() =>
-                              setForm((f) => ({
-                                ...f,
-                                insuranceDuty: choice.key,
-                                /* السبب لا معنى له إلا مع الإعفاء */
-                                insuranceNote:
-                                  choice.key === "لا تلزم" ? f.insuranceNote : "",
-                              }))
-                            }
-                            className={`rounded-lg px-4 py-2 text-sm ${
-                              form.insuranceDuty === choice.key
-                                ? "bg-slate-900 font-bold text-white"
-                                : "bg-white"
-                            }`}
-                          >
-                            {choice.label}
-                          </button>
-                        ))}
-                      </div>
-
-                      {form.insuranceDuty === "المقاول" && (
-                        <p className="mt-2 text-xs text-slate-600">
-                          اخترها إن كان في العقد بندٌ صريح — لا مجرّد «يتحمّل
-                          مسؤولية إصابات عماله». فالأول يعني أن مؤمِّناً يدفع،
-                          والثاني أن ترجع عليه وهو قد يكون معسراً.
-                        </p>
-                      )}
-
-                      {form.insuranceDuty === "لا تلزم" && (
-                        <div className="mt-2">
-                          {/*
-                            هذا حكمٌ لا نصّ — لا ورقةَ خلفه. فيُطالَب بسببه
-                            كما يُطالَب كلُّ إسقاطٍ في هذا النظام، وإلا
-                            سُئل عنه بعد سنتين فلم يُعرف جوابه.
-                          */}
-                          <Field
-                            label="سبب الإعفاء"
-                            hint="مطلوب — توريدٌ بلا عمالة في الموقع · عملُ يومٍ واحد · وما أشبه"
-                          >
-                            <input
-                              type="text"
-                              value={form.insuranceNote}
-                              onChange={(e) =>
-                                setForm((f) => ({
-                                  ...f,
-                                  insuranceNote: e.target.value,
-                                }))
-                              }
-                              className={inputClass}
-                            />
-                          </Field>
-                        </div>
-                      )}
-
-                      {!form.insuranceDuty && (
-                        <p className="mt-2 text-sm font-bold text-amber-900">
-                          ⚠ ما لم يُحدَّد، فوثيقة التأمين <u>على الشركة</u> في
-                          هذا الموقع — أضِف البند إلى العقد قبل توقيعه، أو
-                          سجّل الوثيقة في المشروع، أو أعفِه بسببٍ مكتوب.
-                        </p>
-                      )}
-                    </div>
-                  )}
-                  <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
-                    {(
-                      [
-                        ["durationDays", "مدة العقد (يوم)"],
-                        ["delayPenaltyPerDay", "غرامة التأخير اليومية"],
-                        ["maxPenaltyPercent", "حد الغرامات %"],
-                        ["terminationAfterDays", "الفسخ بعد (يوم)"],
-                        ["warrantyYears", "الكفالة (سنة)"],
-                      ] as [keyof typeof BLANK_CONTRACT, string][]
-                    ).map(([key, label]) => (
-                      <Field key={key} label={label}>
-                        <input
-                          type="number"
-                          min="0"
-                          value={form[key] as string}
-                          onChange={(e) => set(key, e.target.value)}
-                          className={inputClass}
-                        />
-                      </Field>
-                    ))}
-                  </div>
-                </div>
-              </>
-            )}
-
-            {/* التمهيد */}
-            <Field
-              label="التمهيد"
-              hint={
-                isAddendum
-                  ? "اشرح سبب الملحق وما يضيفه"
-                  : "يُبنى تلقائياً من بيانات الموقع إن تركته فارغاً"
-              }
-            >
-              <textarea
-                rows={3}
-                value={form.preamble}
-                onChange={(e) => set("preamble", e.target.value)}
-                placeholder={effectivePreamble}
-                className={inputClass}
-              />
-            </Field>
-
-            {!isAddendum && (
-              <>
-                {/* البنود الفنية */}
-                <div>
-                  <div className="mb-2 flex items-center gap-3">
-                    <p className="text-sm font-bold text-slate-600">
-                      البنود الفنية ({clauses.length})
-                    </p>
-                    <button
-                      onClick={() =>
-                        setClauses((prev) => [
-                          ...prev,
-                          { id: newId(), title: "", body: "" },
-                        ])
-                      }
-                      className="rounded bg-slate-100 px-3 py-1 text-xs font-bold"
-                    >
-                      + بند
-                    </button>
-                  </div>
-
-                  <div className="space-y-3">
-                    {clauses.map((clause, index) => (
-                      <div
-                        key={clause.id}
-                        className="rounded-lg border border-slate-200 p-3"
-                      >
-                        <div className="mb-2 flex gap-2">
-                          <input
-                            type="text"
-                            value={clause.title}
-                            onChange={(e) =>
-                              setClauses((prev) =>
-                                prev.map((c, i) =>
-                                  i === index ? { ...c, title: e.target.value } : c
-                                )
-                              )
-                            }
-                            placeholder="عنوان البند"
-                            className={`${inputClass} font-bold`}
-                          />
-                          <button
-                            onClick={() =>
-                              setClauses((prev) => prev.filter((_, i) => i !== index))
-                            }
-                            className="rounded-lg bg-red-50 px-3 text-red-700"
-                          >
-                            حذف
-                          </button>
-                        </div>
-                        <textarea
-                          rows={3}
-                          value={clause.body}
-                          onChange={(e) =>
-                            setClauses((prev) =>
-                              prev.map((c, i) =>
-                                i === index ? { ...c, body: e.target.value } : c
-                              )
-                            )
-                          }
-                          className={inputClass}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* الالتزامات */}
-                <div>
-                  <div className="mb-2 flex items-center gap-3">
-                    <p className="text-sm font-bold text-slate-600">
-                      الالتزامات والمواصفات الفنية ({obligations.length})
-                    </p>
-                    <button
-                      onClick={() => setObligations((prev) => [...prev, ""])}
-                      className="rounded bg-slate-100 px-3 py-1 text-xs font-bold"
-                    >
-                      + التزام
-                    </button>
-                  </div>
-
-                  <div className="space-y-2">
-                    {obligations.map((text, index) => (
-                      <div key={index} className="flex gap-2">
-                        <span className="pt-3 text-sm font-bold">{index + 1}.</span>
-                        <textarea
-                          rows={2}
-                          value={text}
-                          onChange={(e) =>
-                            setObligations((prev) =>
-                              prev.map((o, i) => (i === index ? e.target.value : o))
-                            )
-                          }
-                          className={inputClass}
-                        />
-                        <button
-                          onClick={() =>
-                            setObligations((prev) => prev.filter((_, i) => i !== index))
-                          }
-                          className="rounded-lg bg-red-50 px-3 text-red-700"
-                        >
-                          حذف
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </>
-            )}
-
-            {/* القيمة والدفعات */}
-            <div>
-              <p className="mb-2 text-sm font-bold text-slate-600">
-                القيمة وجدول الدفعات
-              </p>
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-                <Field label="قيمة العقد (د.ك)">
-                  <input
-                    type="number"
-                    step="0.001"
-                    value={form.contractValue}
-                    onChange={(e) => set("contractValue", e.target.value)}
-                    className={inputClass}
-                  />
-                </Field>
-                <Field label="عدد الدفعات">
-                  <input
-                    type="number"
-                    min="0"
-                    max="60"
-                    value={installments.length || ""}
-                    onChange={(e) => setCount(e.target.value)}
-                    className={inputClass}
-                  />
-                </Field>
-                <div className="flex items-end">
-                  <div className="w-full rounded-lg bg-slate-100 px-4 py-3 text-sm font-bold">
-                    {contractValue > 0 ? amountInWords(contractValue) : "—"}
-                  </div>
-                </div>
-              </div>
-
-              {installments.length > 0 && (
-                <div className="mt-3 space-y-2">
-                  {installments.map((installment, index) => {
-                    const documentary = !isPayableInstallment(installment);
-                    return (
-                    <div key={index} className="grid grid-cols-12 gap-2">
-                      <div
-                        className={`col-span-2 rounded-lg border px-3 py-3 text-sm ${
-                          documentary
-                            ? "border-amber-200 bg-amber-50 text-amber-900"
-                            : "border-slate-200 bg-slate-50"
-                        }`}
-                        title={
-                          documentary
-                            ? "صفّ توثيقي — يُطبع في الجدول ولا يدخل المجموع"
-                            : installment.stage || ""
-                        }
-                      >
-                        {documentary
-                          ? "صفّ توثيقي"
-                          : installment.stage || `الدفعة ${index + 1}`}
-                      </div>
-                      <input
-                        type="number"
-                        step="0.001"
-                        value={installment.value}
-                        onChange={(e) =>
-                          updateInstallment(index, "value", e.target.value)
-                        }
-                        placeholder="القيمة"
-                        className={`${inputClass} col-span-3`}
-                      />
-                      <input
-                        type="text"
-                        value={installment.condition}
-                        onChange={(e) =>
-                          updateInstallment(index, "condition", e.target.value)
-                        }
-                        placeholder="شرط الاستحقاق — بعد صب سقف الدور الأرضي"
-                        className={`${inputClass} col-span-5`}
-                      />
-                      {documentary ? (
-                        <div className="col-span-2 px-3 py-3 text-sm text-amber-900">
-                          مخصوم
-                        </div>
-                      ) : (
-                        <select
-                          value={installment.status}
-                          onChange={(e) =>
-                            updateInstallment(index, "status", e.target.value)
-                          }
-                          className={`${inputClass} col-span-2`}
-                        >
-                          {INSTALLMENT_STATUSES.map((s) => (
-                            <option key={s}>{s}</option>
-                          ))}
-                        </select>
-                      )}
-                    </div>
-                    );
-                  })}
-
-                  <div
-                    className={`rounded-lg border px-4 py-3 font-medium ${
-                      nearlyEqual(installmentsTotal, contractValue)
-                        ? "border-green-200 bg-green-50 text-green-800"
-                        : "border-amber-200 bg-amber-50 text-amber-900"
-                    }`}
-                  >
-                    مجموع الدفعات {fmt(installmentsTotal)} — قيمة العقد{" "}
-                    {fmt(contractValue)}
-                    {documented > 0 && (
-                      <span className="block text-sm font-normal">
-                        ومعها صفّ توثيقي بقيمة {fmt(documented)} مخصومة سلفاً —
-                        يُطبع في الجدول ولا يدخل المجموع.
-                      </span>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/*
-              نقاط «ثانياً: قيمة العقد» سطرٌ لكل نقطة. وحقل السطر الواحد
-              كان يبتلع فواصل الأسطر بلا إنذار، فتنقلب النقاط الثلاث
-              نقطةً واحدة عند أول حفظ — ويضيع نصُّ العقد.
-            */}
-            <Field
-              label="ملاحظات العقد"
-              hint="سطرٌ لكل نقطة — تُطبع نقاطاً تحت «ثانياً: قيمة العقد»"
-            >
-              <textarea
-                rows={3}
-                value={form.notes}
-                onChange={(e) => set("notes", e.target.value)}
-                className={inputClass}
-              />
-            </Field>
-
-            {error && <p className="text-sm font-medium text-red-600">{error}</p>}
-
-            <div className="flex gap-3">
-              <button
-                onClick={save}
-                className="rounded-lg bg-slate-900 px-6 py-3 font-bold text-white"
-              >
-                {editingId ? "حفظ التعديل" : "حفظ المستند"}
-              </button>
-              <button
-                onClick={() => setShowForm(false)}
-                className="rounded-lg bg-slate-200 px-6 py-3 font-bold"
-              >
-                إلغاء
-              </button>
-            </div>
-          </div>
-        )}
-
-        <div className="overflow-x-auto">
-          <table className="w-full text-right text-sm">
-            <thead className="bg-slate-100">
-              <tr>
-                <Th>النوع</Th>
-                <Th>الرقم</Th>
-                <Th>التاريخ</Th>
-                <Th>المقاول</Th>
-                <Th>المشروع</Th>
-                <Th>القيمة</Th>
-                <Th>مع الملاحق</Th>
-                <Th>المدفوع</Th>
-                <Th>المتبقي</Th>
-                <Th>الإجراء</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {contractors.length === 0 ? (
-                <tr>
-                  <Td colSpan={10} className="text-center text-slate-500">
-                    لا توجد عقود
-                  </Td>
-                </tr>
-              ) : (
-                contractors.map((c) => {
-                  const paid = payments(c).total;
-                  const withAddenda = totalWithAddenda(c);
-                  const addendum = c.documentType === "ملحق عقد";
-                  return (
-                    <tr key={c.id} className="border-b border-slate-200">
-                      <Td>
-                        {addendum ? (
-                          <span className="rounded bg-amber-100 px-2 py-1 text-xs text-amber-900">
-                            ملحق لـ {c.parentContractNumber}
-                          </span>
-                        ) : (
-                          "عقد"
-                        )}
-                      </Td>
-                      <Td>
-                        <button
-                          onClick={() => setSelectedId(c.id)}
-                          className="text-blue-600 underline"
-                        >
-                          {c.contractNumber}
-                        </button>
-                      </Td>
-                      <Td>{c.contractDate || "—"}</Td>
-                      <Td>{c.name}</Td>
-                      <Td>{c.project}</Td>
-                      <Td>
-                        <Money value={c.contractValue} />
-                      </Td>
-                      <Td>
-                        {withAddenda !== c.contractValue ? (
-                          <span className="font-bold text-amber-800">
-                            {fmt(withAddenda)}
-                          </span>
-                        ) : (
-                          "—"
-                        )}
-                      </Td>
-                      <Td>
-                        <Money value={paid} />
-                      </Td>
-                      <Td>
-                        <Money value={round3(c.contractValue - paid)} />
-                      </Td>
-                      <Td>
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() => onPrint(c)}
-                            className="rounded-lg bg-slate-100 px-3 py-2"
-                          >
-                            🖨 طباعة
-                          </button>
-                          <button
-                            onClick={() => openEdit(c)}
-                            className="rounded-lg bg-blue-50 px-3 py-2 text-blue-700"
-                          >
-                            تعديل
-                          </button>
-                          <button
-                            onClick={() => {
-                              /*
-                                الحذف يفكّ ربط الحركات ولا يحذفها: تعود إلى
-                                «غير المرتبطة» فتُربط بعقدها الصحيح. ويُقال
-                                عددها قبل الحذف لا بعده.
-                              */
-                              const linkedCount = movements.filter(
-                                (m) => m.contractNumber === c.contractNumber
-                              ).length;
-                              const warning =
-                                linkedCount > 0
-                                  ? `\n\nتنبيه: ${linkedCount} حركة مرتبطة بهذا العقد. حذفه يفكّ ربطها — والقيود نفسها لا تُحذف.`
-                                  : "";
-                              if (
-                                window.confirm(
-                                  `حذف «${c.contractNumber}» — ${c.name}؟${warning}`
-                                )
-                              ) {
-                                setContractors((prev) =>
-                                  prev.filter((x) => x.id !== c.id)
-                                );
-                                /* ولا يُفكّ إن بقي عقدٌ آخر بالرقم نفسه */
-                                const shared = contractors.some(
-                                  (x) =>
-                                    x.id !== c.id &&
-                                    x.contractNumber === c.contractNumber
-                                );
-                                if (!shared) onUnlinkContract(c.contractNumber);
-                                onLog(
-                                  "حذف",
-                                  "عقد",
-                                  `حذف ${c.documentType} ${c.contractNumber} — ${c.name}${
-                                    linkedCount > 0 && !shared
-                                      ? ` · فُكّ ربط ${linkedCount} حركة`
-                                      : ""
-                                  }`
-                                );
-                                if (selectedId === c.id) setSelectedId(null);
-                              }
-                            }}
-                            className="rounded-lg bg-red-50 px-3 py-2 text-red-700"
-                          >
-                            حذف
-                          </button>
-                        </div>
-                      </Td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-      </Panel>
-
+        فصارت اللوحة أوّل ما يُرى متى اختير عقد، والقائمةُ تحتها
+        تُرشَّح بالبحث.
+      */}
       {selected && (
+        <div ref={detailRef}>
         <Panel
           title={`${selected.documentType} ${selected.contractNumber} — ${selected.name}`}
           subtitle={`${selected.project} · ${selected.workType}`}
@@ -8280,7 +7615,771 @@ function ContractorsPage({
             );
           })()}
         </Panel>
+        </div>
       )}
+
+      <Panel
+        title="عقود المقاولين"
+        subtitle={`${contractors.length} مستند — «المدفوع» محسوب من قيود الدفع المرتبطة`}
+      >
+        <button
+          onClick={showForm ? () => setShowForm(false) : openNew}
+          className="mb-5 rounded-lg bg-blue-600 px-6 py-3 font-bold text-white"
+        >
+          {showForm ? "إخفاء النموذج" : "عقد أو ملحق جديد"}
+        </button>
+
+        {showForm && (
+          <div
+            ref={formRef}
+            className="mb-6 space-y-5 rounded-xl border-2 border-blue-300 p-5"
+          >
+            <h4 className="font-bold">
+              {editingId
+                ? `تعديل ${form.documentType} ${form.contractNumber}${
+                    form.name ? " — " + form.name : ""
+                  }`
+                : "مستند جديد"}
+            </h4>
+
+            {/* بيانات أساسية */}
+            <div>
+              <p className="mb-2 text-sm font-bold text-slate-600">بيانات أساسية</p>
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                <Field label="نوع المستند">
+                  <select
+                    value={form.documentType}
+                    onChange={(e) => set("documentType", e.target.value)}
+                    className={inputClass}
+                  >
+                    {DOCUMENT_TYPES.map((t) => (
+                      <option key={t}>{t}</option>
+                    ))}
+                  </select>
+                </Field>
+
+                <Field label="نوع الطرف الثاني">
+                  <select
+                    value={form.counterpartyType}
+                    onChange={(e) =>
+                      set("counterpartyType", e.target.value as CounterpartyType)
+                    }
+                    className={inputClass}
+                  >
+                    {COUNTERPARTY_TYPES.map((t) => (
+                      <option key={t}>{t}</option>
+                    ))}
+                  </select>
+                </Field>
+
+                {isAddendum && (
+                  <Field label="رقم العقد الأصلي">
+                    <select
+                      value={form.parentContractNumber}
+                      onChange={(e) => set("parentContractNumber", e.target.value)}
+                      className={inputClass}
+                    >
+                      <option value="">اختر العقد</option>
+                      {contractors
+                        .filter((c) => c.documentType !== "ملحق عقد")
+                        .map((c) => (
+                          <option key={c.id} value={c.contractNumber}>
+                            {c.contractNumber} — {c.name} ({c.project})
+                          </option>
+                        ))}
+                    </select>
+                  </Field>
+                )}
+
+                <Field label="رقم المستند">
+                  <input
+                    type="text"
+                    value={form.contractNumber}
+                    onChange={(e) => set("contractNumber", e.target.value)}
+                    className={inputClass}
+                  />
+                </Field>
+
+                <Field label="التاريخ">
+                  <input
+                    type="date"
+                    value={form.contractDate}
+                    onChange={(e) => set("contractDate", e.target.value)}
+                    className={inputClass}
+                  />
+                </Field>
+
+                <Field label="المشروع">
+                  <select
+                    value={form.project}
+                    onChange={(e) => set("project", e.target.value)}
+                    className={inputClass}
+                  >
+                    <option value="">اختر المشروع</option>
+                    {projects.map((p) => (
+                      <option key={p.id} value={p.name}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+
+                <Field label="نوع الأعمال">
+                  <input
+                    type="text"
+                    value={form.workType}
+                    onChange={(e) => set("workType", e.target.value)}
+                    placeholder="هيكل أسود"
+                    className={inputClass}
+                  />
+                </Field>
+              </div>
+            </div>
+
+            {/* الطرف الثاني */}
+            <div>
+              <p className="mb-2 text-sm font-bold text-slate-600">
+                الطرف الثاني (المقاول)
+              </p>
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                {(
+                  [
+                    ["name", "الاسم"],
+                    ["civilId", "الرقم المدني"],
+                    ["passportNumber", "رقم الجواز"],
+                    ["nationality", "الجنسية"],
+                    ["phone", "رقم الهاتف"],
+                    ["specialty", "التخصص"],
+                  ] as [keyof typeof BLANK_CONTRACT, string][]
+                ).map(([key, label]) => (
+                  <Field key={key} label={label}>
+                    <input
+                      type="text"
+                      value={form[key] as string}
+                      onChange={(e) => set(key, e.target.value)}
+                      className={inputClass}
+                    />
+                  </Field>
+                ))}
+              </div>
+            </div>
+
+            {!isAddendum && (
+              <>
+                {/* موقع العمل */}
+                <div>
+                  <p className="mb-2 text-sm font-bold text-slate-600">موقع العمل</p>
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                    {(
+                      [
+                        ["area", "المنطقة"],
+                        ["block", "القطعة"],
+                        ["plot", "القسيمة"],
+                        ["licenseNumber", "رقم الرخصة"],
+                      ] as [keyof typeof BLANK_CONTRACT, string][]
+                    ).map(([key, label]) => (
+                      <Field key={key} label={label}>
+                        <input
+                          type="text"
+                          value={form[key] as string}
+                          onChange={(e) => set(key, e.target.value)}
+                          className={inputClass}
+                        />
+                      </Field>
+                    ))}
+                    <div className="md:col-span-2">
+                      <Field label="وصف المبنى">
+                        <input
+                          type="text"
+                          value={form.buildingDescription}
+                          onChange={(e) => set("buildingDescription", e.target.value)}
+                          placeholder="نصف سرداب + أرضي + أول + ثاني + سطح"
+                          className={inputClass}
+                        />
+                      </Field>
+                    </div>
+                  </div>
+                </div>
+
+                {/* الشروط */}
+                <div>
+                  <p className="mb-2 text-sm font-bold text-slate-600">
+                    شروط التنفيذ
+                  </p>
+
+                  {/*
+                    قاعدة الشركة: لا تُؤمّن على موقعٍ إلا إن كان التنفيذ
+                    بعمّالها. والتنفيذ كلُّه بمقاولين، فالوثيقة على المنفّذ
+                    — بشرط أن ينصّ عقدُه. ومن لم ينصّ فالوثيقة علينا في
+                    موقعه، ويُقال ذلك هنا لا بعد وقوع الحادث.
+                  */}
+                  {form.counterpartyType !== "عميل" && (
+                    <div
+                      className={`mb-3 rounded-lg border p-3 ${
+                        form.insuranceDuty
+                          ? "border-green-300 bg-green-50"
+                          : "border-amber-300 bg-amber-50"
+                      }`}
+                    >
+                      <p className="mb-1 text-sm font-bold">
+                        وثيقة تأمين الموقع — على مَن تقع؟
+                      </p>
+                      <p className="mb-2 text-xs text-slate-600">
+                        الشركة لا تُؤمّن على موقعٍ إلا إن كان التنفيذ بعمّالها.
+                      </p>
+
+                      <div className="flex flex-wrap gap-2">
+                        {[
+                          {
+                            key: "المقاول",
+                            label: "منصوصٌ في العقد — على المقاول",
+                          },
+                          { key: "لا تلزم", label: "لا تلزم وثيقة" },
+                          { key: "", label: "غيرُ محدَّد — فهي علينا" },
+                        ].map((choice) => (
+                          <button
+                            key={choice.key || "none"}
+                            onClick={() =>
+                              setForm((f) => ({
+                                ...f,
+                                insuranceDuty: choice.key,
+                                /* السبب لا معنى له إلا مع الإعفاء */
+                                insuranceNote:
+                                  choice.key === "لا تلزم" ? f.insuranceNote : "",
+                              }))
+                            }
+                            className={`rounded-lg px-4 py-2 text-sm ${
+                              form.insuranceDuty === choice.key
+                                ? "bg-slate-900 font-bold text-white"
+                                : "bg-white"
+                            }`}
+                          >
+                            {choice.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      {form.insuranceDuty === "المقاول" && (
+                        <p className="mt-2 text-xs text-slate-600">
+                          اخترها إن كان في العقد بندٌ صريح — لا مجرّد «يتحمّل
+                          مسؤولية إصابات عماله». فالأول يعني أن مؤمِّناً يدفع،
+                          والثاني أن ترجع عليه وهو قد يكون معسراً.
+                        </p>
+                      )}
+
+                      {form.insuranceDuty === "لا تلزم" && (
+                        <div className="mt-2">
+                          {/*
+                            هذا حكمٌ لا نصّ — لا ورقةَ خلفه. فيُطالَب بسببه
+                            كما يُطالَب كلُّ إسقاطٍ في هذا النظام، وإلا
+                            سُئل عنه بعد سنتين فلم يُعرف جوابه.
+                          */}
+                          <Field
+                            label="سبب الإعفاء"
+                            hint="مطلوب — توريدٌ بلا عمالة في الموقع · عملُ يومٍ واحد · وما أشبه"
+                          >
+                            <input
+                              type="text"
+                              value={form.insuranceNote}
+                              onChange={(e) =>
+                                setForm((f) => ({
+                                  ...f,
+                                  insuranceNote: e.target.value,
+                                }))
+                              }
+                              className={inputClass}
+                            />
+                          </Field>
+                        </div>
+                      )}
+
+                      {!form.insuranceDuty && (
+                        <p className="mt-2 text-sm font-bold text-amber-900">
+                          ⚠ ما لم يُحدَّد، فوثيقة التأمين <u>على الشركة</u> في
+                          هذا الموقع — أضِف البند إلى العقد قبل توقيعه، أو
+                          سجّل الوثيقة في المشروع، أو أعفِه بسببٍ مكتوب.
+                        </p>
+                      )}
+                    </div>
+                  )}
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
+                    {(
+                      [
+                        ["durationDays", "مدة العقد (يوم)"],
+                        ["delayPenaltyPerDay", "غرامة التأخير اليومية"],
+                        ["maxPenaltyPercent", "حد الغرامات %"],
+                        ["terminationAfterDays", "الفسخ بعد (يوم)"],
+                        ["warrantyYears", "الكفالة (سنة)"],
+                      ] as [keyof typeof BLANK_CONTRACT, string][]
+                    ).map(([key, label]) => (
+                      <Field key={key} label={label}>
+                        <input
+                          type="number"
+                          min="0"
+                          value={form[key] as string}
+                          onChange={(e) => set(key, e.target.value)}
+                          className={inputClass}
+                        />
+                      </Field>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* التمهيد */}
+            <Field
+              label="التمهيد"
+              hint={
+                isAddendum
+                  ? "اشرح سبب الملحق وما يضيفه"
+                  : "يُبنى تلقائياً من بيانات الموقع إن تركته فارغاً"
+              }
+            >
+              <textarea
+                rows={3}
+                value={form.preamble}
+                onChange={(e) => set("preamble", e.target.value)}
+                placeholder={effectivePreamble}
+                className={inputClass}
+              />
+            </Field>
+
+            {!isAddendum && (
+              <>
+                {/* البنود الفنية */}
+                <div>
+                  <div className="mb-2 flex items-center gap-3">
+                    <p className="text-sm font-bold text-slate-600">
+                      البنود الفنية ({clauses.length})
+                    </p>
+                    <button
+                      onClick={() =>
+                        setClauses((prev) => [
+                          ...prev,
+                          { id: newId(), title: "", body: "" },
+                        ])
+                      }
+                      className="rounded bg-slate-100 px-3 py-1 text-xs font-bold"
+                    >
+                      + بند
+                    </button>
+                  </div>
+
+                  <div className="space-y-3">
+                    {clauses.map((clause, index) => (
+                      <div
+                        key={clause.id}
+                        className="rounded-lg border border-slate-200 p-3"
+                      >
+                        <div className="mb-2 flex gap-2">
+                          <input
+                            type="text"
+                            value={clause.title}
+                            onChange={(e) =>
+                              setClauses((prev) =>
+                                prev.map((c, i) =>
+                                  i === index ? { ...c, title: e.target.value } : c
+                                )
+                              )
+                            }
+                            placeholder="عنوان البند"
+                            className={`${inputClass} font-bold`}
+                          />
+                          <button
+                            onClick={() =>
+                              setClauses((prev) => prev.filter((_, i) => i !== index))
+                            }
+                            className="rounded-lg bg-red-50 px-3 text-red-700"
+                          >
+                            حذف
+                          </button>
+                        </div>
+                        <textarea
+                          rows={3}
+                          value={clause.body}
+                          onChange={(e) =>
+                            setClauses((prev) =>
+                              prev.map((c, i) =>
+                                i === index ? { ...c, body: e.target.value } : c
+                              )
+                            )
+                          }
+                          className={inputClass}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* الالتزامات */}
+                <div>
+                  <div className="mb-2 flex items-center gap-3">
+                    <p className="text-sm font-bold text-slate-600">
+                      الالتزامات والمواصفات الفنية ({obligations.length})
+                    </p>
+                    <button
+                      onClick={() => setObligations((prev) => [...prev, ""])}
+                      className="rounded bg-slate-100 px-3 py-1 text-xs font-bold"
+                    >
+                      + التزام
+                    </button>
+                  </div>
+
+                  <div className="space-y-2">
+                    {obligations.map((text, index) => (
+                      <div key={index} className="flex gap-2">
+                        <span className="pt-3 text-sm font-bold">{index + 1}.</span>
+                        <textarea
+                          rows={2}
+                          value={text}
+                          onChange={(e) =>
+                            setObligations((prev) =>
+                              prev.map((o, i) => (i === index ? e.target.value : o))
+                            )
+                          }
+                          className={inputClass}
+                        />
+                        <button
+                          onClick={() =>
+                            setObligations((prev) => prev.filter((_, i) => i !== index))
+                          }
+                          className="rounded-lg bg-red-50 px-3 text-red-700"
+                        >
+                          حذف
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* القيمة والدفعات */}
+            <div>
+              <p className="mb-2 text-sm font-bold text-slate-600">
+                القيمة وجدول الدفعات
+              </p>
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                <Field label="قيمة العقد (د.ك)">
+                  <input
+                    type="number"
+                    step="0.001"
+                    value={form.contractValue}
+                    onChange={(e) => set("contractValue", e.target.value)}
+                    className={inputClass}
+                  />
+                </Field>
+                <Field label="عدد الدفعات">
+                  <input
+                    type="number"
+                    min="0"
+                    max="60"
+                    value={installments.length || ""}
+                    onChange={(e) => setCount(e.target.value)}
+                    className={inputClass}
+                  />
+                </Field>
+                <div className="flex items-end">
+                  <div className="w-full rounded-lg bg-slate-100 px-4 py-3 text-sm font-bold">
+                    {contractValue > 0 ? amountInWords(contractValue) : "—"}
+                  </div>
+                </div>
+              </div>
+
+              {installments.length > 0 && (
+                <div className="mt-3 space-y-2">
+                  {installments.map((installment, index) => {
+                    const documentary = !isPayableInstallment(installment);
+                    return (
+                    <div key={index} className="grid grid-cols-12 gap-2">
+                      <div
+                        className={`col-span-2 rounded-lg border px-3 py-3 text-sm ${
+                          documentary
+                            ? "border-amber-200 bg-amber-50 text-amber-900"
+                            : "border-slate-200 bg-slate-50"
+                        }`}
+                        title={
+                          documentary
+                            ? "صفّ توثيقي — يُطبع في الجدول ولا يدخل المجموع"
+                            : installment.stage || ""
+                        }
+                      >
+                        {documentary
+                          ? "صفّ توثيقي"
+                          : installment.stage || `الدفعة ${index + 1}`}
+                      </div>
+                      <input
+                        type="number"
+                        step="0.001"
+                        value={installment.value}
+                        onChange={(e) =>
+                          updateInstallment(index, "value", e.target.value)
+                        }
+                        placeholder="القيمة"
+                        className={`${inputClass} col-span-3`}
+                      />
+                      <input
+                        type="text"
+                        value={installment.condition}
+                        onChange={(e) =>
+                          updateInstallment(index, "condition", e.target.value)
+                        }
+                        placeholder="شرط الاستحقاق — بعد صب سقف الدور الأرضي"
+                        className={`${inputClass} col-span-5`}
+                      />
+                      {documentary ? (
+                        <div className="col-span-2 px-3 py-3 text-sm text-amber-900">
+                          مخصوم
+                        </div>
+                      ) : (
+                        <select
+                          value={installment.status}
+                          onChange={(e) =>
+                            updateInstallment(index, "status", e.target.value)
+                          }
+                          className={`${inputClass} col-span-2`}
+                        >
+                          {INSTALLMENT_STATUSES.map((s) => (
+                            <option key={s}>{s}</option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+                    );
+                  })}
+
+                  <div
+                    className={`rounded-lg border px-4 py-3 font-medium ${
+                      nearlyEqual(installmentsTotal, contractValue)
+                        ? "border-green-200 bg-green-50 text-green-800"
+                        : "border-amber-200 bg-amber-50 text-amber-900"
+                    }`}
+                  >
+                    مجموع الدفعات {fmt(installmentsTotal)} — قيمة العقد{" "}
+                    {fmt(contractValue)}
+                    {documented > 0 && (
+                      <span className="block text-sm font-normal">
+                        ومعها صفّ توثيقي بقيمة {fmt(documented)} مخصومة سلفاً —
+                        يُطبع في الجدول ولا يدخل المجموع.
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/*
+              نقاط «ثانياً: قيمة العقد» سطرٌ لكل نقطة. وحقل السطر الواحد
+              كان يبتلع فواصل الأسطر بلا إنذار، فتنقلب النقاط الثلاث
+              نقطةً واحدة عند أول حفظ — ويضيع نصُّ العقد.
+            */}
+            <Field
+              label="ملاحظات العقد"
+              hint="سطرٌ لكل نقطة — تُطبع نقاطاً تحت «ثانياً: قيمة العقد»"
+            >
+              <textarea
+                rows={3}
+                value={form.notes}
+                onChange={(e) => set("notes", e.target.value)}
+                className={inputClass}
+              />
+            </Field>
+
+            {error && <p className="text-sm font-medium text-red-600">{error}</p>}
+
+            <div className="flex gap-3">
+              <button
+                onClick={save}
+                className="rounded-lg bg-slate-900 px-6 py-3 font-bold text-white"
+              >
+                {editingId ? "حفظ التعديل" : "حفظ المستند"}
+              </button>
+              <button
+                onClick={() => setShowForm(false)}
+                className="rounded-lg bg-slate-200 px-6 py-3 font-bold"
+              >
+                إلغاء
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* شريطُ البحث فوق القائمة — والمنتهي يُخفى ويُقال كم أُخفي */}
+        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="ابحث برقم العقد أو اسم صاحبه أو المشروع…"
+            className="min-w-[14rem] flex-1 rounded-lg border border-slate-300 px-4 py-2 text-sm"
+          />
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <input
+              type="checkbox"
+              checked={hideSettled}
+              onChange={(e) => setHideSettled(e.target.checked)}
+              className="h-4 w-4"
+            />
+            أخفِ المنتهية
+            {settledCount > 0 && (
+              <span className="text-slate-500">({settledCount})</span>
+            )}
+          </label>
+          <span className="text-sm font-bold text-slate-600">
+            {listed.length} من {contractors.length}
+          </span>
+        </div>
+
+        {/*
+          القائمة لا تطول بلا حدّ: ما زاد عن خمسةٍ وعشرين يُطلب بالبحث.
+          فالصفحة تُفتح على ما يُرى لا على ما يُنزَل إليه.
+        */}
+        {listed.length > 25 && (
+          <p className="mb-3 text-sm text-amber-800">
+            تُعرض أوّل ٢٥ — اكتب في البحث لتصل إلى غيرها
+          </p>
+        )}
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-right text-sm">
+            <thead className="bg-slate-100">
+              <tr>
+                <Th>النوع</Th>
+                <Th>الرقم</Th>
+                <Th>التاريخ</Th>
+                <Th>المقاول</Th>
+                <Th>المشروع</Th>
+                <Th>القيمة</Th>
+                <Th>مع الملاحق</Th>
+                <Th>المدفوع</Th>
+                <Th>المتبقي</Th>
+                <Th>الإجراء</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {listed.length === 0 ? (
+                <tr>
+                  <Td colSpan={10} className="text-center text-slate-500">
+                    {contractors.length === 0
+                      ? "لا توجد عقود"
+                      : "لا عقد يطابق البحث"}
+                  </Td>
+                </tr>
+              ) : (
+                listed.slice(0, 25).map((c) => {
+                  const paid = payments(c).total;
+                  const withAddenda = totalWithAddenda(c);
+                  const addendum = c.documentType === "ملحق عقد";
+                  return (
+                    <tr key={c.id} className="border-b border-slate-200">
+                      <Td>
+                        {addendum ? (
+                          <span className="rounded bg-amber-100 px-2 py-1 text-xs text-amber-900">
+                            ملحق لـ {c.parentContractNumber}
+                          </span>
+                        ) : (
+                          "عقد"
+                        )}
+                      </Td>
+                      <Td>
+                        <button
+                          onClick={() => pick(c.id)}
+                          className="text-blue-600 underline"
+                        >
+                          {c.contractNumber}
+                        </button>
+                      </Td>
+                      <Td>{c.contractDate || "—"}</Td>
+                      <Td>{c.name}</Td>
+                      <Td>{c.project}</Td>
+                      <Td>
+                        <Money value={c.contractValue} />
+                      </Td>
+                      <Td>
+                        {withAddenda !== c.contractValue ? (
+                          <span className="font-bold text-amber-800">
+                            {fmt(withAddenda)}
+                          </span>
+                        ) : (
+                          "—"
+                        )}
+                      </Td>
+                      <Td>
+                        <Money value={paid} />
+                      </Td>
+                      <Td>
+                        <Money value={round3(c.contractValue - paid)} />
+                      </Td>
+                      <Td>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => onPrint(c)}
+                            className="rounded-lg bg-slate-100 px-3 py-2"
+                          >
+                            🖨 طباعة
+                          </button>
+                          <button
+                            onClick={() => openEdit(c)}
+                            className="rounded-lg bg-blue-50 px-3 py-2 text-blue-700"
+                          >
+                            تعديل
+                          </button>
+                          <button
+                            onClick={() => {
+                              /*
+                                الحذف يفكّ ربط الحركات ولا يحذفها: تعود إلى
+                                «غير المرتبطة» فتُربط بعقدها الصحيح. ويُقال
+                                عددها قبل الحذف لا بعده.
+                              */
+                              const linkedCount = movements.filter(
+                                (m) => m.contractNumber === c.contractNumber
+                              ).length;
+                              const warning =
+                                linkedCount > 0
+                                  ? `\n\nتنبيه: ${linkedCount} حركة مرتبطة بهذا العقد. حذفه يفكّ ربطها — والقيود نفسها لا تُحذف.`
+                                  : "";
+                              if (
+                                window.confirm(
+                                  `حذف «${c.contractNumber}» — ${c.name}؟${warning}`
+                                )
+                              ) {
+                                setContractors((prev) =>
+                                  prev.filter((x) => x.id !== c.id)
+                                );
+                                /* ولا يُفكّ إن بقي عقدٌ آخر بالرقم نفسه */
+                                const shared = contractors.some(
+                                  (x) =>
+                                    x.id !== c.id &&
+                                    x.contractNumber === c.contractNumber
+                                );
+                                if (!shared) onUnlinkContract(c.contractNumber);
+                                onLog(
+                                  "حذف",
+                                  "عقد",
+                                  `حذف ${c.documentType} ${c.contractNumber} — ${c.name}${
+                                    linkedCount > 0 && !shared
+                                      ? ` · فُكّ ربط ${linkedCount} حركة`
+                                      : ""
+                                  }`
+                                );
+                                if (selectedId === c.id) setSelectedId(null);
+                              }
+                            }}
+                            className="rounded-lg bg-red-50 px-3 py-2 text-red-700"
+                          >
+                            حذف
+                          </button>
+                        </div>
+                      </Td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
     </>
   );
 }
