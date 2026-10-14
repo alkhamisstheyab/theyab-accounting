@@ -1812,6 +1812,7 @@ export default function HomeV2() {
             <QuotationsPage
               quotations={quotations}
               workItems={workItems}
+              contractors={contractors}
               year={year}
               canManage={allow("quotations.manage")}
               canSeeCost={allow("quotations.cost")}
@@ -12500,6 +12501,8 @@ function QuotationValidity({ quotation }: { quotation: Quotation }) {
 function QuotationsPage({
   quotations,
   workItems,
+  /* العقود للحارس وحده: لا يُحذف عرضٌ صار سندَ عقدٍ قائم */
+  contractors,
   year,
   canManage,
   canSeeCost,
@@ -12512,6 +12515,7 @@ function QuotationsPage({
 }: {
   quotations: Quotation[];
   workItems: WorkItem[];
+  contractors: Contractor[];
   year: number;
   canManage: boolean;
   canSeeCost: boolean;
@@ -12560,6 +12564,55 @@ function QuotationsPage({
         return next;
       })
     );
+
+  /**
+   * حذفُ عرضٍ — ولم يكن له بابٌ في الشاشة قطّ.
+   *
+   * العروضُ تُنشأ للتجربة والتعليم كما تُنشأ للعمل، ولم يكن يُزيلها إلا
+   * المحوُ التلقائيُّ لما انقضت مدّتُه — وهو لا يمسّ مسودّةً ولا مقبولاً.
+   * فبقيت تتراكم: سبعةَ عشرَ عرضاً فيها أربعةٌ أُنشئت لتعليم الموظفين
+   * كيف يعمل النظام، وواحدٌ عميلُه «sdhfg».
+   *
+   * والحارسُ ليس على الحالة بل على **السند**: العرضُ الذي صار عقداً
+   * قائماً هو أصلُه وسندُه — فيه البنودُ وأسعارُها وما استُثني منها —
+   * فلا يُحذف ويُقال لمَ. وأمّا عرضٌ يشير إلى عقدٍ لا وجود له (كعقدَي
+   * ١٠٠٤ و٢٠١٠ اللذين لم يُنشآ قطّ) فلا سندَ تحته، فيُحذف ويُقال ذلك
+   * في التأكيد.
+   *
+   * ويُذكر في التأكيد عددُ بنوده: من محا عرضاً بتسعين بنداً يعرف ما
+   * يمحو. ويُسجَّل في سجلّ التدقيق — ولا يُستردّ منه، لكنه يُعرف.
+   */
+  const removeQuotation = (q: Quotation) => {
+    const bound = q.contractNumber
+      ? contractors.find((c) => c.contractNumber === q.contractNumber)
+      : undefined;
+    if (bound) {
+      window.alert(
+        `لا يُحذف هذا العرض: هو سندُ العقد ${q.contractNumber} — ${bound.name}.\n\nوفيه بنودُ الاتفاق وأسعارُها وما استُثني منها، ويُرجع إليه إن نُوزع في العقد يوماً.\n\nفإن أردتَ حذفه فاحذف العقد أوّلاً، أو امسح رقم العقد من العرض.`
+      );
+      return;
+    }
+    const orphan = q.contractNumber ? `\nويشير إلى العقد ${q.contractNumber} ولا وجود له في النظام.` : "";
+    if (
+      !window.confirm(
+        `حذف العرض ${q.number}؟\n\nالعميل: ${q.clientName || "بلا عميل"} · الحالة: ${q.status} · ${
+          (q.lines ?? []).length
+        } بنداً.${orphan}\n\nولا يُستردّ بعد الحذف. ويبقى أثرُه في سجلّ التدقيق.`
+      )
+    ) {
+      return;
+    }
+    setQuotations((prev) => prev.filter((x) => x.id !== q.id));
+    if (openId === q.id) setOpenId(null);
+    /* كيانُه «عقد» كما في إنشاء العرض ونسخه — فالعرض أصلُ العقد */
+    onLog(
+      "حذف",
+      "عقد",
+      `حُذف عرض السعر ${q.number} — ${q.clientName || "بلا عميل"} · ${
+        q.status
+      } · ${(q.lines ?? []).length} بنداً`
+    );
+  };
 
   /** نسخة من عرض قائم — لعرض بديل لنفس العميل بنطاق آخر */
   const duplicate = (source: Quotation) => {
@@ -12725,6 +12778,14 @@ function QuotationsPage({
                               className="rounded-lg bg-slate-100 px-3 py-2"
                             >
                               نسخة
+                            </button>
+                          )}
+                          {canManage && (
+                            <button
+                              onClick={() => removeQuotation(q)}
+                              className="rounded-lg bg-red-50 px-3 py-2 text-red-700"
+                            >
+                              حذف
                             </button>
                           )}
                         </div>

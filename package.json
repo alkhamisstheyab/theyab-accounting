@@ -63,7 +63,8 @@
     "check:annex": "node db/check-annex-print.mjs",
     "check:engineer": "node db/check-engineer-reaches.mjs",
     "check:screen": "node db/check-contracts-screen.mjs",
-    "check:month": "node db/check-open-month.mjs"
+    "check:month": "node db/check-open-month.mjs",
+    "check:qdelete": "node db/check-quotation-delete.mjs"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
