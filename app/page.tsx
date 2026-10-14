@@ -329,6 +329,7 @@ import {
   Notice,
   NoticeTone,
   activitySince,
+  awaitingConfirmation,
   buildNotices,
   INSURANCE_ALERT_DAYS,
   projectInsurance,
@@ -16860,8 +16861,133 @@ function ApprovalsPage({
     );
   };
 
+  /*
+    ما ينتظر إقرارَك، مجموعاً في موضعٍ واحد.
+
+    التنبيهُ في الرئيسية يقول «ثلاث مراحل اعتمدها المهندس وتنتظر
+    إقرارك»، ويقود إلى هذه الشاشة — وفيها ثمانيةٌ وأربعون عقداً بمئات
+    الدفعات، معتمدِها وغيرِ معتمدِها. فيُترك صاحبُها يُفتّش عن ثلاثةٍ
+    بين مئات. وقال: «أتوه ولا أعرف أيُّ واحدةٍ المعتمدةُ الجديدة».
+
+    فصارت تُعرض أوّلَ الشاشة بأسمائها وأرقامها ومبالغها، ويُقرّ كلٌّ
+    منها من موضعه. ويُقال في كلٍّ أدخلها مالٌ أم لا — فإقرارُ ما دخله
+    المال تصحيحُ سجلّ، وإقرارُ ما لم يدخله إنشاءُ استحقاق، وليسا سواء.
+
+    ويُعرض تحتها شرطُ كلِّ مرحلة: الإقرارُ شهادةٌ على إنجازٍ بعينه لا
+    على رقم.
+  */
+  const waiting = useMemo(
+    () => (canConfirm ? awaitingConfirmation(contractors) : []),
+    [canConfirm, contractors]
+  );
+
   return (
     <>
+      {waiting.length > 0 && (
+        <Panel
+          title={`${waiting.length} مرحلة تنتظر إقرارك`}
+          subtitle="اعتمدها المهندس — ولا تصير الدفعة مستحقة قبل إقرارك"
+        >
+          <div className="overflow-x-auto">
+            <table className="w-full text-right text-sm">
+              <thead className="bg-slate-100">
+                <tr>
+                  <Th>العقد</Th>
+                  <Th>الدفعة</Th>
+                  <Th>صاحبه</Th>
+                  <Th>المشروع</Th>
+                  <Th>المستحقّ</Th>
+                  <Th>المصروف منها</Th>
+                  <Th>اعتمدها</Th>
+                  <Th>{""}</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {waiting.map(({ contract, installment }) => {
+                  const paid = round3(
+                    contractPayments(
+                      movements,
+                      contract.contractNumber
+                    ).byInstallment.get(installment.number) ?? 0
+                  );
+                  const net = installmentNet(installment);
+                  return (
+                    <tr
+                      key={contract.id + ":" + installment.number}
+                      className="border-b border-slate-100"
+                    >
+                      <Td className="font-bold">{contract.contractNumber}</Td>
+                      <Td>{installment.number}</Td>
+                      <Td>{contract.name}</Td>
+                      <Td className="text-xs">{contract.project}</Td>
+                      <Td>
+                        <Money value={net} />
+                      </Td>
+                      <Td>
+                        {isZero(paid) ? (
+                          <span className="rounded bg-amber-100 px-2 py-1 text-xs text-amber-900">
+                            لم يدخلها مال
+                          </span>
+                        ) : round3(net - paid) <= 0 ? (
+                          <span className="rounded bg-green-100 px-2 py-1 text-xs text-green-800">
+                            مدفوعةٌ بالكامل
+                          </span>
+                        ) : (
+                          <span className="rounded bg-slate-100 px-2 py-1 text-xs">
+                            <Money value={paid} /> من <Money value={net} />
+                          </span>
+                        )}
+                      </Td>
+                      <Td className="text-xs text-slate-500">
+                        {installment.approvedBy || "—"}
+                        {installment.approvedAt
+                          ? " · " + installment.approvedAt.slice(0, 10)
+                          : ""}
+                      </Td>
+                      <Td>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() =>
+                              setConfirmation(
+                                contract.id,
+                                installment.number,
+                                true
+                              )
+                            }
+                            className="whitespace-nowrap rounded-lg bg-green-600 px-4 py-2 font-bold text-white"
+                          >
+                            أقرّ
+                          </button>
+                          <button
+                            onClick={() => {
+                              setProjectFilter(contract.project);
+                              setStateFilter("الكل");
+                            }}
+                            className="whitespace-nowrap rounded-lg bg-slate-100 px-3 py-2 text-xs"
+                          >
+                            اعرض عقده
+                          </button>
+                        </div>
+                      </Td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <ul className="mt-4 space-y-1 text-xs text-slate-600">
+            {waiting.map(({ contract, installment }) => (
+              <li key={contract.id + ":c:" + installment.number}>
+                <b>
+                  {contract.contractNumber}/{installment.number}
+                </b>{" "}
+                — {installment.condition || "بلا شرطٍ مكتوب"}
+              </li>
+            ))}
+          </ul>
+        </Panel>
+      )}
+
       <Panel
         title="اعتماد مراحل الإنجاز"
         subtitle="اعتماد المرحلة المنجزة يجعل دفعتها مستحقة للصرف — الصرف نفسه من اختصاص المحاسب"
