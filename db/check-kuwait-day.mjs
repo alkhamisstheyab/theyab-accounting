@@ -95,7 +95,10 @@ check(
   "لا يومَ ثانياً في الشاشة",
   !page.includes("const todayISO = () => new Date().toISOString()")
 );
-check("بل تستورده", page.includes('import { todayISO } from "@/lib/today";'));
+check(
+  "بل تستورده من موضعه الواحد",
+  /import \{[^}]*\btodayISO\b[^}]*\} from "@\/lib\/today";/.test(page)
+);
 check(
   "ولا تاريخَ يُشتقّ من غرينتش",
   !page.includes("new Date().toISOString().slice(0, 10)")

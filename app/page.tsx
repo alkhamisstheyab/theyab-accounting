@@ -269,7 +269,7 @@ import {
   verdict,
   type MatchRun,
 } from "@/lib/match-log";
-import { todayISO } from "@/lib/today";
+import { monthInYear, todayISO } from "@/lib/today";
 import type { AppState } from "@/lib/storage";
 import {
   COST_STALE_DAYS,
@@ -19956,7 +19956,12 @@ function AttendancePage({
     change?: { before?: string; after?: string }
   ) => void;
 }) {
-  const [month, setMonth] = useState(`${year}-01`);
+  const [month, setMonth] = useState(() => monthInYear(year));
+  /*
+    وإن بُدّلت السنةُ من أعلى الشاشة تبع الشهرُ سنتَه الجديدة — وإلا
+    بقي معلّقاً في سنةٍ غادرها صاحبُه، فيُعرض شهرٌ لا بيانات له.
+  */
+  useEffect(() => setMonth(monthInYear(year)), [year]);
   const [openEmployee, setOpenEmployee] = useState<string | null>(null);
 
   // إدخال الاستثناء: موظف + مدى تاريخي + حالة
@@ -21196,7 +21201,12 @@ function PayrollPage({
     change?: { before?: string; after?: string }
   ) => void;
 }) {
-  const [month, setMonth] = useState(`${year}-01`);
+  const [month, setMonth] = useState(() => monthInYear(year));
+  /*
+    وإن بُدّلت السنةُ من أعلى الشاشة تبع الشهرُ سنتَه الجديدة — وإلا
+    بقي معلّقاً في سنةٍ غادرها صاحبُه، فيُعرض شهرٌ لا بيانات له.
+  */
+  useEffect(() => setMonth(monthInYear(year)), [year]);
   const [deductions, setDeductions] = useState<Record<string, string>>({});
   /*
     سداد السلفة غير «الخصومات الأخرى»: تلك جزاءٌ يُنقص المصروف، وهذا
