@@ -325,6 +325,7 @@ import {
   normalizeArabic,
   planLinks,
 } from "@/lib/contract-links";
+import { Guide, GUIDES, guideGroups, guidesFor } from "@/lib/guides";
 import {
   Notice,
   NoticeTone,
@@ -344,6 +345,8 @@ import {
 
 const PAGES = [
   "الرئيسية",
+  /* دليلُ العمل بابُ من لا يعرف، فموضعُه قبل العمل لا بعده */
+  "دليل العمل",
   "إدخال حركة",
   "جدول الحركات",
   "القيود اليومية",
@@ -2525,6 +2528,10 @@ export default function HomeV2() {
               setPeople={setPeople}
               onLog={log}
             />
+          )}
+
+          {page === "دليل العمل" && (
+            <GuidesPage permissions={currentUser.permissions} />
           )}
 
           {page === "دليل الحسابات" && <ChartPage />}
@@ -10922,6 +10929,189 @@ const BULK_FIXES: BulkFix[] = [
     match: isCarPaintOnGovFees,
   },
 ];
+
+/**
+ * دليلُ العمل — خطوةً خطوة.
+ *
+ * طلبه صاحب الشركة: «صفحةٌ فيها تعليماتُ جميع العمليات. أختار العملية
+ * فيمشي معي خطوةً خطوة حتى أنجزها كاملة». وعلّتُه أن النظام فُتح
+ * لستّة، فكلٌّ يسأل عن الخطوة التالية — أو يُدخل نصفَ العملية ويترك
+ * نصفَها، كدفعةٍ تُصرف ولا تُعتمد.
+ *
+ * ولا تُعرض الخطواتُ جملةً واحدة: الواحدةُ بعد الواحدة، فمن قرأ عشر
+ * خطواتٍ معاً لم يعمل بواحدة. ويُقال في كلٍّ أين تقع ليُعرف موضعُها،
+ * وما يُخطئ فيه الناس عادةً.
+ *
+ * وما يحتاج صلاحيةً لا يُعرض لمن لا يملكها: دليلُ عملٍ لا يستطيعه
+ * صاحبُه زحامٌ لا نفع فيه.
+ */
+function GuidesPage({ permissions }: { permissions: readonly Permission[] }) {
+  const mine = useMemo(() => guidesFor(permissions), [permissions]);
+  const groups = useMemo(() => guideGroups(mine), [mine]);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [step, setStep] = useState(0);
+
+  const open = mine.find((g) => g.id === openId) ?? null;
+
+  const start = (id: string) => {
+    setOpenId(id);
+    setStep(0);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  if (open) {
+    const last = open.steps.length - 1;
+    const current = open.steps[step];
+    const done = step > last;
+    return (
+      <Panel
+        title={open.title}
+        subtitle={done ? "تمّت العملية" : `الخطوة ${step + 1} من ${open.steps.length}`}
+      >
+        <div className="mb-5 flex flex-wrap items-center gap-3">
+          <button
+            onClick={() => setOpenId(null)}
+            className="rounded-lg bg-slate-100 px-4 py-2 font-bold"
+          >
+            ← الأدلّة
+          </button>
+          {step > 0 && !done && (
+            <button
+              onClick={() => setStep((s) => Math.max(0, s - 1))}
+              className="rounded-lg bg-slate-100 px-4 py-2 text-sm"
+            >
+              الخطوة السابقة
+            </button>
+          )}
+        </div>
+
+        {/* شريطُ التقدّم: الخطوةُ المنجزة خضراء، والقائمةُ ذهبية */}
+        <div className="mb-5 flex flex-wrap gap-1">
+          {open.steps.map((s, i) => (
+            <button
+              key={s.title}
+              onClick={() => setStep(i)}
+              title={s.title}
+              className={`h-2 flex-1 rounded-full ${
+                i < step ? "bg-green-600" : i === step ? "bg-amber-500" : "bg-slate-200"
+              }`}
+            />
+          ))}
+        </div>
+
+        {done ? (
+          <>
+            <Banner tone="ok">
+              <b>تمّت العملية.</b> راجع ما أدخلتَه قبل أن تنصرف — فما يُدخل
+              ناقصاً يُكتشف بعد شهر.
+            </Banner>
+            <div className="flex flex-wrap gap-3">
+              <button
+                onClick={() => setStep(0)}
+                className="rounded-lg bg-blue-600 px-6 py-3 font-bold text-white"
+              >
+                ابدأ من جديد
+              </button>
+              <button
+                onClick={() => setOpenId(null)}
+                className="rounded-lg bg-slate-100 px-6 py-3 font-bold"
+              >
+                عُد إلى الأدلّة
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="rounded-xl border-2 border-amber-300 bg-amber-50 p-5">
+              <div className="mb-2 flex flex-wrap items-baseline gap-3">
+                <span className="rounded-full bg-amber-600 px-3 py-1 text-sm font-bold text-white">
+                  {step + 1}
+                </span>
+                <h3 className="text-lg font-bold">{current.title}</h3>
+                {current.screen && (
+                  <span className="rounded bg-white px-3 py-1 text-xs font-bold text-slate-600">
+                    شاشة «{current.screen}»
+                  </span>
+                )}
+              </div>
+              <p className="text-sm leading-loose">{current.body}</p>
+              {current.warn && (
+                <p className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm leading-loose text-red-900">
+                  <b>انتبه: </b>
+                  {current.warn}
+                </p>
+              )}
+            </div>
+
+            <button
+              onClick={() => {
+                setStep((s) => s + 1);
+                window.scrollTo({ top: 0, behavior: "smooth" });
+              }}
+              className="mt-5 w-full rounded-xl bg-green-600 px-6 py-4 text-lg font-bold text-white"
+            >
+              {step === last ? "أنجزتُ الأخيرة — أنهِ" : "أنجزتُها — التالية"}
+            </button>
+
+            {/* ما بقي بعدها، عناوينَ فقط — ليُعرف الطريق ولا يُقرأ كلُّه */}
+            {step < last && (
+              <div className="mt-5">
+                <p className="mb-2 text-xs font-bold text-slate-500">
+                  وبعدها {last - step} {last - step === 1 ? "خطوة" : "خطوات"}:
+                </p>
+                <ol className="list-inside list-decimal space-y-1 text-xs text-slate-500">
+                  {open.steps.slice(step + 1).map((s) => (
+                    <li key={s.title}>{s.title}</li>
+                  ))}
+                </ol>
+              </div>
+            )}
+          </>
+        )}
+      </Panel>
+    );
+  }
+
+  return (
+    <Panel
+      title="دليل العمل"
+      subtitle="اختر العملية التي تريدها، فيمشي معك خطوةً خطوة حتى تتمّها"
+    >
+      <Banner tone="ok">
+        الأدلّةُ تُرتّب العمل لا تشرح الشاشة: <b>ما يُفعل أوّلاً وما يليه
+        ولماذا</b>. فالشاشةُ تُرى، والترتيبُ لا يُرى. وما يُعرض لك منها هو ما
+        تملك صلاحيتَه.
+      </Banner>
+
+      {mine.length === 0 ? (
+        <Empty>لا دليلَ يوافق صلاحياتك — راجع المدير</Empty>
+      ) : (
+        groups.map((group) => (
+          <div key={group} className="mb-6">
+            <p className="mb-3 text-sm font-bold text-slate-500">{group}</p>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              {mine
+                .filter((g) => g.group === group)
+                .map((g) => (
+                  <button
+                    key={g.id}
+                    onClick={() => start(g.id)}
+                    className="rounded-xl border border-slate-200 p-4 text-right hover:border-blue-400 hover:bg-blue-50"
+                  >
+                    <p className="font-bold">{g.title}</p>
+                    <p className="mt-1 text-xs leading-5 text-slate-600">{g.when}</p>
+                    <p className="mt-2 text-xs font-bold text-blue-700">
+                      {g.steps.length} خطوات ←
+                    </p>
+                  </button>
+                ))}
+            </div>
+          </div>
+        ))
+      )}
+    </Panel>
+  );
+}
 
 function BulkFixPanel({
   movements,
