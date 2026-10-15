@@ -142,30 +142,45 @@ check(
 );
 check("والمجموعات تُحسب بترتيبها", guideGroups(GUIDES).length >= 4, guideGroups(GUIDES).join(" · "));
 
-console.log("\nوالشاشة تمشي خطوةً خطوة:\n");
+console.log("\nوالدليلُ يمشي مع صاحبه ولا يُخرجه:\n");
 
+/*
+  كان الدليلُ شاشةً مستقلّة: يقرأ الخطوة فيخرج منها إلى شاشة العمل،
+  فيعود ليقرأ التي بعدها فيخرج. وقال صاحب الشركة: «هذا تصعيبٌ للعمل».
+  فصار لوحةً ثابتةً تفتح شاشةَ العملية وتبقى معه فيها.
+*/
 check("الصفحةُ في القائمة", /"دليل العمل",/.test(page));
-check("والمكوّن موجود", /function GuidesPage\(\{ permissions/.test(page));
-check("ويُعرض عند اختيارها", /\{page === "دليل العمل" && \(/.test(page));
+check("ومكوّنُ الاختيار موجود", /function GuidesPage\(\{\s+permissions,\s+onStart,/.test(page));
+check("ورفيقُ الخطوة موجود", /function GuideCompanion\(\{/.test(page));
 check(
-  "ولا تُعرض الخطواتُ جملةً واحدة",
-  /const current = open\.steps\[step\];/.test(page),
-  "فمن قرأ عشراً معاً لم يعمل بواحدة"
+  "وحالُ الدليل فوق الشاشات لا داخل صفحته",
+  /const \[guide, setGuide\] = useState<\{ id: string; step: number \} \| null>\(null\);/.test(
+    page
+  ),
+  "وإلا انقطع متى غادرها"
 );
-check("وزرٌّ ينتقل إلى التالية", /أنجزتُها — التالية/.test(page));
-check("ويُعرف أين هو منها", /الخطوة \$\{step \+ 1\} من \$\{open\.steps\.length\}/.test(page));
-check("ويعود إلى السابقة", /الخطوة السابقة/.test(page));
-check("ويُقال له حين يتمّ", /تمّت العملية/.test(page));
 check(
-  "ويُعرض ما بقي عناوينَ فقط",
-  /open\.steps\.slice\(step \+ 1\)\.map/.test(page),
-  "ليُعرف الطريق ولا يُقرأ كلُّه"
+  "والبدءُ يفتح شاشة أوّل خطوة",
+  /const first = g\.steps\[0\]\?\.screen;\s+if \(first\) setPage\(first\);/.test(page)
 );
+check(
+  "والانتقالُ إلى التالية ينقله إلى شاشتها",
+  /const target = guide\.steps\[next\]\?\.screen;\s+if \(target\) onGo\(target\);/.test(
+    page
+  )
+);
+check(
+  "والرفيقُ يُعرض خارج تبديل الصفحات",
+  page.indexOf("<GuideCompanion") > page.indexOf('{page === "الإعدادات" && ('),
+  "فيبقى ظاهراً في أي شاشة"
+);
+check("ويُطوى إن حجب العمل", /const \[folded, setFolded\] = useState\(false\);/.test(page));
+check("ويُغلق بقرار صاحبه", /onClose=\{\(\) => setGuide\(null\)\}/.test(page));
+check("ولا يُطبع مع الورق", /z-50 no-print/.test(page) && /z-50 w-\[min\(26rem[^"]*no-print/.test(page));
+check("ويُعرف أين هو منها", /الخطوة \{step \+ 1\} من \{guide\.steps\.length\}/.test(page));
+check("ويُقال اسم شاشتها معها", /شاشة «\$\{current\.screen\}»/.test(page));
 check("والتحذيرُ يُميَّز بلونه", /<b>انتبه: <\/b>/.test(page));
-check(
-  "والشاشةُ المذكورةُ تُعرض مع الخطوة",
-  /شاشة «\{current\.screen\}»/.test(page)
-);
+check("ويُقال له حين يتمّ", /تمّت العملية/.test(page));
 
 console.log("\nوأبوابُ النظام الكبرى مشمولة:\n");
 const ids = GUIDES.map((g) => g.id);

@@ -391,6 +391,22 @@ const MOVEMENT_TYPES = [
 
 export default function HomeV2() {
   const [page, setPage] = useState("الرئيسية");
+  /*
+    الدليلُ الجاري — يمشي مع صاحبه عبر الشاشات.
+
+    حالُه هنا لا في صفحته: لو كان فيها لانقطع متى غادرها، وهو إنما
+    وُضع ليبقى بعد مغادرتها.
+  */
+  const [guide, setGuide] = useState<{ id: string; step: number } | null>(null);
+  const activeGuide = guide ? GUIDES.find((g) => g.id === guide.id) ?? null : null;
+
+  /** يبدأ الدليل: يفتح شاشةَ أوّل خطوةٍ ثم يبقى معه */
+  const startGuide = (g: Guide) => {
+    setGuide({ id: g.id, step: 0 });
+    const first = g.steps[0]?.screen;
+    if (first) setPage(first);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
   /** لوحة تغيير رقم الدخول مفتوحة؟ */
   const [changingPassword, setChangingPassword] = useState(false);
   /** وقت الدخول السابق، مثبَّت عند الدخول — مرجع «ما جرى في غيابك» */
@@ -2531,7 +2547,10 @@ export default function HomeV2() {
           )}
 
           {page === "دليل العمل" && (
-            <GuidesPage permissions={currentUser.permissions} />
+            <GuidesPage
+              permissions={currentUser.permissions}
+              onStart={startGuide}
+            />
           )}
 
           {page === "دليل الحسابات" && <ChartPage />}
@@ -2892,6 +2911,23 @@ export default function HomeV2() {
           )}
         </section>
       </div>
+
+      {/*
+        رفيقُ الخطوة فوق الشاشات كلِّها — لا داخل صفحة الدليل. فمن بدأ
+        دليلاً ثم انتقل إلى شاشة عمله يبقى معه فيها.
+      */}
+      {activeGuide && guide && (
+        <GuideCompanion
+          guide={activeGuide}
+          step={guide.step}
+          onStep={(next) => setGuide({ id: activeGuide.id, step: next })}
+          onClose={() => setGuide(null)}
+          onGo={(screen) => {
+            setPage(screen);
+            window.scrollTo({ top: 0, behavior: "smooth" });
+          }}
+        />
+      )}
 
       {transferSheet && (
         <TransferSheet
@@ -10931,156 +10967,31 @@ const BULK_FIXES: BulkFix[] = [
 ];
 
 /**
- * دليلُ العمل — خطوةً خطوة.
+ * دليلُ العمل — الاختيار.
  *
- * طلبه صاحب الشركة: «صفحةٌ فيها تعليماتُ جميع العمليات. أختار العملية
- * فيمشي معي خطوةً خطوة حتى أنجزها كاملة». وعلّتُه أن النظام فُتح
- * لستّة، فكلٌّ يسأل عن الخطوة التالية — أو يُدخل نصفَ العملية ويترك
- * نصفَها، كدفعةٍ تُصرف ولا تُعتمد.
- *
- * ولا تُعرض الخطواتُ جملةً واحدة: الواحدةُ بعد الواحدة، فمن قرأ عشر
- * خطواتٍ معاً لم يعمل بواحدة. ويُقال في كلٍّ أين تقع ليُعرف موضعُها،
- * وما يُخطئ فيه الناس عادةً.
- *
- * وما يحتاج صلاحيةً لا يُعرض لمن لا يملكها: دليلُ عملٍ لا يستطيعه
- * صاحبُه زحامٌ لا نفع فيه.
+ * الصفحةُ تختار العملية ولا تشرحها: الشرحُ يمشي مع صاحبه في شاشة
+ * العمل نفسها (GuideCompanion)، فلا يخرج ليقرأ ثم يعود ليعمل.
  */
-function GuidesPage({ permissions }: { permissions: readonly Permission[] }) {
+function GuidesPage({
+  permissions,
+  onStart,
+}: {
+  permissions: readonly Permission[];
+  onStart: (guide: Guide) => void;
+}) {
   const mine = useMemo(() => guidesFor(permissions), [permissions]);
   const groups = useMemo(() => guideGroups(mine), [mine]);
-  const [openId, setOpenId] = useState<string | null>(null);
-  const [step, setStep] = useState(0);
-
-  const open = mine.find((g) => g.id === openId) ?? null;
-
-  const start = (id: string) => {
-    setOpenId(id);
-    setStep(0);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  };
-
-  if (open) {
-    const last = open.steps.length - 1;
-    const current = open.steps[step];
-    const done = step > last;
-    return (
-      <Panel
-        title={open.title}
-        subtitle={done ? "تمّت العملية" : `الخطوة ${step + 1} من ${open.steps.length}`}
-      >
-        <div className="mb-5 flex flex-wrap items-center gap-3">
-          <button
-            onClick={() => setOpenId(null)}
-            className="rounded-lg bg-slate-100 px-4 py-2 font-bold"
-          >
-            ← الأدلّة
-          </button>
-          {step > 0 && !done && (
-            <button
-              onClick={() => setStep((s) => Math.max(0, s - 1))}
-              className="rounded-lg bg-slate-100 px-4 py-2 text-sm"
-            >
-              الخطوة السابقة
-            </button>
-          )}
-        </div>
-
-        {/* شريطُ التقدّم: الخطوةُ المنجزة خضراء، والقائمةُ ذهبية */}
-        <div className="mb-5 flex flex-wrap gap-1">
-          {open.steps.map((s, i) => (
-            <button
-              key={s.title}
-              onClick={() => setStep(i)}
-              title={s.title}
-              className={`h-2 flex-1 rounded-full ${
-                i < step ? "bg-green-600" : i === step ? "bg-amber-500" : "bg-slate-200"
-              }`}
-            />
-          ))}
-        </div>
-
-        {done ? (
-          <>
-            <Banner tone="ok">
-              <b>تمّت العملية.</b> راجع ما أدخلتَه قبل أن تنصرف — فما يُدخل
-              ناقصاً يُكتشف بعد شهر.
-            </Banner>
-            <div className="flex flex-wrap gap-3">
-              <button
-                onClick={() => setStep(0)}
-                className="rounded-lg bg-blue-600 px-6 py-3 font-bold text-white"
-              >
-                ابدأ من جديد
-              </button>
-              <button
-                onClick={() => setOpenId(null)}
-                className="rounded-lg bg-slate-100 px-6 py-3 font-bold"
-              >
-                عُد إلى الأدلّة
-              </button>
-            </div>
-          </>
-        ) : (
-          <>
-            <div className="rounded-xl border-2 border-amber-300 bg-amber-50 p-5">
-              <div className="mb-2 flex flex-wrap items-baseline gap-3">
-                <span className="rounded-full bg-amber-600 px-3 py-1 text-sm font-bold text-white">
-                  {step + 1}
-                </span>
-                <h3 className="text-lg font-bold">{current.title}</h3>
-                {current.screen && (
-                  <span className="rounded bg-white px-3 py-1 text-xs font-bold text-slate-600">
-                    شاشة «{current.screen}»
-                  </span>
-                )}
-              </div>
-              <p className="text-sm leading-loose">{current.body}</p>
-              {current.warn && (
-                <p className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm leading-loose text-red-900">
-                  <b>انتبه: </b>
-                  {current.warn}
-                </p>
-              )}
-            </div>
-
-            <button
-              onClick={() => {
-                setStep((s) => s + 1);
-                window.scrollTo({ top: 0, behavior: "smooth" });
-              }}
-              className="mt-5 w-full rounded-xl bg-green-600 px-6 py-4 text-lg font-bold text-white"
-            >
-              {step === last ? "أنجزتُ الأخيرة — أنهِ" : "أنجزتُها — التالية"}
-            </button>
-
-            {/* ما بقي بعدها، عناوينَ فقط — ليُعرف الطريق ولا يُقرأ كلُّه */}
-            {step < last && (
-              <div className="mt-5">
-                <p className="mb-2 text-xs font-bold text-slate-500">
-                  وبعدها {last - step} {last - step === 1 ? "خطوة" : "خطوات"}:
-                </p>
-                <ol className="list-inside list-decimal space-y-1 text-xs text-slate-500">
-                  {open.steps.slice(step + 1).map((s) => (
-                    <li key={s.title}>{s.title}</li>
-                  ))}
-                </ol>
-              </div>
-            )}
-          </>
-        )}
-      </Panel>
-    );
-  }
 
   return (
     <Panel
       title="دليل العمل"
-      subtitle="اختر العملية التي تريدها، فيمشي معك خطوةً خطوة حتى تتمّها"
+      subtitle="اختر العملية، فتُفتح شاشتُها ويبقى الدليل معك فيها خطوةً خطوة"
     >
       <Banner tone="ok">
         الأدلّةُ تُرتّب العمل لا تشرح الشاشة: <b>ما يُفعل أوّلاً وما يليه
-        ولماذا</b>. فالشاشةُ تُرى، والترتيبُ لا يُرى. وما يُعرض لك منها هو ما
-        تملك صلاحيتَه.
+        ولماذا</b>. وحين تختار واحداً تُفتح لك شاشتُه، وتبقى <b>لوحةٌ في أسفل
+        الشاشة</b> تقول لك ما تفعل — فإذا أنجزتَ ضغطتَ «أنجزتُها» فانتقلت إلى
+        التالية ونقلتك إلى شاشتها. وتُطوى إن حجبت عملك، ولا تُطبع مع الورق.
       </Banner>
 
       {mine.length === 0 ? (
@@ -11095,13 +11006,13 @@ function GuidesPage({ permissions }: { permissions: readonly Permission[] }) {
                 .map((g) => (
                   <button
                     key={g.id}
-                    onClick={() => start(g.id)}
-                    className="rounded-xl border border-slate-200 p-4 text-right hover:border-blue-400 hover:bg-blue-50"
+                    onClick={() => onStart(g)}
+                    className="rounded-xl border border-slate-200 p-4 text-right hover:border-amber-400 hover:bg-amber-50"
                   >
                     <p className="font-bold">{g.title}</p>
                     <p className="mt-1 text-xs leading-5 text-slate-600">{g.when}</p>
-                    <p className="mt-2 text-xs font-bold text-blue-700">
-                      {g.steps.length} خطوات ←
+                    <p className="mt-2 text-xs font-bold text-amber-700">
+                      {g.steps.length} خطوات — ابدأ ←
                     </p>
                   </button>
                 ))}
@@ -11110,6 +11021,164 @@ function GuidesPage({ permissions }: { permissions: readonly Permission[] }) {
         ))
       )}
     </Panel>
+  );
+}
+
+/**
+ * رفيقُ الخطوة — يمشي مع صاحبه ولا يُخرجه.
+ *
+ * كان الدليلُ شاشةً مستقلّة: يقرأ الخطوة، فيخرج منها إلى شاشة العمل،
+ * فيعود ليقرأ التي بعدها، فيخرج. قال صاحب الشركة: «هذا تصعيبٌ للعمل».
+ * وهو كذلك — الدليلُ الذي يُخرج صاحبَه من عمله ليقرأه ليس دليلاً.
+ *
+ * فصار لوحةً ثابتةً في أسفل الشاشة: تفتح له شاشةَ العملية، وتبقى معه
+ * فيها تقول له ما يفعل. فإذا أنجز ضغط «أنجزتُها» فانتقلت إلى التالية —
+ * ونقلته إلى شاشتها إن كانت في غيرها.
+ *
+ * وتُطوى إلى شريطٍ صغير إن حجبت عملاً، ولا تُطبع مع الورق.
+ */
+function GuideCompanion({
+  guide,
+  step,
+  onStep,
+  onClose,
+  onGo,
+}: {
+  guide: Guide;
+  step: number;
+  onStep: (next: number) => void;
+  onClose: () => void;
+  onGo: (screen: string) => void;
+}) {
+  const [folded, setFolded] = useState(false);
+  const last = guide.steps.length - 1;
+  const done = step > last;
+  const current = guide.steps[Math.min(step, last)];
+
+  if (folded) {
+    return (
+      <div className="fixed bottom-4 left-4 z-50 no-print">
+        <button
+          onClick={() => setFolded(false)}
+          className="rounded-full bg-amber-600 px-5 py-3 text-sm font-bold text-white shadow-lg"
+        >
+          دليل: {guide.title} — {done ? "تمّ" : `${step + 1}/${guide.steps.length}`} ↑
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="fixed bottom-4 left-4 z-50 w-[min(26rem,calc(100vw-2rem))] rounded-2xl border-2 border-amber-400 bg-white shadow-2xl no-print">
+      <div className="flex items-center justify-between gap-2 rounded-t-2xl bg-amber-500 px-4 py-2 text-white">
+        <span className="text-sm font-bold">{guide.title}</span>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setFolded(true)}
+            title="اطوِ"
+            className="rounded px-2 py-1 text-xs font-bold hover:bg-amber-600"
+          >
+            ↓
+          </button>
+          <button
+            onClick={onClose}
+            title="أغلق الدليل"
+            className="rounded px-2 py-1 text-xs font-bold hover:bg-amber-600"
+          >
+            ✕
+          </button>
+        </div>
+      </div>
+
+      <div className="p-4">
+        {done ? (
+          <>
+            <p className="mb-3 font-bold text-green-700">تمّت العملية.</p>
+            <p className="mb-4 text-sm leading-loose text-slate-600">
+              راجع ما أدخلتَه قبل أن تنصرف — فما يُدخل ناقصاً يُكتشف بعد شهر.
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => onStep(0)}
+                className="rounded-lg bg-slate-100 px-4 py-2 text-sm font-bold"
+              >
+                من جديد
+              </button>
+              <button
+                onClick={onClose}
+                className="rounded-lg bg-green-600 px-4 py-2 text-sm font-bold text-white"
+              >
+                أغلق
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="mb-3 flex gap-1">
+              {guide.steps.map((s, i) => (
+                <span
+                  key={s.title}
+                  className={`h-1.5 flex-1 rounded-full ${
+                    i < step ? "bg-green-600" : i === step ? "bg-amber-500" : "bg-slate-200"
+                  }`}
+                />
+              ))}
+            </div>
+
+            <p className="mb-1 text-xs font-bold text-slate-500">
+              الخطوة {step + 1} من {guide.steps.length}
+              {current.screen ? ` · شاشة «${current.screen}»` : ""}
+            </p>
+            <p className="mb-2 font-bold leading-6">{current.title}</p>
+            <p className="mb-3 text-sm leading-loose text-slate-700">
+              {current.body}
+            </p>
+            {current.warn && (
+              <p className="mb-3 rounded-lg border border-red-200 bg-red-50 p-2 text-xs leading-5 text-red-900">
+                <b>انتبه: </b>
+                {current.warn}
+              </p>
+            )}
+
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => {
+                  const next = step + 1;
+                  onStep(next);
+                  /* ينتقل إلى شاشة الخطوة التالية إن كانت في غيرها */
+                  const target = guide.steps[next]?.screen;
+                  if (target) onGo(target);
+                }}
+                className="rounded-lg bg-green-600 px-5 py-2 text-sm font-bold text-white"
+              >
+                {step === last ? "أنجزتُ الأخيرة" : "أنجزتُها — التالية"}
+              </button>
+              {step > 0 && (
+                <button
+                  onClick={() => {
+                    const back = step - 1;
+                    onStep(back);
+                    const target = guide.steps[back]?.screen;
+                    if (target) onGo(target);
+                  }}
+                  className="rounded-lg bg-slate-100 px-4 py-2 text-sm"
+                >
+                  السابقة
+                </button>
+              )}
+              {current.screen && (
+                <button
+                  onClick={() => onGo(current.screen as string)}
+                  className="rounded-lg bg-blue-50 px-4 py-2 text-sm text-blue-700"
+                >
+                  افتح الشاشة
+                </button>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
   );
 }
 
