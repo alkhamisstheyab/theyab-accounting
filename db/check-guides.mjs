@@ -93,7 +93,8 @@ const codes = new Set([
 const mentioned = new Set();
 for (const g of GUIDES)
   for (const s of g.steps)
-    for (const m of `${s.body} ${s.warn ?? ""}`.matchAll(/\b([1-6]\d{3})\b/g))
+    /* يُستثنى ما سُبق بـ«ضمن» — فذاك مبلغٌ لا رقمُ حساب */
+    for (const m of `${s.body} ${s.warn ?? ""}`.matchAll(/(?<!ضمن )\b([1-6]\d{3})\b/g))
       mentioned.add(m[1]);
 const ghosts = [...mentioned].filter((c) => !codes.has(c));
 check(
@@ -141,6 +142,63 @@ check(
   "ولا يرى مسيّر الرواتب"
 );
 check("والمجموعات تُحسب بترتيبها", guideGroups(GUIDES).length >= 4, guideGroups(GUIDES).join(" · "));
+
+console.log("\nوترتيبُ الخطوات ترتيبُ الشاشة:\n");
+
+/*
+  جرّب صاحب الشركة دليلَ القبض فقال: «الخطوات غير مرتّبة — بدأ باختيار
+  نوع الحركة مع أن التاريخ يسبقها، وبعدها المفترض البند فقفز إلى
+  المشروع والطرف».
+
+  وكان على حقّ: كُتبت الخطواتُ على ترتيبٍ منطقيٍّ لا على ترتيب خانات
+  النموذج. ودليلٌ يُخالف ترتيبَ الشاشة يُتعب قارئَه أكثر مما يُعينه —
+  يبحث عن خانةٍ لم يبلغها بعد.
+
+  فيُقرأ ترتيبُ الخانات من الشيفرة نفسها ويُقاس عليه. ولو بُدّل ترتيبُ
+  النموذج يوماً ولم يُبدَّل الدليل، أخفق هذا الفحص.
+*/
+const form = page.slice(page.indexOf("function MovementForm({"));
+const fields = [...form.slice(0, 20000).matchAll(/label="([^"]+)"/g)].map((m) => m[1]);
+const rank = (name) => fields.indexOf(name);
+
+/* الخانات التي يذكرها الدليلان، بترتيب النموذج */
+const ORDER = ["التاريخ", "نوع الحركة", "البند", "طريقة الدفع", "المشروع", "المبلغ (د.ك)"];
+check(
+  "النموذج يُقرأ ترتيبُه من الشيفرة",
+  ORDER.every((f) => rank(f) >= 0),
+  ORDER.filter((f) => rank(f) < 0).join(" · ") || fields.slice(0, 9).join(" ← ")
+);
+check(
+  "وترتيبُه هو: تاريخ ← نوع ← بند ← طريقة دفع ← مشروع ← مبلغ",
+  ORDER.every((f, i) => i === 0 || rank(ORDER[i - 1]) < rank(f)),
+  ORDER.map((f) => `${f}(${rank(f)})`).join(" ")
+);
+
+/* ويُقاس عليه دليلا المصروف والقبض */
+const WORD = {
+  "التاريخ": /تاريخ/,
+  "نوع الحركة": /نوع الحركة/,
+  "البند": /البند/,
+  "طريقة الدفع": /طريقة الدفع/,
+  "المشروع": /المشروع/,
+  "المبلغ (د.ك)": /المبلغ/,
+};
+for (const id of ["expense", "client-receipt"]) {
+  const g = GUIDES.find((x) => x.id === id);
+  /* موضعُ أوّل خطوةٍ تذكر كلَّ خانة */
+  const at = ORDER.map((f) => g.steps.findIndex((s) => WORD[f].test(s.title)));
+  const seen = at.filter((i) => i >= 0);
+  check(
+    `دليل «${g.title}» يتبع ترتيب النموذج`,
+    seen.every((v, i) => i === 0 || seen[i - 1] < v),
+    ORDER.map((f, i) => `${f}:${at[i]}`).join(" · ")
+  );
+  check(
+    `  وأوّلُ خطوته التاريخ`,
+    /تاريخ/.test(g.steps[0].title),
+    g.steps[0].title
+  );
+}
 
 console.log("\nوالدليلُ يمشي مع صاحبه ولا يُخرجه:\n");
 
