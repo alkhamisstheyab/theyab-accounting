@@ -63,7 +63,7 @@ check(
 check(
   "ولا يبعث ما دفنه الجهاز ولم يُرسل دفنَه",
   /const buried = new Set\(tombs\[field\] \?\? \[\]\);/.test(sync) &&
-    /!here\.has\(key\) && !buried\.has\(key\)/.test(sync),
+    /if \(buried\.has\(key\)\) return false;/.test(sync),
   "وإلا عاد ما حُذف عمداً"
 );
 check(

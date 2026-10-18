@@ -14,6 +14,7 @@
  */
 
 import {
+  comparable,
   diffStates,
   isEmpty,
   countChanges,
@@ -24,6 +25,8 @@ import { ROW_COLLECTIONS } from "./collections";
 import type { AppState } from "./storage";
 
 const ENABLED_KEY = "theyab:sync";
+/** ما مسَّه هذا الجهاز ولم يبلغ الخادمَ بعد — يبقى بعد إغلاق المتصفّح */
+const TOUCHED_KEY = "theyab:touched";
 /*
   الحذف المعلّق: ما حُذف في الجهاز ولم يبلغ الخادم بعد.
 
@@ -101,6 +104,142 @@ let snapshot: AppState | null = null;
 let latest: AppState | null = null;
 /** ضمٌّ طُلب قبل أن تُعرَف حالةُ الجهاز، فيُنفَّذ عند أول حفظ */
 let adoptWanted = false;
+
+/**
+ * ما مسَّه صاحبُ هذا الجهاز في جلسته — ولا يُرسل سواه.
+ *
+ * كانت المزامنة تحسب الفرق بين الجهاز والخادم وتعدّ **كلَّ فرقٍ**
+ * تغييراً محلياً يُرسل. فلا تفرّق بين «أنا عدّلتُ هذا» و«نسختي قديمةٌ
+ * وقد تقدّم الخادم عليّ». فإذا أقرّ أحدُهم دفعةً ثم فتح آخرُ جهازاً
+ * نسختُه أقدم، دفع جهازُه القديمَ فوق الجديد — وكلٌّ يتشبّث بنسخته.
+ *
+ * ووقع ذلك في ١٨ أكتوبر ٢٠٢٦: مُحي تسعةَ عشرَ إقراراً للإدارة
+ * واعتمادان، كتب فوقها جهازا م. ميس وصاحب الشركة نفسه بنسختين
+ * أقدم. ولم يضع مالٌ ولا قيد — ضاعت القرارات وحدها، واستُردّت من
+ * سجلّ التدقيق.
+ *
+ * فصار الجهاز لا يُرسل إلا ما غيّره صاحبُه بيده. والصفُّ يُعدّ ممسوساً
+ * متى خالف **ما كان عليه هنا قبل لحظة** — فإن ساوى ما عند الخادم فهو
+ * وارثٌ من الخادم لا تغييرٌ محليّ، وإلا عاد ما يصل من غيرك يُرسل إليه
+ * من جديد فيدور بلا نهاية.
+ */
+const touched = new Map<string, Set<string>>();
+
+/**
+ * ويبقى بعد إغلاق المتصفّح.
+ *
+ * من عمل والخطُّ مقطوع ثم أغلق قبل أن يُرسل، يعود فيجد عملَه في جهازه
+ * — ولو نُسي أنه مسَّه لعُدّ صفُّه قديماً، فأُخذ من الخادم وضاع ما عمل.
+ * فيُحفظ كما يُحفظ شاهدُ القبر، ويُمحى ما بلغ الخادم.
+ */
+function readTouched(): Map<string, Set<string>> {
+  const map = new Map<string, Set<string>>();
+  if (typeof window === "undefined") return map;
+  try {
+    const raw = window.localStorage.getItem(TOUCHED_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    if (parsed && typeof parsed === "object") {
+      for (const [field, keys] of Object.entries(parsed)) {
+        if (Array.isArray(keys) && keys.length) map.set(field, new Set(keys.map(String)));
+      }
+    }
+  } catch {
+    /* تخزينٌ ممنوع أو تالف — يُبدأ من فراغ */
+  }
+  return map;
+}
+
+function writeTouched(): void {
+  if (typeof window === "undefined") return;
+  try {
+    const out: Record<string, string[]> = {};
+    for (const [field, keys] of touched) if (keys.size) out[field] = [...keys].slice(-5000);
+    if (Object.keys(out).length) {
+      window.localStorage.setItem(TOUCHED_KEY, JSON.stringify(out));
+    } else {
+      window.localStorage.removeItem(TOUCHED_KEY);
+    }
+  } catch {
+    /* التخزين ممتلئ — والسجلّ يبقى لهذه الجلسة */
+  }
+}
+
+const markTouched = (field: string, key: string): void => {
+  const set = touched.get(field) ?? new Set<string>();
+  if (set.has(key)) return;
+  set.add(key);
+  touched.set(field, set);
+  writeTouched();
+};
+
+/**
+ * آخرُ ما أبلغ به هذا الجهاز — **صورةً** لا مرجعاً.
+ *
+ * ولا يصحّ أن يكون مرجعاً إلى حالة الشاشة: من عدّل المصفوفة في موضعها
+ * ثم أبلغ بها، قُورن الشيءُ بنفسه فلم يُعدّ تغييراً — فيضيع عملُه ولا
+ * يُرسل. وأمسك هذا فحصُ المزامنة حين دفع حركةً في المصفوفة نفسها.
+ */
+let baseline: AppState | null = null;
+
+/* ما بقي من جلسةٍ سابقةٍ لم يبلغ الخادم */
+for (const [field, keys] of readTouched()) touched.set(field, keys);
+
+/** يُقارن حالَ الشاشة بما أُبلغ به قبلُ، ويسجّل ما غيّره صاحبُ الجهاز */
+function noteLocalEdits(after: AppState): void {
+  const now = snapshotForServer(after);
+  const before = baseline;
+  baseline = now;
+  /* جهازٌ لم يُبلّغ بحاله قطّ: ما فيه عملُه هو */
+  if (!before) {
+    for (const collection of ROW_COLLECTIONS) {
+      const field = collection.field as string;
+      for (const row of (now[collection.field] ?? []) as Record<string, unknown>[]) {
+        markTouched(field, collection.keyOf(row));
+      }
+    }
+    return;
+  }
+  const server = snapshot;
+  for (const collection of ROW_COLLECTIONS) {
+    const field = collection.field as string;
+    const owned = collection.serverOwned;
+    const was = new Map(
+      ((before[collection.field] ?? []) as Record<string, unknown>[]).map((r) => [
+        collection.keyOf(r),
+        r,
+      ])
+    );
+    const srv = new Map(
+      ((server?.[collection.field] ?? []) as Record<string, unknown>[]).map((r) => [
+        collection.keyOf(r),
+        r,
+      ])
+    );
+    for (const row of (now[collection.field] ?? []) as Record<string, unknown>[]) {
+      const key = collection.keyOf(row);
+      const before1 = was.get(key);
+      /* لم يتغيّر هنا */
+      if (before1 && same(comparable(before1, owned), comparable(row, owned))) continue;
+      /* تغيّر، لكنه صار نسخةَ الخادم — فهو وارثٌ منه لا تغييرٌ محليّ */
+      const atServer = srv.get(key);
+      if (atServer && same(comparable(atServer, owned), comparable(row, owned))) continue;
+      markTouched(field, key);
+    }
+  }
+}
+
+/** يُنسى ما أُرسل — فلا يُعاد إرساله بلا سبب */
+function forgetTouched(upserts: Record<string, unknown[]> | undefined): void {
+  if (!upserts) return;
+  for (const [field, rows] of Object.entries(upserts)) {
+    const collection = ROW_COLLECTIONS.find((c) => c.field === field);
+    const set = touched.get(field);
+    if (!collection || !set) continue;
+    for (const row of rows) set.delete(collection.keyOf(row as Record<string, unknown>));
+    if (set.size === 0) touched.delete(field);
+  }
+  writeTouched();
+}
 
 /**
  * الصفوف التي رآها هذا الجهاز.
@@ -407,17 +546,25 @@ function adoptFromSnapshot(): number {
     /* ما لا يُقرأ لا يُضمّ: المجموعة المحجوبة تصل فارغةً فلا تُحسب نقصاً */
     if (hidden.has(field)) continue;
 
-    const here = new Set(
-      ((latest[collection.field] ?? []) as Record<string, unknown>[]).map((r) =>
-        collection.keyOf(r)
-      )
+    const here = new Map(
+      ((latest[collection.field] ?? []) as Record<string, unknown>[]).map((r) => [
+        collection.keyOf(r),
+        r,
+      ])
     );
     const buried = new Set(tombs[field] ?? []);
+    const mine = touched.get(field);
+    const owned = collection.serverOwned;
     const gained = (
       (snapshot[collection.field] ?? []) as Record<string, unknown>[]
     ).filter((r) => {
       const key = collection.keyOf(r);
-      return !here.has(key) && !buried.has(key);
+      if (buried.has(key)) return false;
+      /* ما لم يمسّه صاحبُ الجهاز يُؤخذ من الخادم — غائباً كان أو قديماً */
+      if (mine?.has(key)) return false;
+      const local = here.get(key);
+      if (!local) return true;
+      return !same(comparable(local, owned), comparable(r, owned));
     });
     if (gained.length > 0) {
       upserts[field] = gained;
@@ -446,6 +593,14 @@ export function record(state: AppState): void {
     وإشعالها وحده لا يغيّر شيئاً، فبقيت مشتعلة صامتة والمقارنة حمراء.
     وقع ذلك فعلاً بعد مسح بيانات المتصفّح.
   */
+  /*
+    ما غيّره صاحبُ الجهاز يُسجَّل قبل أن يصير `latest` هو الماضي.
+
+    وإن لم يكن ثمّة أساس — جهازٌ لم يُحمّل شيئاً ولم يُبلّغ بحاله قطّ —
+    فما فيه عملُه هو، فيُعدّ كلُّه ممسوساً. وإلا ضاع عملُ من بدأ على
+    جهازٍ فارغ.
+  */
+  noteLocalEdits(state);
   latest = state;
   remember(state);
   /* ضمٌّ طُلب قبل أن تُعرَف الحالة — الآن تُعرف */
@@ -467,7 +622,18 @@ export function record(state: AppState): void {
  * بنفسه — عرضُ سعرٍ انقضت مدّته مثلاً — محوٌ مقصود يُبلَّغ به الخادم،
  * لا صفٌّ غريبٌ لم يره هذا الجهاز قطّ فيُترك في مكانه.
  */
-export const rememberLoaded = (state: AppState): void => remember(state);
+export const rememberLoaded = (state: AppState): void => {
+  remember(state);
+  /*
+    وهو خطُّ البدء لما يُعدّ عملاً محلياً.
+
+    ما حُمّل من المخزن ليس تغييراً من صاحب الجهاز، فلا يُرسل منه شيء
+    حتى يمسّه. ولولا تثبيتُه هنا لعُدّ أوّلُ حفظٍ بعد الفتح بلا أساسٍ
+    يُقاس عليه.
+  */
+  latest = state;
+  baseline = snapshotForServer(state);
+};
 
 /** يسجّل مفاتيح ما في الجهاز الآن، فيُعرف لاحقاً ما زال عنه */
 function remember(state: AppState): void {
@@ -492,6 +658,28 @@ function remember(state: AppState): void {
  */
 function sendable(from: AppState, to: AppState) {
   const changes = diffStates(from, to);
+
+  /*
+    لا يُرسل إلا ما مسَّه صاحبُ هذا الجهاز.
+
+    والفرقُ بين الجهاز والخادم ليس دليلَ تغييرٍ محليّ: قد يكون الخادمُ
+    تقدّم بعمل غيرك ونسختُك هي القديمة. فإرسالُ كلِّ فرقٍ يكتب القديمَ
+    فوق الجديد — وبه مُحي تسعةَ عشرَ إقراراً في ١٨ أكتوبر ٢٠٢٦.
+  */
+  for (const [field, rows] of Object.entries(changes.upserts ?? {})) {
+    const collection = ROW_COLLECTIONS.find((c) => c.field === field);
+    if (!collection) continue;
+    const mine = touched.get(field);
+    const kept = (rows as Record<string, unknown>[]).filter((row) =>
+      mine?.has(collection.keyOf(row))
+    );
+    if (kept.length) (changes.upserts as Record<string, unknown[]>)[field] = kept;
+    else delete (changes.upserts as Record<string, unknown[]>)[field];
+  }
+  if (changes.upserts && Object.keys(changes.upserts).length === 0) {
+    delete changes.upserts;
+  }
+
   if (!changes.deletes) return changes;
 
   const tombs = readTombs();
@@ -616,6 +804,18 @@ async function flush(): Promise<void> {
     const refused = Array.isArray(body?.refused)
       ? (body.refused as SyncStatus["refused"])
       : [];
+    /*
+      ما بلغ الخادمَ يُنسى — والمردودُ يبقى ممسوساً ليُعاد.
+
+      فلو نُسي المردودُ مع المقبول لما أُرسل ثانيةً أبداً، ولظهر «لا شيء
+      في الانتظار» وعملُ صاحبه في جهازه وحده.
+    */
+    const refusedNames = new Set(refused.map((r) => r.field));
+    const written = Object.fromEntries(
+      Object.entries(changes.upserts ?? {}).filter(([f]) => !refusedNames.has(f))
+    );
+    forgetTouched(written as Record<string, unknown[]>);
+
     const next = snapshotForServer(state);
     for (const item of refused) {
       const sent =

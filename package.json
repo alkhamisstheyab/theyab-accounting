@@ -66,7 +66,9 @@
     "check:month": "node db/check-open-month.mjs",
     "check:qdelete": "node db/check-quotation-delete.mjs",
     "check:waiting": "node db/check-waiting-panel.mjs",
-    "check:guides": "node db/check-guides.mjs"
+    "check:guides": "node db/check-guides.mjs",
+    "check:stale": "node db/check-stale-push.mjs",
+    "restore:confirmations": "node db/restore-confirmations.mjs"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

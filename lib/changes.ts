@@ -48,7 +48,7 @@ export const same = (a: unknown, b: unknown): boolean => canonical(a) === canoni
  * ويغيّرها صاحبها على الخادم. فلو دخلت المقارنة لبقي سطر المستخدمين
  * مختلفاً أبداً — وهو ليس اختلافاً في البيانات بل في ملكيّة الحقل.
  */
-const comparable = (row: Row, owned?: string[]): Row => {
+export const comparable = (row: Row, owned?: string[]): Row => {
   if (!owned || owned.length === 0) return row;
   const copy: Row = { ...row };
   for (const key of owned) delete copy[key];

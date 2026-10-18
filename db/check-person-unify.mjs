@@ -41,7 +41,7 @@ const check = (label, ok, detail = "") => {
   console.log(`  ${ok ? "✓" : "✗"} ${label}${detail ? " — " + detail : ""}`);
 };
 
-const state = parseBackup(fs.readFileSync(BACKUP, "utf8"));
+let state = parseBackup(fs.readFileSync(BACKUP, "utf8"));
 
 const FROM = "م.نوح";
 const TO = "م. نوح";
@@ -176,11 +176,29 @@ const spellings = [
   "عبداللطيف أحمد عبداللطيف حسوب",
   "بو احمد النجار",
 ];
-const hits = state.movements.filter((m) => spellings.includes((m.party ?? "").trim()));
+/*
+  وتُفحص على الدفاتر إن بقيت فيها صيغةٌ قديمة، وإلا فعلى صفٍّ مصنوع.
+
+  كان الشرط «في الدفاتر صيغٌ متفرّقة» — وكان صادقاً يوم كُتب. ثم طُبّق
+  التوحيد فلم تبقَ صيغةٌ قديمة، فأخفق الشرطُ على نجاحه هو. والمفحوصُ
+  أن التوحيد يجمع الصيغ، لا أن في الدفاتر صيغاً تُجمع.
+*/
+const inBooks = state.movements.filter((m) => spellings.includes((m.party ?? "").trim()));
+const sample = spellings.map((party, i) => ({
+  ...state.movements[0],
+  id: "صيغة-" + i,
+  party,
+  amount: 10,
+}));
+const already = inBooks.length === 0;
+const hits = already ? sample : inBooks;
+if (already) state = { ...state, movements: [...state.movements, ...sample] };
 check(
   "وتطال كل صيغة كُتب بها اسمه",
-  hits.length > 0,
-  `${hits.length} حركة · ${[...new Set(hits.map((m) => m.party))].length} صيغة`
+  hits.length > 0 && new Set(hits.map((m) => (m.party ?? "").trim())).size > 1,
+  already
+    ? `الدفاتر موحَّدةٌ أصلاً — فُحص على ${hits.length} صيغةٍ مصنوعة`
+    : `${hits.length} حركة · ${[...new Set(hits.map((m) => m.party))].length} صيغة`
 );
 const unified = state.movements.map((m) =>
   spellings.includes((m.party ?? "").trim())
