@@ -193,6 +193,7 @@ export const permissionLabel = (key: Permission): string =>
 export type RoleKey =
   | "owner"
   | "manager"
+  | "assistant"
   | "secretary"
   | "engineer"
   | "custom";
@@ -203,6 +204,59 @@ export type RoleDefinition = {
   description: string;
   permissions: Permission[];
 };
+
+/**
+ * مساعد المحاسب ومراقب المشاريع: يعمل عملَ المحاسب ويتابع المشاريع.
+ *
+ * والأصلُ فيه أنه **يُدخل ولا يُقرّ**: فالإقرار قرارُ صاحب الشركة أو
+ * المدير العام — وهو قرارُ مجلس الإدارة في ١٢ سبتمبر ٢٠٢٦، وبه تدخل
+ * الحركةُ ميزانَ المراجعة. فلو أقرّ كاتبُ القيدِ قيدَه سقطت الرقابةُ
+ * كلُّها وصارت صورةً: يكتب ويُجيز نفسه، ولا ثانيَ ينظر.
+ *
+ * ولا يُعطى الحذف: يُعدّل الخطأَ ولا يُزيله، فالأثر يبقى في السجلّ.
+ *
+ * ولا اعتمادَ مراحلٍ ولا إقرارَها: تلك شهادةُ المهندس على إتمام العمل
+ * ثم إقرارُ الإدارة — ومراقبةُ المشاريع متابعةٌ لا شهادة.
+ *
+ * ولا رواتبَ ولا مسيَّر: ملفُّ الموظفين يُرى ولا يُعدَّل، وأرقامُ
+ * الرواتب تبقى عند الإدارة.
+ *
+ * ولا دليلَ حسابات يُعدَّل، ولا أرصدةَ افتتاحية، ولا ترحيلَ سنة —
+ * فتلك تمسّ أساسَ الدفاتر لا حركةً فيها.
+ */
+const ASSISTANT: Permission[] = [
+  /* عملُه اليوميّ: يكتب القيدَ ويصحّحه، ولا يُقرّه ولا يحذفه */
+  "movements.view",
+  "movements.create",
+  "movements.edit",
+  "journal.view",
+  "ledger.view",
+  /* ويقرأ الموازينَ والقوائم — فهو يعمل عملَ المحاسب */
+  "trialBalance.view",
+  "financials.view",
+  "reports.view",
+  /* ومتابعةُ المشاريع والعقود وربطُ الدفعات بها — وذاك صلبُ عمله */
+  "projects.view",
+  "projects.manage",
+  "contractors.view",
+  "contractors.manage",
+  "quotations.view",
+  "invoices.view",
+  "advances.view",
+  "dues.view",
+  "dues.create",
+  "materials.view",
+  "materials.manage",
+  /* والحضورُ عملٌ يوميٌّ يتصل بمتابعة المواقع — والرواتبُ لا */
+  "employees.view",
+  "attendance.manage",
+  /* والدليلُ والأرصدةُ تُقرأ ولا تُمَسّ */
+  "chart.view",
+  "opening.view",
+  "print",
+  "vouchers.print",
+  "export",
+];
 
 /** السكرتارية: اطلاع وطباعة فقط — بلا إدخال ولا تعديل ولا حذف */
 const SECRETARY: Permission[] = [
@@ -241,6 +295,13 @@ export const ROLES: RoleDefinition[] = [
     description:
       "كل الصلاحيات بلا استثناء، بما فيها إدارة المستخدمين والصلاحيات.",
     permissions: ALL_PERMISSIONS,
+  },
+  {
+    key: "assistant",
+    label: "مساعد محاسب / مراقب مشاريع",
+    description:
+      "إدخال القيود وتصحيحها، وقراءة الموازين والقوائم، ومتابعة المشاريع والعقود وربط دفعاتها، واستلام المواد والحضور — ولا يُقرّ حركةً ولا يحذفها، ولا يمسّ الرواتب ولا دليل الحسابات ولا الأرصدة الافتتاحية.",
+    permissions: ASSISTANT,
   },
   {
     key: "secretary",
