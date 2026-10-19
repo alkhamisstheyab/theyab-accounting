@@ -6562,12 +6562,19 @@ function ClientStatementSheet({
                   المطلوب سداده
                 </td>
                 <td className="border border-slate-300 px-2 py-2 tabular-nums">
-                  {fmt(statement.owed)} د.ك
+                  {fmt(statement.owedAll)} د.ك
                 </td>
               </tr>
             </tbody>
           </table>
 
+          {statement.startedShort > 0.001 && (
+            <p className="mb-3 text-sm leading-7">
+              ومن المبلغ أعلاه <b>{fmt(statement.startedShort)} د.ك</b> نقصُ
+              دفعاتٍ شُرع في سدادها ولم تُستوفَ — وهي دفعاتٌ تُستحقّ ببدء
+              مراحلها لتوفير موادها.
+            </p>
+          )}
           {statement.lateDays != null && statement.lateDays > 0 && (
             <p className="mb-3 text-sm">
               أقدمُ دفعةٍ مستحقّة بتاريخ <b>{statement.oldestDue}</b>، ومضى
@@ -6581,6 +6588,14 @@ function ClientStatementSheet({
               <b>{fmt(statement.spentWhileLate)} د.ك</b> من مواردها — أجوراً
               ومواد وأعمال مقاولين، بحسب {statement.spentEntries} قيداً في
               دفاترها.
+            </p>
+          )}
+
+          {statement.extensionDays > 0 && statement.originalEnd && (
+            <p className="mb-5 text-sm leading-7">
+              وبموجب العقد تُضاف مدّةُ التأخير في السداد على مدّة التنفيذ،
+              فتمتدّ من <b>{statement.originalEnd}</b> إلى{" "}
+              <b>{statement.extendedEnd}</b>.
             </p>
           )}
 
@@ -6633,8 +6648,9 @@ function ClientsDuePage({
     [contractors, movements]
   );
 
-  const owing = rows.filter((r) => r.owed > 0.001);
-  const totalOwed = round3(owing.reduce((sum, r) => sum + r.owed, 0));
+  const owing = rows.filter((r) => r.owedAll > 0.001);
+  const totalOwed = round3(owing.reduce((sum, r) => sum + r.owedAll, 0));
+  const totalStarted = round3(rows.reduce((sum, r) => sum + r.startedShort, 0));
   const totalAhead = round3(rows.reduce((sum, r) => sum + r.paidAhead, 0));
   const undated = rows.reduce(
     (n, r) => n + r.items.filter((i) => !i.dueDate).length,
@@ -6660,6 +6676,19 @@ function ClientsDuePage({
               </p>
               <p className="text-xs text-slate-500">من {owing.length} عميلاً</p>
             </div>
+            {totalStarted > 0.001 && (
+              <div className="rounded-xl border border-amber-300 bg-amber-50 px-5 py-3">
+                <p className="text-sm text-amber-900">
+                  نقصُ دفعاتٍ شُرع في سدادها
+                </p>
+                <p className="text-2xl font-bold tabular-nums text-amber-900">
+                  {fmt(totalStarted)} <span className="text-base">د.ك</span>
+                </p>
+                <p className="text-xs text-amber-900">
+                  دفع بعضَها ولم يُتمّها — ومنه يتأخّر توفير المواد
+                </p>
+              </div>
+            )}
             {totalAhead > 0.001 && (
               <div className="rounded-xl border border-green-300 bg-green-50 px-5 py-3">
                 <p className="text-sm text-green-800">مقبوضٌ مقدّماً</p>
@@ -6704,7 +6733,7 @@ function ClientsDuePage({
                   <Fragment key={r.project || "(بلا مشروع)"}>
                     <tr
                       className={`border-b border-slate-100 ${
-                        r.owed > 0.001 ? "" : "text-slate-400"
+                        r.owedAll > 0.001 ? "" : "text-slate-400"
                       }`}
                     >
                       <td className="px-3 py-2 font-bold">
@@ -6719,8 +6748,15 @@ function ClientsDuePage({
                       <td className="px-3 py-2 tabular-nums">{fmt(r.due)}</td>
                       <td className="px-3 py-2 tabular-nums">{fmt(r.received)}</td>
                       <td className="px-3 py-2 tabular-nums font-bold">
-                        {r.owed > 0.001 ? (
-                          fmt(r.owed)
+                        {r.owedAll > 0.001 ? (
+                          <>
+                            {fmt(r.owedAll)}
+                            {r.startedShort > 0.001 && (
+                              <span className="block text-xs font-normal text-amber-800">
+                                منه {fmt(r.startedShort)} نقصُ دفعاتٍ شُرع فيها
+                              </span>
+                            )}
+                          </>
                         ) : r.paidAhead > 0.001 ? (
                           <span className="text-green-700">
                             مقدّماً {fmt(r.paidAhead)}
@@ -6730,7 +6766,7 @@ function ClientsDuePage({
                         )}
                       </td>
                       <td className="px-3 py-2">
-                        {r.owed <= 0.001 ? (
+                        {r.owedAll <= 0.001 ? (
                           "—"
                         ) : r.lateDays == null ? (
                           <span className="text-amber-700">لا يُعلم</span>
@@ -6778,7 +6814,7 @@ function ClientsDuePage({
                         >
                           {isOpen ? "إخفاء" : "التفصيل"}
                         </button>
-                        {r.owed > 0.001 && (
+                        {r.owedAll > 0.001 && (
                           <button
                             onClick={() => onPrint(r)}
                             className="mr-2 rounded-lg bg-blue-600 px-3 py-1 text-xs font-bold text-white"
@@ -6792,6 +6828,20 @@ function ClientsDuePage({
                     {isOpen && (
                       <tr className="bg-slate-50">
                         <td colSpan={9} className="px-3 py-3">
+                          {r.originalEnd && (
+                            <p className="mb-3 text-sm">
+                              مدّةُ العقد تنتهي <b>{r.originalEnd}</b>
+                              {r.extensionDays > 0 ? (
+                                <>
+                                  {" "}— ويُضاف إليها <b>{r.extensionDays}</b>{" "}
+                                  يوماً بتأخّر سداده بنصّ العقد، فتنتهي{" "}
+                                  <b>{r.extendedEnd}</b>
+                                </>
+                              ) : (
+                                " — ولا إضافةَ بعد"
+                              )}
+                            </p>
+                          )}
                           {r.items.length === 0 ? (
                             <p className="text-sm text-slate-600">
                               لا دفعةَ مطلوبةً — وما قُبض مقدّماً {fmt(r.paidAhead)} د.ك
@@ -6809,6 +6859,7 @@ function ClientsDuePage({
                                   <th className="px-2 py-1">الباقي</th>
                                   <th className="px-2 py-1">استُحقّت بتاريخ</th>
                                   <th className="px-2 py-1">التأخير</th>
+                                  <th className="px-2 py-1">سندُ الطلب</th>
                                 </tr>
                               </thead>
                               <tbody>
@@ -6856,6 +6907,15 @@ function ClientsDuePage({
                                         </span>
                                       )}
                                     </td>
+                                    <td className="px-2 py-1">
+                                      {i.basis === "مُقرّة" ? (
+                                        <span className="text-slate-600">أُقرّت مرحلتها</span>
+                                      ) : (
+                                        <span className="font-bold text-amber-800">
+                                          دفع بعضَها
+                                        </span>
+                                      )}
+                                    </td>
                                   </tr>
                                 ))}
                               </tbody>
@@ -6872,8 +6932,11 @@ function ClientsDuePage({
         </div>
 
         <Banner tone="ok">
-          <b>ما يُحسب وكيف.</b> «المطلوب الآن» دفعاتٌ أُقرّت ولم يصل مالُها
-          كلُّه — وما لم تُقرّ مرحلتُه ليس مطلوباً ولو كان في الجدول.
+          <b>ما يُحسب وكيف.</b> «المطلوب الآن» بابان: دفعاتٌ أُقرّت مراحلُها
+          ولم يصل مالُها كلُّه، ودفعاتٌ لم تُقرّ وقد <b>دفع بعضَها ولم
+          يُتمّها</b> — ومن دفع بعضَ دفعةٍ فقد أقرّ بأنها مستحقّة، وشرطُ
+          أمثالها في العقد «بدءُ المرحلة» لا تمامُها، فمالُها يموّل موادها.
+          وما لم تُقرّ ولم يصل منها شيءٌ ليست مطلوبةً بعد.
           و«أُنفق في مدّته» أجورٌ ومواد ومقاولون صُرفوا على قسيمته بين أقدم
           استحقاقٍ لم يُسدَّد واليوم، من دفاترك لا تقديراً. و«غرامةٌ تسقط
           عنّا» بنصّ عقده: تأخّرُ المالك فوق أسبوعين يُضاف على مدّة العقد،

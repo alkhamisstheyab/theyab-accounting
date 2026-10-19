@@ -73,6 +73,7 @@ const contract = {
   contractDate: "2026-01-01",
   delayPenaltyPerDay: 25,
   maxPenaltyPercent: 5,
+  durationDays: 365,
   installments: [
     /* ١: مستحقّةٌ منذ ١٠٠ يوم، لم يصل منها شيء */
     installment(1, 10000, { dueDate: "2026-07-11", stage: "التجهيز" }),
@@ -80,8 +81,10 @@ const contract = {
     installment(2, 8000, { dueDate: "2026-08-30", stage: "الهيكل" }),
     /* ٣: مستحقّةٌ ووصلت كاملةً — فلا تُعدّ */
     installment(3, 5000, { dueDate: "2026-09-01", stage: "الطابوق" }),
-    /* ٤: لم تُقرّ، ووصل عليها مالٌ — سَبْقٌ لا تأخّر */
+    /* ٤: لم تُقرّ، ووصل بعضُ مالها ولم يَتمّ — مطلوبةٌ بسند الدفع */
     installment(4, 7000, { confirmed: false, approved: false, stage: "التشطيب" }),
+    /* ٥: لم تُقرّ، ووصلت كاملةً — سَبْقٌ لا تأخّر */
+    installment(5, 2000, { confirmed: false, approved: false, stage: "التسليم" }),
   ],
 };
 
@@ -102,6 +105,7 @@ const movements = [
   movement("r1", "2026-09-20", 4000, { installmentNumber: 2 }),
   movement("r2", "2026-09-25", 5000, { installmentNumber: 3 }),
   movement("r3", "2026-10-01", 3000, { installmentNumber: 4 }),
+  movement("r4", "2026-10-02", 2000, { installmentNumber: 5 }),
   /* ومصروفاتٌ على قسيمته: اثنان في مدّة التأخير وواحدٌ قبلها */
   movement("e1", "2026-06-01", 1000, { movementType: "مصروفات", contractNumber: "" }),
   movement("e2", "2026-08-01", 2500, { movementType: "مصروفات", contractNumber: "" }),
@@ -112,16 +116,16 @@ const s = clientStatement("مشروعٌ مصنوع", [contract], movements, TODA
 
 console.log("\nالمطلوبُ يُحسب من المُقرّ وحده:\n");
 
+check("ما أُقرّ: ١٠٠٠٠ + ٨٠٠٠ + ٥٠٠٠", s.due === 23000, String(s.due));
 check(
-  "ما أُقرّ: ١٠٠٠٠ + ٨٠٠٠ + ٥٠٠٠",
-  s.due === 23000,
-  String(s.due)
+  "وما قُبض على ما عُدّ مطلوباً: ٤٠٠٠ + ٥٠٠٠ + ٣٠٠٠",
+  s.received === 12000,
+  String(s.received)
 );
-check("وما قُبض على المُقرّ: ٤٠٠٠ + ٥٠٠٠", s.received === 9000, String(s.received));
 check(
-  "فالمطلوبُ ١٤٠٠٠",
+  "فالمطلوبُ من المُقرّ ١٤٠٠٠",
   s.owed === 14000,
-  `${s.owed} — من ${s.items.length} دفعةً`
+  `${s.owed} — من ${s.items.filter((i) => i.basis === "مُقرّة").length} دفعةً`
 );
 check(
   "والمستوفاةُ لا تُعدّ",
@@ -129,9 +133,56 @@ check(
   "الدفعة ٣ وصلت كاملةً"
 );
 check(
-  "وما لم تُقرّ ليست مطلوبةً، ومالُها سَبْقٌ",
-  s.paidAhead === 3000 && !s.items.some((i) => i.number === 4),
+  "وما لم تُقرّ ووصلت كاملةً سَبْقٌ لا تأخّر",
+  s.paidAhead === 2000 && !s.items.some((i) => i.number === 5),
   `مقدّماً ${s.paidAhead}`
+);
+
+/*
+  وهذا هو ما كان يختفي.
+
+  الدفعةُ ٥ من العقد ٦٠٠١: قيمتُها ٨٠٠٠ ووصل منها ٢٨٠٠، ومرحلتُها لم
+  تُعتمد — فكانت تُعدّ «مقبوضاً مقدّماً» ويختفي نقصُ ٥٢٠٠، وهو الذي
+  أخّر توفير المواد. ومن دفع بعضَ دفعةٍ فقد أقرّ بأنها مستحقّة، وشرطُ
+  أمثالها «بدءُ المرحلة» لا تمامُها.
+*/
+console.log("\nومن دفع بعضَ دفعةٍ فقد أقرّ بأنها مستحقّة:\n");
+
+const started = s.items.find((i) => i.number === 4);
+check(
+  "دفعةٌ لم تُقرّ ودُفع بعضُها تُعدّ مطلوبة",
+  !!started && started.owing === 4000,
+  started ? `باقٍ ${started.owing} من ${started.net}` : "لم تُعدّ"
+);
+check(
+  "وسندُها «شُرع في سدادها» لا «مُقرّة»",
+  started?.basis === "شُرع في سدادها",
+  started?.basis ?? "—"
+);
+check(
+  "ويُفرد مجموعُها",
+  s.startedShort === 4000,
+  `نقصُ ما شُرع فيه ${s.startedShort}`
+);
+check(
+  "والمُقرُّ وحده لا يبلعه",
+  s.owed === 14000 && s.owedAll === 18000,
+  `مُقرٌّ ${s.owed} · جملةً ${s.owedAll}`
+);
+check(
+  "ولا تُحسب في المقبوض مقدّماً",
+  s.paidAhead === 2000,
+  "فالمقدّمُ ما وصل كاملاً على ما لم يُقرّ"
+);
+check(
+  "والشاشةُ تُفرد لها لوحاً وعموداً",
+  /نقصُ دفعاتٍ شُرع في سدادها/.test(page) && /دفع بعضَها/.test(page)
+);
+check(
+  "والكشفُ المسلَّم يذكرها وسندَها",
+  /نقصُ\s*\n?\s*دفعاتٍ شُرع في سدادها ولم تُستوفَ/.test(page) ||
+    /statement\.startedShort/.test(page),
+  "فهي مطالبةٌ بحقٍّ أقرّ به بدفعه"
 );
 
 console.log("\nوالتأخير يُقاس بتاريخ الاستحقاق:\n");
@@ -143,8 +194,8 @@ check(
 );
 check("وأيامُه ١٠٠", s.lateDays === 100, String(s.lateDays));
 check(
-  "والدفعاتُ مرتَّبةٌ بالأقدم",
-  s.items.map((i) => i.number).join(",") === "1,2",
+  "والدفعاتُ مرتَّبةٌ بالأقدم، وما لا تاريخَ له في الذيل",
+  s.items.map((i) => i.number).join(",") === "1,2,4",
   s.items.map((i) => `${i.number}:${i.lateDays}`).join(" · ")
 );
 check(
@@ -206,6 +257,7 @@ check(
 );
 
 /* ---- وشرطُ الأسبوعين ---- */
+/* eslint-disable-next-line no-var */
 const soon = {
   ...contract,
   installments: [installment(1, 10000, { dueDate: "2026-10-10" })],
@@ -215,6 +267,36 @@ check(
   "ولا تقع قبل تجاوز الأسبوعين",
   s2.lateDays === 9 && s2.penaltyWaived === 0,
   `${s2.lateDays} يوماً — ونصُّ العقد: «بمدة تتجاوز أسبوعين»`
+);
+
+console.log("\nومدّةٌ تُضاف على مدّة العقد — علاجُ العقد لتأخّر السداد:\n");
+
+/*
+  وهو أنفعُ من رقمٍ بالدينار حين يكون الضررُ تأخّرَ العمل نفسه — كتأخّر
+  توفير المواد: فالمالُ لم يُنفَق، وإنما ضاع الوقت.
+*/
+check(
+  "تُحسب بأيام التأخير",
+  s.extensionDays === 100,
+  `${s.extensionDays} يوماً`
+);
+check(
+  "ونهايةُ المدّة الأصليّة تُحسب من تاريخ العقد ومدّته",
+  s.originalEnd === "2027-01-01",
+  `${s.originalEnd} — عقدٌ في ٢٠٢٦-٠١-٠١ ومدّتُه ٣٦٥`
+);
+check(
+  "وتمتدّ بالإضافة",
+  s.extendedEnd === "2027-04-11",
+  s.extendedEnd
+);
+check(
+  "ولا تقع قبل تجاوز الأسبوعين",
+  clientStatement("مشروعٌ مصنوع", [soon], [], TODAY).extensionDays === 0
+);
+check(
+  "وتُذكر في الكشف المسلَّم — فهي حقُّ الشركة بنصّ عقده",
+  /تُضاف مدّةُ التأخير في السداد على مدّة التنفيذ/.test(page)
 );
 
 console.log("\nوبلا تاريخٍ لا يُدّعى تأخير:\n");
@@ -284,11 +366,12 @@ if (BACKUP && fs.existsSync(BACKUP)) {
   const { parseBackup } = await jiti.import("../lib/storage.ts");
   const state = parseBackup(fs.readFileSync(BACKUP, "utf8"));
   const rows = clientStatements(state.contractors, state.movements, new Date());
-  const owing = rows.filter((r) => r.owed > 0.001);
+  const owing = rows.filter((r) => r.owedAll > 0.001);
   console.log("\nوعلى دفاتر الشركة:\n");
   for (const r of rows) {
     console.log(
-      `     ${String(r.project).padEnd(34)} مطلوب ${String(r.owed).padStart(9)}` +
+      `     ${String(r.project).padEnd(34)} مطلوب ${String(r.owedAll).padStart(9)}` +
+        (r.startedShort > 0.001 ? ` (منه ${r.startedShort} نقصُ ما شُرع فيه)` : "") +
         (r.paidAhead > 0.001 ? ` · مقدّماً ${r.paidAhead}` : "") +
         (r.lateDays != null ? ` · ${r.lateDays} يوماً` : "")
     );
@@ -299,7 +382,7 @@ if (BACKUP && fs.existsSync(BACKUP)) {
   );
   console.log(
     `\n     المطلوب جملةً: ${
-      Math.round(owing.reduce((a, r) => a + r.owed, 0) * 1000) / 1000
+Math.round(owing.reduce((a, r) => a + r.owedAll, 0) * 1000) / 1000
     } د.ك من ${owing.length} عميلاً`
   );
   if (undatedRows > 0) {

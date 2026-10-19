@@ -85,6 +85,21 @@ export type OwedInstallment = {
   dueDate: string;
   /** أيامُ التأخير — و«لا يُعلم» إن لم يُكتب تاريخُ الاستحقاق */
   lateDays: number | null;
+  /**
+   * من أين عُدّت مطلوبةً.
+   *
+   *   • `مُقرّة`: شُهد بإنجاز مرحلتها وأقرّتها الإدارة.
+   *   • `شُرع في سدادها`: لم تُقرّ، وقد وصل بعضُ مالها ولم يَتمّ.
+   *
+   * والثانيةُ مطلوبةٌ كالأولى: من دفع بعضَ دفعةٍ فقد أقرّ بأنها
+   * مستحقّة. ووقع في دفاتر الشركة: الدفعةُ ٥ من العقد ٦٠٠١ قيمتُها
+   * ٨٠٠٠ ووصل منها ٢٨٠٠، ومرحلتُها لم تُعتمد — فكانت تُعدّ «مقبوضاً
+   * مقدّماً» ويختفي نقصُ ٥٢٠٠، وهو الذي أخّر توفير المواد.
+   *
+   * وشرطُ أمثالها في العقد «بدءُ المرحلة» لا تمامُها — فمالُها يموّل
+   * موادها. فالاعتمادُ بعد الإنجاز ليس بابَها.
+   */
+  basis: "مُقرّة" | "شُرع في سدادها";
 };
 
 export type ClientStatement = {
@@ -101,8 +116,18 @@ export type ClientStatement = {
   received: number;
   /** المطلوبُ الآن */
   owed: number;
-  /** ما قُبض على دفعاتٍ لم تُقرّ — سَبْقُ العميل لا تأخّره */
+  /** ما قُبض كاملاً على دفعاتٍ لم تُقرّ — سَبْقُ العميل لا تأخّره */
   paidAhead: number;
+  /** نقصُ دفعاتٍ شُرع في سدادها ولم تُقرّ مراحلُها */
+  startedShort: number;
+  /** المطلوبُ جملةً: المُقرّ وما شُرع فيه */
+  owedAll: number;
+  /** مدّةٌ تُضاف على مدّة العقد بتأخّر السداد — بنصّ العقد */
+  extensionDays: number;
+  /** نهايةُ المدّة الأصليّة — yyyy-mm-dd، وفراغٌ إن لم تُكتب */
+  originalEnd: string;
+  /** ونهايتُها بعد الإضافة */
+  extendedEnd: string;
   /** الدفعاتُ المطلوبة، الأقدمُ استحقاقاً أوّلاً */
   items: OwedInstallment[];
   /** أقدمُ استحقاقٍ لم يُسدَّد */
@@ -145,6 +170,7 @@ export function clientStatement(
   let due = 0;
   let received = 0;
   let paidAhead = 0;
+  let startedShort = 0;
   let contractValue = 0;
   const names = new Set<string>();
 
@@ -159,15 +185,39 @@ export function clientStatement(
       const net = installmentNet(installment);
       const got = receivedOn(paid, installment.number);
 
-      /* ما لم تُقرّ مرحلتُه ليس مطلوباً — وما قُبض عليه سَبْقٌ لا تأخّر */
+      const owing = round3(net - got);
+
+      /*
+        ما لم تُقرّ مرحلتُه: إن وصل بعضُ مالها ولم يَتمّ فهي مطلوبةٌ —
+        من دفع بعضَ دفعةٍ فقد أقرّ بأنها مستحقّة. وإن لم يصل منها شيءٌ
+        فليست مطلوبةً بعد. وإن وصلت كاملةً فذاك سَبْقٌ لا تأخّر.
+      */
       if (!installment.confirmed) {
-        paidAhead = round3(paidAhead + got);
+        if (got > 0.001 && owing > 0.001) {
+          const dueDateOf = installment.dueDate ?? "";
+          const atOf = dayOf(dueDateOf);
+          items.push({
+            contractNumber: contract.contractNumber,
+            workType: contract.workType || contract.specialty || "",
+            number: installment.number,
+            stage: installment.stage ?? "",
+            net,
+            received: got,
+            owing,
+            dueDate: dueDateOf,
+            lateDays: atOf ? daysBetween(atOf, today) : null,
+            basis: "شُرع في سدادها",
+          });
+          startedShort = round3(startedShort + owing);
+          received = round3(received + got);
+        } else {
+          paidAhead = round3(paidAhead + got);
+        }
         continue;
       }
 
       due = round3(due + net);
       received = round3(received + got);
-      const owing = round3(net - got);
       if (owing <= 0.001) continue;
 
       const dueDate = installment.dueDate ?? "";
@@ -182,6 +232,7 @@ export function clientStatement(
         owing,
         dueDate,
         lateDays: at ? daysBetween(at, today) : null,
+        basis: "مُقرّة",
       });
     }
   }
@@ -193,7 +244,10 @@ export function clientStatement(
     return a.dueDate.localeCompare(b.dueDate);
   });
 
-  const owed = round3(items.reduce((sum, i) => sum + i.owing, 0));
+  const owed = round3(
+    items.filter((i) => i.basis === "مُقرّة").reduce((sum, i) => sum + i.owing, 0)
+  );
+  const owedAll = round3(items.reduce((sum, i) => sum + i.owing, 0));
   const weightedDays = Math.round(
     items.reduce((sum, i) => sum + i.owing * (i.lateDays ?? 0), 0)
   );
@@ -206,7 +260,7 @@ export function clientStatement(
   /* ---- ما أُنفق على مشروعه في مدّة التأخير ---- */
   let spentWhileLate = 0;
   let spentEntries = 0;
-  if (oldest && owed > 0.001) {
+  if (oldest && owedAll > 0.001) {
     const from = oldestDue.slice(0, 10);
     const to = today.toISOString().slice(0, 10);
     for (const m of movements) {
@@ -234,7 +288,7 @@ export function clientStatement(
         (Number(b.delayPenaltyPerDay) || 0) - (Number(a.delayPenaltyPerDay) || 0)
     )[0];
 
-  if (strongest && lateDays != null && lateDays > 14 && owed > 0.001) {
+  if (strongest && lateDays != null && lateDays > 14 && owedAll > 0.001) {
     const perDay = Number(strongest.delayPenaltyPerDay) || 0;
     const capPercent = Number(strongest.maxPenaltyPercent) || 0;
     const raw = round3(lateDays * perDay);
@@ -249,6 +303,31 @@ export function clientStatement(
       ` · العقد ${strongest.contractNumber}`;
   }
 
+  /*
+    ومدّةٌ تُضاف على مدّة العقد.
+
+    وهي علاجُ العقد لتأخّر السداد: «تُضاف المدة على مدة العقد». وهي
+    أنفعُ لصاحب الشركة من رقمٍ بالدينار حين يكون ضررُه تأخّرَ العمل
+    نفسه — كتأخّر توفير المواد: فالمالُ لم يُنفَق، وإنما ضاع الوقت.
+  */
+  const extensionDays = lateDays != null && lateDays > 14 ? lateDays : 0;
+  const longest = mine
+    .filter((c) => (Number(c.durationDays) || 0) > 0 && c.contractDate)
+    .sort((a, b) => (Number(b.durationDays) || 0) - (Number(a.durationDays) || 0))[0];
+  let originalEnd = "";
+  let extendedEnd = "";
+  if (longest) {
+    const start = dayOf(longest.contractDate);
+    if (start) {
+      const days = Number(longest.durationDays) || 0;
+      const end = new Date(start.getTime() + days * DAY);
+      originalEnd = end.toISOString().slice(0, 10);
+      extendedEnd = new Date(end.getTime() + extensionDays * DAY)
+        .toISOString()
+        .slice(0, 10);
+    }
+  }
+
   return {
     project,
     names: [...names],
@@ -258,6 +337,11 @@ export function clientStatement(
     received,
     owed,
     paidAhead,
+    startedShort,
+    owedAll,
+    extensionDays,
+    originalEnd,
+    extendedEnd,
     items,
     oldestDue,
     lateDays,
@@ -281,5 +365,5 @@ export function clientStatements(
   }
   return [...projects]
     .map((p) => clientStatement(p, contracts, movements, today))
-    .sort((a, b) => b.owed - a.owed || b.paidAhead - a.paidAhead);
+    .sort((a, b) => b.owedAll - a.owedAll || b.paidAhead - a.paidAhead);
 }
