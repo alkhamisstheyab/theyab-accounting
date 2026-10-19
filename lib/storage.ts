@@ -173,6 +173,21 @@ export type Installment = {
   confirmedAt: string;
   confirmNote: string;
 
+  /**
+   * متى استُحقّت هذه الدفعة — yyyy-mm-dd.
+   *
+   * وبها وحدها يُقاس التأخير. وتواريخُ الاعتماد والإقرار لا تصلح لذلك:
+   * هي تواريخُ **إدخال** لا تواريخُ عمل. والدليلُ في دفاتر الشركة:
+   * الدفعةُ الأولى من العقد ٦٠٠١ أُقرّت في ٢٠ سبتمبر ٢٠٢٦ ومالُها
+   * وصل في ٣٠ سبتمبر ٢٠٢٥ — سنةً قبلها. فمن قاس بها أخرج تأخيراً
+   * مقلوباً، يُخاصم به عميلاً وهو دافعٌ قبل موعده.
+   *
+   * وتُكتب تلقائيّاً يومَ يعتمد المهندسُ المرحلة — فذاك يومُ تمامها
+   * وطلبِ مالها — وتبقى قابلةً للتعديل بيد الإدارة: فقد يُعتمد متأخّراً
+   * عن تمام العمل، والعبرةُ بالواقع لا بموعد الإدخال.
+   */
+  dueDate?: string;
+
   /* --------------------------------------------------------------
    * تمثيل جدول «الأعمال والبنود المتفق عليها» كما في العقد المبرم.
    *
@@ -1328,6 +1343,8 @@ function migrateContractor(raw: unknown): Contractor {
         confirmedBy: str(item.confirmedBy),
         confirmedAt: str(item.confirmedAt),
         confirmNote: str(item.confirmNote),
+        /* ولا يُستنبط من تاريخ الاعتماد: ذاك تاريخُ إدخالٍ قد يسبقه عمرٌ */
+        dueDate: str(item.dueDate) || undefined,
         externalPaid: str(item.externalPaid) || undefined,
         externalNote: str(item.externalNote) || undefined,
         deduction: str(item.deduction) || undefined,

@@ -72,6 +72,7 @@
     "check:nightly": "node db/check-scheduled-backup.mjs",
     "check:verify": "node db/check-backup-verify.mjs",
     "check:assistant": "node db/check-assistant-role.mjs",
+    "check:receivables": "node db/check-receivables.mjs",
     "restore:confirmations": "node db/restore-confirmations.mjs"
   },
   "dependencies": {

@@ -269,6 +269,10 @@ import {
   verdict,
   type MatchRun,
 } from "@/lib/match-log";
+import {
+  clientStatements,
+  type ClientStatement,
+} from "@/lib/receivables";
 import { monthInYear, todayISO } from "@/lib/today";
 import type { AppState } from "@/lib/storage";
 import {
@@ -360,6 +364,7 @@ const PAGES = [
   "بنود الأعمال",
   "الفواتير",
   "المقاولون",
+  "المطلوب من العملاء",
   "ربط الحركات",
   "اعتماد الحركات",
   "اعتماد المراحل",
@@ -443,6 +448,10 @@ export default function HomeV2() {
   const [backupMeta, setBackupMeta] = useState<BackupMeta | null>(null);
   const [linkedFile, setLinkedFile] = useState<string | null>(null);
   const [backupNotice, setBackupNotice] = useState("");
+  /* كشفُ عميلٍ يُطبع — يُفتح بزرّه ويُغلق بعد الطباعة */
+  const [clientStatement, setClientStatement] = useState<ClientStatement | null>(
+    null
+  );
   const [users, setUsers] = useState<User[]>([]);
   /* من دخل الخادم: هويّته وصلاحيته معاً، ولا شيء منهما من الجهاز */
   const [session, setSession] = useState<ServerUser | null>(null);
@@ -2100,6 +2109,42 @@ export default function HomeV2() {
             />
           )}
 
+          {page === "المطلوب من العملاء" && (
+            <ClientsDuePage
+              contractors={contractors}
+              /*
+                العقد يمتدّ سنتين، فدفعاته لا تُصفّى بالسنة المعروضة —
+                كما في شاشة المقاولين.
+              */
+              movements={approvedMovements}
+              company={company}
+              canManage={allow("contractors.manage")}
+              onSetDueDate={(contractNumber, installmentNumber, date) => {
+                setContractors((prev) =>
+                  prev.map((c) =>
+                    c.contractNumber !== contractNumber
+                      ? c
+                      : {
+                          ...c,
+                          installments: c.installments.map((i) =>
+                            i.number !== installmentNumber
+                              ? i
+                              : { ...i, dueDate: date || undefined }
+                          ),
+                        }
+                  )
+                );
+                log(
+                  "تعديل",
+                  "عقد",
+                  `العقد ${contractNumber} — تاريخ استحقاق الدفعة ${installmentNumber}`,
+                  { after: date || "مُسح" }
+                );
+              }}
+              onPrint={setClientStatement}
+            />
+          )}
+
           {page === "المقاولون" && (
             <ContractorsPage
               contractors={contractors}
@@ -3013,6 +3058,13 @@ export default function HomeV2() {
         />
       )}
 
+      {clientStatement && (
+        <ClientStatementSheet
+          statement={clientStatement}
+          company={company}
+          onClose={() => setClientStatement(null)}
+        />
+      )}
       {contractFor && (
         <ContractSheet
           contract={contractFor}
@@ -6380,6 +6432,458 @@ const BLANK_CONTRACT = {
   notes: DEFAULT_NOTES,
   contractValue: "",
 };
+
+/**
+ * المطلوب من العملاء.
+ *
+ * والعميلُ يُعرف بمشروعه — فالدفاترُ تسمّي المشروعَ باسمه. ويُعرض لكلٍّ
+ * ما أُقرّ من دفعاته وما قُبض وما بقي، ثم ثلاثةُ أرقامٍ عن التأخير:
+ * أيامُه، وما أنفقناه على قسيمته فيه، والغرامةُ التي تسقط عنّا بنصّ
+ * عقده.
+ *
+ * وتاريخُ الاستحقاق يُكتب من هنا: فالدفعاتُ القائمةُ قبل هذا الحقل بلا
+ * تاريخ، ولا يُقاس بها تأخير. ومن لم يُكتب تاريخُه يُقال فيه «لا يُعلم»
+ * ولا يُحسب صفراً — فالصفرُ دعوى بأن لا تأخير، و«لا يُعلم» صدق.
+ */
+/**
+ * كشفُ حسابٍ يُسلَّم للعميل.
+ *
+ * ولا يُذكر فيه ما لا يُطالَب به: الغرامةُ التي تسقط عن الشركة حُجّةٌ
+ * لها في المحاورة، لا بندٌ في كشف. ولو كُتب في ورقةٍ تُسلَّم لصار
+ * مطالبةً بما لا يُستحقّ — وذاك يُفقد الكشفَ حجّيتَه كلَّها.
+ *
+ * ويُذكر ما أُنفق على قسيمته في مدّة التأخير: فهو من دفاتر الشركة،
+ * وهو الذي يُفهم منه أثرُ التأخير بلا دعوى ولا غرامة.
+ */
+function ClientStatementSheet({
+  statement,
+  company,
+  onClose,
+}: {
+  statement: ClientStatement;
+  company: CompanyProfile;
+  onClose: () => void;
+}) {
+  const today = new Date().toLocaleDateString("ar-KW");
+
+  return (
+    <div
+      className="voucher-sheet fixed inset-0 z-50 overflow-auto bg-slate-800/60 p-6"
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="voucher-body designed-sheet mx-auto flex max-w-3xl flex-col bg-white shadow-xl"
+        style={{ minHeight: "27cm" }}
+      >
+        <div className="flex justify-end gap-3 p-6 pb-0 no-print">
+          <button
+            onClick={() => window.print()}
+            className="rounded-lg bg-slate-900 px-6 py-3 font-bold text-white"
+          >
+            🖨 طباعة
+          </button>
+          <button
+            onClick={onClose}
+            className="rounded-lg bg-slate-200 px-6 py-3 font-bold"
+          >
+            إغلاق
+          </button>
+        </div>
+
+        <div style={{ height: 14, background: DOC_GOLD_SOFT }} />
+
+        <div className="flex-1 px-10 pt-8">
+          <div className="mb-6 flex items-start justify-between border-b-2 border-slate-800 pb-4">
+            <div>
+              <div className="text-2xl font-bold">{company.name}</div>
+              {company.nameEn && (
+                <div style={{ fontSize: "9pt" }}>{company.nameEn}</div>
+              )}
+              {company.crNumber && (
+                <div className="text-sm text-slate-600">
+                  س.ت {company.crNumber}
+                </div>
+              )}
+            </div>
+            <div className="text-left text-sm">
+              <div className="font-bold">كشف حساب</div>
+              <div>{today}</div>
+            </div>
+          </div>
+
+          <p className="mb-1">
+            السادة / <b>{statement.names.join(" · ") || statement.project}</b>
+          </p>
+          <p className="mb-5 text-sm text-slate-600">
+            المشروع: {statement.project} · عدد العقود: {statement.contracts}
+          </p>
+
+          <table className="mb-5 w-full border-collapse text-sm">
+            <thead>
+              <tr className="bg-slate-100">
+                <th className="border border-slate-300 px-2 py-2">العقد</th>
+                <th className="border border-slate-300 px-2 py-2">الدفعة</th>
+                <th className="border border-slate-300 px-2 py-2">المرحلة</th>
+                <th className="border border-slate-300 px-2 py-2">استُحقّت</th>
+                <th className="border border-slate-300 px-2 py-2">قيمتها</th>
+                <th className="border border-slate-300 px-2 py-2">المسدَّد</th>
+                <th className="border border-slate-300 px-2 py-2">الباقي</th>
+              </tr>
+            </thead>
+            <tbody>
+              {statement.items.map((i) => (
+                <tr key={`${i.contractNumber}-${i.number}`}>
+                  <td className="border border-slate-300 px-2 py-2">
+                    {i.contractNumber}
+                  </td>
+                  <td className="border border-slate-300 px-2 py-2 tabular-nums">
+                    {i.number}
+                  </td>
+                  <td className="border border-slate-300 px-2 py-2">
+                    {i.stage || i.workType}
+                  </td>
+                  <td className="border border-slate-300 px-2 py-2">
+                    {i.dueDate || "—"}
+                  </td>
+                  <td className="border border-slate-300 px-2 py-2 tabular-nums">
+                    {fmt(i.net)}
+                  </td>
+                  <td className="border border-slate-300 px-2 py-2 tabular-nums">
+                    {fmt(i.received)}
+                  </td>
+                  <td className="border border-slate-300 px-2 py-2 tabular-nums font-bold">
+                    {fmt(i.owing)}
+                  </td>
+                </tr>
+              ))}
+              <tr className="bg-slate-100 font-bold">
+                <td className="border border-slate-300 px-2 py-2" colSpan={6}>
+                  المطلوب سداده
+                </td>
+                <td className="border border-slate-300 px-2 py-2 tabular-nums">
+                  {fmt(statement.owed)} د.ك
+                </td>
+              </tr>
+            </tbody>
+          </table>
+
+          {statement.lateDays != null && statement.lateDays > 0 && (
+            <p className="mb-3 text-sm">
+              أقدمُ دفعةٍ مستحقّة بتاريخ <b>{statement.oldestDue}</b>، ومضى
+              عليها <b>{statement.lateDays}</b> يوماً.
+            </p>
+          )}
+
+          {statement.spentWhileLate > 0.001 && (
+            <p className="mb-5 text-sm leading-7">
+              وقد أنفقت الشركة على المشروع في هذه المدّة{" "}
+              <b>{fmt(statement.spentWhileLate)} د.ك</b> من مواردها — أجوراً
+              ومواد وأعمال مقاولين، بحسب {statement.spentEntries} قيداً في
+              دفاترها.
+            </p>
+          )}
+
+          <p className="mb-8 text-sm leading-7">
+            نرجو التكرّم بسداد المبلغ المطلوب، ولكم جزيل الشكر.
+          </p>
+
+          <div className="mt-10 flex justify-between text-sm">
+            <div>
+              <div className="mb-10">المحاسب</div>
+              <div className="border-t border-slate-400 pt-1">التوقيع</div>
+            </div>
+            <div>
+              <div className="mb-10">المدير العام المالي والإداري</div>
+              <div className="border-t border-slate-400 pt-1">التوقيع</div>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ height: 14, background: DOC_GOLD_SOFT }} />
+      </div>
+    </div>
+  );
+}
+
+function ClientsDuePage({
+  contractors,
+  movements,
+  company,
+  canManage,
+  onSetDueDate,
+  onPrint,
+}: {
+  contractors: Contractor[];
+  movements: Movement[];
+  company: CompanyProfile;
+  canManage: boolean;
+  onSetDueDate: (
+    contractNumber: string,
+    installmentNumber: number,
+    date: string
+  ) => void;
+  onPrint: (statement: ClientStatement) => void;
+}) {
+  const [open, setOpen] = useState<string | null>(null);
+
+  /* اليومُ يُمرَّر ولا يُؤخذ داخل الحساب — فيُفحص على يومٍ معلوم */
+  const rows = useMemo(
+    () => clientStatements(contractors, movements, new Date()),
+    [contractors, movements]
+  );
+
+  const owing = rows.filter((r) => r.owed > 0.001);
+  const totalOwed = round3(owing.reduce((sum, r) => sum + r.owed, 0));
+  const totalAhead = round3(rows.reduce((sum, r) => sum + r.paidAhead, 0));
+  const undated = rows.reduce(
+    (n, r) => n + r.items.filter((i) => !i.dueDate).length,
+    0
+  );
+
+  return (
+    <>
+      <Panel
+        title="المطلوب من العملاء"
+        subtitle="دفعاتٌ شُهد بإنجاز مراحلها وأُقرّت، ولم يصل مالُها كلُّه"
+      >
+        {owing.length === 0 ? (
+          <Banner tone="ok">
+            لا مطلوبَ من أحد — كلُّ دفعةٍ أُقرّت وصل مالُها.
+          </Banner>
+        ) : (
+          <div className="mb-4 flex flex-wrap gap-4">
+            <div className="rounded-xl border border-slate-300 bg-white px-5 py-3">
+              <p className="text-sm text-slate-500">المطلوب الآن</p>
+              <p className="text-2xl font-bold tabular-nums">
+                {fmt(totalOwed)} <span className="text-base">د.ك</span>
+              </p>
+              <p className="text-xs text-slate-500">من {owing.length} عميلاً</p>
+            </div>
+            {totalAhead > 0.001 && (
+              <div className="rounded-xl border border-green-300 bg-green-50 px-5 py-3">
+                <p className="text-sm text-green-800">مقبوضٌ مقدّماً</p>
+                <p className="text-2xl font-bold tabular-nums text-green-900">
+                  {fmt(totalAhead)} <span className="text-base">د.ك</span>
+                </p>
+                <p className="text-xs text-green-800">
+                  على دفعاتٍ لم يشهد المهندسُ بإنجازها
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {undated > 0 && (
+          <Banner tone="warn">
+            <b>{undated}</b> دفعةً مطلوبةً بلا تاريخ استحقاق، فلا يُقاس تأخيرُها.
+            افتح العميل واكتب تاريخَ كلِّ دفعةٍ — متى تمّت مرحلتُها وطُلب مالُها.
+            وما بعد اليوم يُكتب تاريخُه وحدَه يومَ يعتمد المهندسُ المرحلة.
+          </Banner>
+        )}
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b-2 border-slate-300 text-right">
+                <th className="px-3 py-2">العميل / المشروع</th>
+                <th className="px-3 py-2">عقوده</th>
+                <th className="px-3 py-2">أُقرّ له</th>
+                <th className="px-3 py-2">قُبض</th>
+                <th className="px-3 py-2">المطلوب الآن</th>
+                <th className="px-3 py-2">أقدمُ استحقاق</th>
+                <th className="px-3 py-2">أُنفق في مدّته</th>
+                <th className="px-3 py-2">غرامةٌ تسقط عنّا</th>
+                <th className="px-3 py-2"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => {
+                const isOpen = open === r.project;
+                return (
+                  <Fragment key={r.project || "(بلا مشروع)"}>
+                    <tr
+                      className={`border-b border-slate-100 ${
+                        r.owed > 0.001 ? "" : "text-slate-400"
+                      }`}
+                    >
+                      <td className="px-3 py-2 font-bold">
+                        {r.project || "(بلا مشروع)"}
+                        {r.names.length > 0 && (
+                          <span className="block text-xs font-normal text-slate-500">
+                            {r.names.join(" · ")}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 tabular-nums">{r.contracts}</td>
+                      <td className="px-3 py-2 tabular-nums">{fmt(r.due)}</td>
+                      <td className="px-3 py-2 tabular-nums">{fmt(r.received)}</td>
+                      <td className="px-3 py-2 tabular-nums font-bold">
+                        {r.owed > 0.001 ? (
+                          fmt(r.owed)
+                        ) : r.paidAhead > 0.001 ? (
+                          <span className="text-green-700">
+                            مقدّماً {fmt(r.paidAhead)}
+                          </span>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                      <td className="px-3 py-2">
+                        {r.owed <= 0.001 ? (
+                          "—"
+                        ) : r.lateDays == null ? (
+                          <span className="text-amber-700">لا يُعلم</span>
+                        ) : (
+                          <>
+                            {r.oldestDue}
+                            <span
+                              className={`block text-xs ${
+                                r.lateDays > 14 ? "font-bold text-red-700" : "text-slate-500"
+                              }`}
+                            >
+                              {r.lateDays} يوماً
+                            </span>
+                          </>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 tabular-nums">
+                        {r.spentWhileLate > 0.001 ? (
+                          <>
+                            {fmt(r.spentWhileLate)}
+                            <span className="block text-xs text-slate-500">
+                              {r.spentEntries} حركة
+                            </span>
+                          </>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                      <td className="px-3 py-2 tabular-nums">
+                        {r.penaltyWaived > 0.001 ? (
+                          <>
+                            {fmt(r.penaltyWaived)}
+                            <span className="block text-xs text-slate-500">
+                              {r.penaltyBasis}
+                            </span>
+                          </>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-left">
+                        <button
+                          onClick={() => setOpen(isOpen ? null : r.project)}
+                          className="rounded-lg bg-slate-100 px-3 py-1 text-xs font-bold hover:bg-slate-200"
+                        >
+                          {isOpen ? "إخفاء" : "التفصيل"}
+                        </button>
+                        {r.owed > 0.001 && (
+                          <button
+                            onClick={() => onPrint(r)}
+                            className="mr-2 rounded-lg bg-blue-600 px-3 py-1 text-xs font-bold text-white"
+                          >
+                            كشفٌ للعميل
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+
+                    {isOpen && (
+                      <tr className="bg-slate-50">
+                        <td colSpan={9} className="px-3 py-3">
+                          {r.items.length === 0 ? (
+                            <p className="text-sm text-slate-600">
+                              لا دفعةَ مطلوبةً — وما قُبض مقدّماً {fmt(r.paidAhead)} د.ك
+                              على دفعاتٍ لم تُقرّ.
+                            </p>
+                          ) : (
+                            <table className="w-full text-sm">
+                              <thead>
+                                <tr className="border-b border-slate-300 text-right">
+                                  <th className="px-2 py-1">العقد</th>
+                                  <th className="px-2 py-1">الدفعة</th>
+                                  <th className="px-2 py-1">المرحلة</th>
+                                  <th className="px-2 py-1">صافيها</th>
+                                  <th className="px-2 py-1">قُبض</th>
+                                  <th className="px-2 py-1">الباقي</th>
+                                  <th className="px-2 py-1">استُحقّت بتاريخ</th>
+                                  <th className="px-2 py-1">التأخير</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {r.items.map((i) => (
+                                  <tr
+                                    key={`${i.contractNumber}-${i.number}`}
+                                    className="border-b border-slate-200"
+                                  >
+                                    <td className="px-2 py-1">{i.contractNumber}</td>
+                                    <td className="px-2 py-1 tabular-nums">{i.number}</td>
+                                    <td className="px-2 py-1">{i.stage || i.workType}</td>
+                                    <td className="px-2 py-1 tabular-nums">{fmt(i.net)}</td>
+                                    <td className="px-2 py-1 tabular-nums">{fmt(i.received)}</td>
+                                    <td className="px-2 py-1 tabular-nums font-bold">
+                                      {fmt(i.owing)}
+                                    </td>
+                                    <td className="px-2 py-1">
+                                      {canManage ? (
+                                        <input
+                                          type="date"
+                                          value={i.dueDate}
+                                          onChange={(e) =>
+                                            onSetDueDate(
+                                              i.contractNumber,
+                                              i.number,
+                                              e.target.value
+                                            )
+                                          }
+                                          className="rounded border border-slate-300 px-2 py-1"
+                                        />
+                                      ) : (
+                                        i.dueDate || "—"
+                                      )}
+                                    </td>
+                                    <td className="px-2 py-1">
+                                      {i.lateDays == null ? (
+                                        <span className="text-amber-700">لا يُعلم</span>
+                                      ) : (
+                                        <span
+                                          className={
+                                            i.lateDays > 14 ? "font-bold text-red-700" : ""
+                                          }
+                                        >
+                                          {i.lateDays} يوماً
+                                        </span>
+                                      )}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          )}
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        <Banner tone="ok">
+          <b>ما يُحسب وكيف.</b> «المطلوب الآن» دفعاتٌ أُقرّت ولم يصل مالُها
+          كلُّه — وما لم تُقرّ مرحلتُه ليس مطلوباً ولو كان في الجدول.
+          و«أُنفق في مدّته» أجورٌ ومواد ومقاولون صُرفوا على قسيمته بين أقدم
+          استحقاقٍ لم يُسدَّد واليوم، من دفاترك لا تقديراً. و«غرامةٌ تسقط
+          عنّا» بنصّ عقده: تأخّرُ المالك فوق أسبوعين يُضاف على مدّة العقد،
+          فتسقط غرامةُ تأخيرنا — <b>وهي حُجّةٌ لك لا ديْنٌ عليه</b>، تُذكر في
+          المحاورة ولا تُقيَّد في الدفاتر.
+        </Banner>
+      </Panel>
+    </>
+  );
+}
 
 function ContractorsPage({
   contractors,
@@ -17323,6 +17827,15 @@ function ApprovalsPage({
                       approved,
                       approvedBy: approved ? approverName : "",
                       approvedAt: approved ? new Date().toISOString() : "",
+                      /*
+                        ويومُ الشهادةِ يومُ الاستحقاق — وبه يُقاس التأخير.
+                        ولا يُكتب فوق تاريخٍ مكتوب: الإدارةُ تُصحّحه إن
+                        اعتُمدت المرحلةُ متأخّرةً عن تمامها، فلا يُمحى
+                        تصحيحُها باعتمادٍ ثانٍ.
+                      */
+                      dueDate: approved
+                        ? installment.dueDate || todayISO()
+                        : installment.dueDate,
                       approvalNote: approved ? note.trim() : "",
                       /* الخصم من الاعتماد، فسحبه يسحبه */
                       deduction:
