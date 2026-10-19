@@ -23,6 +23,7 @@ import { NextResponse } from "next/server";
 import { currentUser } from "@/lib/server/auth";
 import { serverBackup } from "@/lib/server/backup";
 import {
+  blobConfigured,
   blobToken,
   listBackups,
   purge,
@@ -64,12 +65,12 @@ export async function GET(request: Request) {
     );
   }
 
-  if (!blobToken()) {
+  if (!blobConfigured()) {
     return NextResponse.json(
       {
         error:
           "لا مخزنَ موصولاً: أنشئ مخزن Blob خاصّاً في لوحة فيرسل واربطه بالمشروع، " +
-          "فيظهر المتغيّر BLOB_READ_WRITE_TOKEN.",
+          "ثم أعِد النشر — فيظهر BLOB_STORE_ID أو BLOB_READ_WRITE_TOKEN.",
       },
       { status: 503 }
     );

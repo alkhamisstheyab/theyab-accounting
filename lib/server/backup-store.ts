@@ -35,6 +35,20 @@ export function blobToken(): string | undefined {
   return undefined;
 }
 
+/**
+ * أمخزنٌ موصولٌ أصلاً؟
+ *
+ * والمكتبةُ تستأذن بترتيب: مفتاحٌ يُمرَّر، ثم OIDC مع BLOB_STORE_ID،
+ * ثم BLOB_READ_WRITE_TOKEN من البيئة. والوصلُ الحديثُ للمخزن الخاصّ
+ * لا يضع مفتاحاً ثابتاً قطّ — يضع معرّفَ المخزن ويستأذن بـOIDC.
+ *
+ * فكان الحرزُ يسأل عن المفتاح وحده فيقول «لا مخزنَ موصولاً» والمخزنُ
+ * موصولٌ عاملٌ — منعتُ الطريقَ قبل أن تسلكه المكتبة. فيُسأل عن أيِّ
+ * دليلِ وصلٍ: مفتاحٌ أو معرّف.
+ */
+export const blobConfigured = (): boolean =>
+  Boolean(blobToken() || process.env.BLOB_STORE_ID);
+
 /** أسماءُ ما يراه الخادمُ من متغيّرات المخزن — أسماءٌ بلا قيم، للتشخيص */
 export const blobEnvNames = (): string[] =>
   Object.keys(process.env)

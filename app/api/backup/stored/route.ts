@@ -20,6 +20,7 @@ import { NextResponse } from "next/server";
 import { AuthError, requirePermission } from "@/lib/server/auth";
 import {
   blobEnvNames,
+  blobConfigured,
   blobToken,
   dateOf,
   listBackups,
@@ -45,7 +46,7 @@ export async function GET(request: Request) {
     }
 
     const token = blobToken();
-    if (!token) {
+    if (!blobConfigured()) {
       /* وأسماءُ ما يراه الخادم، بلا قيم — فيُعرف أمشكلةُ اسمٍ أم نشرةٍ لم تُعَد */
       return NextResponse.json({ store: false, backups: [], seen: blobEnvNames() });
     }
