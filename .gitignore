@@ -52,6 +52,9 @@ next-env.d.ts
 /.api-check/
 /.sync-check/
 /.parallel-check/
+/.backup-check-a/
+/.backup-check-b/
+/.backup-check.json
 /.next-verify/
 /.next-check/
 /.next-render/

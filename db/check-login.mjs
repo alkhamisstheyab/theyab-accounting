@@ -24,6 +24,7 @@ import crypto from "crypto";
 import { fileURLToPath } from "url";
 import { spawn, execFileSync } from "child_process";
 import { uuidFor } from "./ids.mjs";
+import { killTree, requireFreePorts } from "./ports.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(HERE, "..");
@@ -36,6 +37,11 @@ if (!BACKUP) {
 
 const PG_PORT = 55435;
 const WEB_PORT = 3213;
+
+await requireFreePorts([
+  [PG_PORT, "منفذ القاعدة"],
+  [WEB_PORT, "خادم الويب"],
+]);
 const BASE = `http://127.0.0.1:${WEB_PORT}`;
 
 /** الرقم السرّي القديم، والكلمة الحقيقية التي تحلّ محلّه */
@@ -130,7 +136,7 @@ web.stdout.on("data", (d) => (log += d));
 web.stderr.on("data", (d) => (log += d));
 
 const stop = async () => {
-  web.kill();
+  killTree(web);
   try {
     await socket.stop();
   } catch {}

@@ -17,10 +17,10 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { spawn, execFileSync } from "child_process";
-import net from "net";
 import bcrypt from "bcryptjs";
 import { createJiti } from "jiti";
 import { uuidFor } from "./ids.mjs";
+import { killTree, requireFreePorts } from "./ports.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(HERE, "..");
@@ -44,37 +44,10 @@ const check = (label, ok, detail = "") => {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/* ------------------------------------------------------------------ */
-/* الطريقُ قبل المسير                                                   */
-/* ------------------------------------------------------------------ */
-/*
-  فحصٌ سابقٌ قد يبقى خادمُه معلّقاً على المنفذ بعد موت قاعدته. فإن بُدئ
-  فحصٌ جديد أخفق «next start» على منفذٍ مشغول، ثم سأل المسبارُ الخادمَ
-  القديمَ فأجابه — فيُفحص بناءٌ قديمٌ لا الذي كُتب، أو يُعلّق الطلبُ إلى
-  غير نهاية. ووقع: علِق فحصٌ ساعتين على خادمٍ عمرُه ساعتان، وقاعدتُه
-  ميتة. وأخطرُ من التعليق أن يرجع أخضرَ على بناءٍ غير المفحوص.
-
-  فيُتحقّق أن المنفذين خاليان قبل كل شيء — ولا يُمشى في طريقٍ فيه غيرُك.
-*/
-const portFree = (port) =>
-  new Promise((resolve) => {
-    const probe = net.createServer();
-    probe.once("error", () => resolve(false));
-    probe.once("listening", () => probe.close(() => resolve(true)));
-    probe.listen(port, "127.0.0.1");
-  });
-
-for (const [port, what] of [
+await requireFreePorts([
   [WEB_PORT, "خادم الويب"],
   [PG_PORT, "منفذ القاعدة"],
-]) {
-  if (!(await portFree(port))) {
-    console.error("المنفذ " + port + " مشغول (" + what + ") — فحصٌ سابقٌ لم يُطفأ.");
-    console.error("اقتله ثم أعِد، وإلا فُحص بناءٌ قديمٌ أو عُلّق الطلبُ أبداً:");
-    console.error('  netstat -ano | grep ":' + port + '"');
-    process.exit(1);
-  }
-}
+]);
 
 /* ------------------------------------------------------------------ */
 /* القاعدة والمستخدم                                                   */
@@ -168,7 +141,7 @@ let webExit = null;
 web.on("exit", (code) => (webExit = code));
 
 const stop = async () => {
-  web.kill();
+  killTree(web);
   try {
     await socket.stop();
   } catch {}

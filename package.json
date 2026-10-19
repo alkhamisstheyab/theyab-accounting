@@ -68,6 +68,7 @@
     "check:waiting": "node db/check-waiting-panel.mjs",
     "check:guides": "node db/check-guides.mjs",
     "check:stale": "node db/check-stale-push.mjs",
+    "check:backup": "node db/check-server-backup.mjs",
     "restore:confirmations": "node db/restore-confirmations.mjs"
   },
   "dependencies": {

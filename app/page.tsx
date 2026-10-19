@@ -1162,6 +1162,44 @@ export default function HomeV2() {
     setBackupNotice("تم تنزيل النسخة إلى مجلد التنزيلات");
   };
 
+  /**
+   * نسخةٌ من الدفاتر نفسها لا من هذا الجهاز.
+   *
+   * ونسخةُ الجهاز تحمل ما وصله هو: فجهازٌ لم يتّصل منذ يومين نسختُه
+   * ناقصةٌ يومين، ومن كان محجوباً عن الرواتب أخذها بلا رواتب. وأخفاها
+   * أن المتصفّح لا يرى تجزئة كلمة المرور قطّ — فنسخته لا يُدخل بها أحد.
+   */
+  const runServerBackup = async () => {
+    try {
+      const response = await fetch("/api/backup");
+      if (!response.ok) {
+        const body = (await response.json().catch(() => ({}))) as {
+          error?: string;
+        };
+        setBackupNotice(
+          body.error ? `تعذّر: ${body.error}` : "تعذّر أخذ النسخة من الخادم"
+        );
+        return;
+      }
+      const content = await response.text();
+      const outcome = await saveToLinkedFile(content);
+      if (outcome.ok) {
+        setBackupMeta(writeBackupMeta(movements.length));
+        setBackupNotice(`نسخة الخادم محفوظة في ${outcome.name}`);
+        return;
+      }
+      if (outcome.reason === "denied") {
+        setBackupNotice("رُفض الإذن بالكتابة — اختر ملف النسخة من جديد");
+        return;
+      }
+      downloadText(backupFileName(), content, "application/json");
+      setBackupMeta(writeBackupMeta(movements.length));
+      setBackupNotice("نسخة الخادم نُزّلت إلى مجلد التنزيلات");
+    } catch {
+      setBackupNotice("تعذّر الاتصال بالخادم — النسخة لم تُؤخذ");
+    }
+  };
+
   const due = backupDue(backupMeta, movements.length);
 
   /** جداول جاهزة للتصدير، مقيّدة بالسنة والفترة المعروضتين */
@@ -2806,6 +2844,7 @@ export default function HomeV2() {
               linkedFile={linkedFile}
               backupNotice={backupNotice}
               onRunBackup={runBackup}
+              onServerBackup={runServerBackup}
               onLinkFile={async () => {
                 const outcome = await chooseBackupFile(backupFileName());
                 if (outcome.ok) {
@@ -9968,6 +10007,7 @@ function SettingsPage({
   linkedFile,
   backupNotice,
   onRunBackup,
+  onServerBackup,
   onLinkFile,
   onUnlinkFile,
   exportTables,
@@ -10011,6 +10051,8 @@ function SettingsPage({
   /** نتيجة آخر عملية حفظ — تُعرض بجانب الزر لا أعلى الصفحة وحدها */
   backupNotice: string;
   onRunBackup: () => void;
+  /** نسخةٌ من القاعدة: كاملةٌ وبتجزئات كلمات المرور — وبها يقع الاسترجاع */
+  onServerBackup: () => Promise<void>;
   onLinkFile: () => void;
   onUnlinkFile: () => void;
   exportTables: ExportTable[];
@@ -10018,6 +10060,8 @@ function SettingsPage({
 }) {
   const logoRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  /* نسخةُ الخادم تمرّ بالشبكة، فيُقال لصاحبها إنها تُؤخذ ولا يُضغط مرّتين */
+  const [serverBusy, setServerBusy] = useState(false);
   const materialsRef = useRef<HTMLInputElement>(null);
   const employeesRef = useRef<HTMLInputElement>(null);
   const [message, setMessage] = useState("");
@@ -10312,6 +10356,21 @@ function SettingsPage({
             className="rounded-lg bg-green-600 px-6 py-3 font-bold text-white hover:bg-green-700"
           >
             💾 حفظ نسخة احتياطية الآن
+          </button>
+          <button
+            disabled={serverBusy}
+            onClick={async () => {
+              setServerBusy(true);
+              try {
+                await onServerBackup();
+              } finally {
+                setServerBusy(false);
+              }
+            }}
+            title="تُقرأ من قاعدة البيانات لا من هذا الجهاز — كاملةً وبكلمات المرور، وهي التي يقع بها الاسترجاع"
+            className="rounded-lg bg-emerald-800 px-6 py-3 font-bold text-white hover:bg-emerald-900 disabled:opacity-60"
+          >
+            {serverBusy ? "… يأخذ من الخادم" : "☁ نسخة من الخادم"}
           </button>
           {backupNotice && (
             <span

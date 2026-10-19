@@ -21,8 +21,12 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { spawn, execFileSync } from "child_process";
+import http from "node:http";
+import { gunzipSync } from "node:zlib";
 import bcrypt from "bcryptjs";
+import { createJiti } from "jiti";
 import { uuidFor } from "./ids.mjs";
+import { killTree, requireFreePorts } from "./ports.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(HERE, "..");
@@ -44,6 +48,11 @@ const check = (label, ok, detail = "") => {
   console.log(`  ${ok ? "✓" : "✗"} ${label}${detail ? " — " + detail : ""}`);
 };
 
+await requireFreePorts([
+  [WEB_PORT, "خادم الويب"],
+  [PG_PORT, "منفذ القاعدة"],
+]);
+
 const dir = path.join(ROOT, ".api-check");
 fs.rmSync(dir, { recursive: true, force: true });
 
@@ -54,19 +63,27 @@ execFileSync(
   { stdio: ["ignore", "ignore", "inherit"] }
 );
 
-/* ---- مستخدمان للفحص: واحد بصلاحيات الحركات وآخر لا يملك إلا النظر ---- */
+/* ---- ثلاثةٌ للفحص: صاحبُ كلِّ شيء، ومن لا يملك إلا النظر، وناسخٌ محجوب ---- */
 const { PGlite } = await import("@electric-sql/pglite");
 const seed = new PGlite(dir);
 
 const hash = await bcrypt.hash(PASSWORD, 10);
-const ALL = [
-  "movements.view",
-  "movements.create",
-  "movements.edit",
-  "movements.delete",
-  "movements.approve",
-  "audit.view",
-];
+/*
+  وصلاحياتُه كلُّها، تُقرأ من موضعها لا تُكتب هنا.
+
+  وكانت ستّاً من صلاحيات الحركات واسمُها ALL. ثم صار الخادم يُرشّح
+  المجموعات بالصلاحية، و`users` منها — فلم يَعُد صاحبُ الستّ يقرأ
+  المستخدمين. والحارسُ أسفلَ يستدلّ على محلّية القاعدة بأسماء
+  المُصطنَعين في الحالة: فصار يطلب دليلاً محجوباً عنه، فاستحال أن
+  يُفلح، وتوقّف الفحصُ قبل أقسامه كلّها.
+
+  فتُقرأ من `ALL_PERMISSIONS`: فما يُضاف من صلاحيةٍ غداً يدخل من
+  تلقائه، ولا يَبلى الفحصُ مرّةً أخرى.
+*/
+const { ALL_PERMISSIONS } = await createJiti(import.meta.url).import(
+  "../lib/permissions.ts"
+);
+const ALL = [...ALL_PERMISSIONS];
 
 /*
   والصفّ يُكتب في عموده وفي data معاً: الأعمدة يقرؤها الدخول، و data
@@ -95,6 +112,8 @@ async function makeUser(name, permissions) {
 }
 await makeUser("فاحص-كامل", ALL);
 await makeUser("فاحص-ناقص", ["movements.view"]);
+/* له النسخُ ولا يقرأ كلَّ الدفاتر — وبه يُفحص أن النسخة لا تكون باباً خلفيّاً */
+await makeUser("فاحص-ناسخ", ["backup.run", "movements.view"]);
 
 const { rows: counted } = await seed.query(
   "SELECT count(*)::int AS n FROM movements"
@@ -147,7 +166,7 @@ web.stdout.on("data", (d) => (log += d));
 web.stderr.on("data", (d) => (log += d));
 
 const stop = async () => {
-  web.kill();
+  killTree(web);
   try {
     await socket.stop();
   } catch {}
@@ -199,6 +218,29 @@ const call = async (url, options = {}, cookie = "") => {
     setCookie: res.headers.get("set-cookie") ?? "",
   };
 };
+
+/*
+  طلبٌ خامٌّ بـ`node:http`.
+
+  و`fetch` لا يصلح لفحص الضغط: يُعلن قبولَه ثم يفكّه ويسلّم النصّ —
+  فلا يُعرف أضُغط أم لم يُضغط. والخامُّ يُسلّم البايتات كما جاءت.
+*/
+const raw = (url, headers = {}) =>
+  new Promise((resolve, reject) => {
+    const request = http.request(BASE + url, { headers }, (res) => {
+      const chunks = [];
+      res.on("data", (c) => chunks.push(c));
+      res.on("end", () =>
+        resolve({
+          status: res.statusCode,
+          headers: res.headers,
+          body: Buffer.concat(chunks),
+        })
+      );
+    });
+    request.on("error", reject);
+    request.end();
+  });
 
 const signIn = async (name) => {
   const login = await call("/api/auth/login", {
@@ -383,6 +425,115 @@ try {
 
   const { rows: end } = await live.query("SELECT count(*)::int AS n FROM movements");
   check("والقاعدة عادت كما كانت", end[0].n === MOVEMENTS, String(end[0].n));
+
+  /* ---- 9. النسخة الاحتياطية من الخادم ---- */
+  console.log("\n  النسخة من الدفاتر:");
+
+  const anonBackup = await raw("/api/backup");
+  check(
+    "بلا جلسة لا تُعطى",
+    anonBackup.status === 401 || anonBackup.status === 403,
+    String(anonBackup.status)
+  );
+
+  const weakBackup = await raw("/api/backup", { cookie: weak });
+  check(
+    "ومن لا صلاحية نسخٍ له يُردّ",
+    weakBackup.status === 403,
+    String(weakBackup.status)
+  );
+
+  /*
+    ومن له النسخُ وحُجب عنه شيء: يُردّ أيضاً. فالنسخة كاملةٌ غيرُ
+    مرشَّحة، فلو أُعطيت له بلغ بها ما حُجب عنه في الشاشة.
+  */
+  const copier = await signIn("فاحص-ناسخ");
+  const partial = await raw("/api/backup", { cookie: copier });
+  const partialBody = JSON.parse(partial.body.toString("utf8"));
+  check(
+    "ومن حُجب عنه شيءٌ يُردّ ولو كان له النسخ",
+    partial.status === 403,
+    String(partial.status)
+  );
+  check(
+    "ويُسمّى له ما لا يقرؤه",
+    String(partialBody?.error ?? "").includes("الرواتب") ||
+      String(partialBody?.error ?? "").includes("employees") ||
+      String(partialBody?.error ?? "").includes("payrollRuns"),
+    String(partialBody?.error ?? "").slice(0, 90)
+  );
+
+  /* ---- ومن يقرأ الدفاتر كلها ---- */
+  const plain = await raw("/api/backup", {
+    cookie,
+    "accept-encoding": "identity",
+  });
+  check("ولصاحب الصلاحية تُعطى", plain.status === 200, String(plain.status));
+  check(
+    "وبترويسة تنزيلٍ باسم ملفٍّ",
+    /attachment; filename="theyab-accounting-/.test(
+      String(plain.headers["content-disposition"] ?? "")
+    ),
+    String(plain.headers["content-disposition"] ?? "")
+  );
+
+  const file = JSON.parse(plain.body.toString("utf8"));
+  check(
+    "وصورتُها صورةُ ملفّ النسخة",
+    file.app === "Theyab Accounting" && typeof file.exportedAt === "string" && !!file.data,
+    Object.keys(file).join("، ")
+  );
+  check(
+    "وفيها الدفاتر",
+    (file.data.movements ?? []).length === MOVEMENTS,
+    `${(file.data.movements ?? []).length} من ${MOVEMENTS}`
+  );
+  /*
+    والمفحوصُ أن التجزئةَ تصل **كما في عمودها**، لا أن لكلِّ مستخدمٍ
+    تجزئة. فأوّلُ ما كُتب هذا الشرطُ طلب تجزئةً للجميع فأخفق: ٣ من ٩.
+    وكان صادقاً في إخفاقه — فستّةٌ منهم جاؤوا من نسخة المتصفّح وهي لا
+    تحمل التجزئات، وتلك هي العلّةُ التي من أجلها بُني هذا المسار.
+  */
+  const { rows: hashRows } = await live.query(
+    "SELECT name, password_hash FROM users ORDER BY name"
+  );
+  const inColumn = new Map(hashRows.map((r) => [r.name, r.password_hash ?? ""]));
+  const carried = (file.data.users ?? []).filter(
+    (u) => (u.pinHash ?? "") === (inColumn.get(u.name) ?? "")
+  );
+  const haveOne = hashRows.filter((r) => (r.password_hash ?? "").length > 20);
+  check(
+    "وتجزئةُ كلٍّ كما في عمودها — وبغيرها لا يدخل أحدٌ بعد الاسترجاع",
+    (file.data.users ?? []).length === hashRows.length &&
+      carried.length === hashRows.length &&
+      haveOne.length > 0,
+    `${carried.length} من ${hashRows.length} · ولصاحبِ تجزئةٍ في الدفاتر: ${haveOne.length}`
+  );
+
+  /* ---- والضغط: فحدُّ فيرسل ٤٫٥ ميغا والنسخة تكبر كلَّ يوم ---- */
+  const packed = await raw("/api/backup", { cookie, "accept-encoding": "gzip" });
+  check(
+    "وتُضغط لمن يقبل الضغط",
+    String(packed.headers["content-encoding"] ?? "") === "gzip",
+    String(packed.headers["content-encoding"] ?? "بلا ضغط")
+  );
+  check(
+    "وتصغر بها كثيراً",
+    packed.body.length * 2 < plain.body.length,
+    `${(packed.body.length / 1024).toFixed(0)} ك.بايت من ${(
+      plain.body.length / 1024
+    ).toFixed(0)}`
+  );
+  check(
+    "والمفكوكُ هو النصُّ نفسه حرفاً بحرف",
+    gunzipSync(packed.body).toString("utf8").length === plain.body.toString("utf8").length,
+    "فما حُفظ عند صاحبه نصٌّ كما كان"
+  );
+  check(
+    "ولا يُضغط لمن لا يقبله — فلا يُحفظ ملفٌّ لا يُقرأ",
+    !plain.headers["content-encoding"],
+    String(plain.headers["content-encoding"] ?? "بلا ترويسة")
+  );
 } catch (error) {
   bad++;
   console.error("\n" + String(error?.stack ?? error));
