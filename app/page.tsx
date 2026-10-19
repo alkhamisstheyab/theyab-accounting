@@ -9982,6 +9982,183 @@ function OpeningPage({
 /* الإعدادات                                                           */
 /* ================================================================== */
 
+/**
+ * النسخُ الليليّة: ما في المخزن، ومتى آخرُها.
+ *
+ * ونسخةٌ لا يراها صاحبُها كأنّها ليست: يُقال له «تُؤخذ كلَّ ليلة»
+ * فيطمئنّ، ثم يحتاجها فلا يجد إليها طريقاً إلا لوحة الناشر. فتُعرض
+ * هنا بتواريخها وأحجامها، وتُنزَّل منها أيُّها شاء.
+ *
+ * وفيه «جرّب الآن»: يُشغّل المجدولَ بيده فيرى السلسلةَ كلّها تعمل —
+ * قراءةً وضغطاً وكتابةً في المخزن — بلا أن ينتظر الليل ليعرف.
+ */
+function StoredBackupsBox() {
+  const [state, setState] = useState<
+    | { kind: "loading" }
+    | { kind: "error"; message: string }
+    | { kind: "none" }
+    | { kind: "ok"; backups: { path: string; at: string; size: number }[] }
+  >({ kind: "loading" });
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState("");
+
+  const load = async () => {
+    try {
+      const response = await fetch("/api/backup/stored");
+      const body = (await response.json()) as {
+        store?: boolean;
+        backups?: { path: string; at: string; size: number }[];
+        error?: string;
+      };
+      if (!response.ok) {
+        setState({ kind: "error", message: body.error ?? "تعذّر قراءة المخزن" });
+        return;
+      }
+      if (!body.store) {
+        setState({ kind: "none" });
+        return;
+      }
+      setState({ kind: "ok", backups: body.backups ?? [] });
+    } catch {
+      setState({ kind: "error", message: "تعذّر الاتصال بالخادم" });
+    }
+  };
+
+  useEffect(() => {
+    void load();
+  }, []);
+
+  const runNow = async () => {
+    setBusy(true);
+    setNotice("");
+    try {
+      const response = await fetch("/api/backup/scheduled");
+      const body = (await response.json()) as {
+        ok?: boolean;
+        bytes?: number;
+        purged?: number;
+        error?: string;
+      };
+      if (!response.ok || !body.ok) {
+        setNotice("تعذّر: " + (body.error ?? "لم تُؤخذ النسخة"));
+      } else {
+        const kb = Math.round((body.bytes ?? 0) / 1024);
+        setNotice(
+          `نسخةٌ جديدةٌ في المخزن — ${kb} ك.بايت` +
+            (body.purged ? ` · وطُرحت ${body.purged} قديمة` : "")
+        );
+        await load();
+      }
+    } catch {
+      setNotice("تعذّر الاتصال بالخادم");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const latest = state.kind === "ok" ? state.backups[0] : undefined;
+  /* ومتى صار الأمرُ يحتاج نظرَه: ليلتان بلا نسخةٍ ليست عادة */
+  const stale =
+    latest && Date.now() - new Date(latest.at).getTime() > 2 * 86400000;
+
+  return (
+    <div className="mb-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
+      <p className="mb-2 font-bold">النسخ التلقائية (كل ليلة)</p>
+
+      {state.kind === "loading" && (
+        <p className="text-sm text-slate-600">… يقرأ المخزن</p>
+      )}
+
+      {state.kind === "none" && (
+        <p className="mb-3 text-sm text-amber-800">
+          لا مخزنَ موصولاً بعد — فلا نسخةَ تلقائية. أنشئ مخزن <b>Blob خاصّاً</b>{" "}
+          في لوحة فيرسل واربطه بالمشروع.
+        </p>
+      )}
+
+      {state.kind === "error" && (
+        <p className="mb-3 text-sm text-red-700">{state.message}</p>
+      )}
+
+      {state.kind === "ok" && (
+        <>
+          {state.backups.length === 0 ? (
+            <p className="mb-3 text-sm text-amber-800">
+              المخزنُ موصولٌ ولا نسخةَ فيه بعد — اضغط «جرّب الآن» لتقع أوّلُ
+              نسخةٍ ولا تنتظر الليل.
+            </p>
+          ) : (
+            <p className={`mb-3 text-sm ${stale ? "text-red-700" : ""}`}>
+              آخر نسخة تلقائية:{" "}
+              <b>{new Date(state.backups[0].at).toLocaleString("ar-KW")}</b> ·{" "}
+              {state.backups.length} نسخةً محفوظة
+              {stale && " — ومضى عليها أكثرُ من يومين، فانظر في المجدول"}
+            </p>
+          )}
+
+          {state.backups.length > 0 && (
+            <div className="mb-3 max-h-64 overflow-y-auto rounded-lg border border-slate-200 bg-white">
+              <table className="w-full text-sm">
+                <tbody>
+                  {state.backups.slice(0, 30).map((backup) => (
+                    <tr key={backup.path} className="border-b border-slate-100">
+                      <td className="px-3 py-2">
+                        {new Date(backup.at).toLocaleString("ar-KW")}
+                      </td>
+                      <td className="px-3 py-2 tabular-nums text-slate-500">
+                        {Math.round(backup.size / 1024)} ك.بايت
+                      </td>
+                      <td className="px-3 py-2 text-left">
+                        <a
+                          href={`/api/backup/stored?path=${encodeURIComponent(
+                            backup.path
+                          )}`}
+                          className="font-bold text-blue-700 hover:underline"
+                        >
+                          تنزيل
+                        </a>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
+
+      {state.kind !== "none" && (
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            disabled={busy}
+            onClick={runNow}
+            className="rounded-lg bg-slate-900 px-5 py-2 font-bold text-white disabled:opacity-60"
+          >
+            {busy ? "… يأخذ نسخة" : "جرّب الآن"}
+          </button>
+          {notice && (
+            <span
+              className={`rounded-lg px-4 py-2 text-sm font-bold ${
+                notice.startsWith("تعذّر")
+                  ? "bg-red-50 text-red-700"
+                  : "bg-green-50 text-green-800"
+              }`}
+            >
+              {notice}
+            </span>
+          )}
+        </div>
+      )}
+
+      <p className="mt-3 text-xs text-slate-500">
+        تُؤخذ كل ليلة في الخامسة فجراً بتوقيت الكويت، وتُحفظ مضغوطةً في مخزنٍ
+        خاصٍّ خارج قاعدة البيانات. ويُبقى منها: كلُّ نسخةٍ في آخر أسبوعين، ثم
+        واحدةٌ من كلِّ أسبوعٍ إلى سنة، ثم واحدةٌ من كلِّ شهرٍ تبقى أبداً.
+      </p>
+    </div>
+  );
+}
+
 function SettingsPage({
   year,
   years,
@@ -10318,6 +10495,8 @@ function SettingsPage({
             )}
           </p>
         </div>
+
+        <StoredBackupsBox />
 
         {/* نقطة استعادة تلقائية: صورة التخزين قبل أول كتابة في هذه الجلسة */}
         {(() => {
