@@ -13,7 +13,7 @@
  * ويُحفظ مضغوطاً: ٣٤٧ ك.بايت بدل ٣٫٨٥ ميغا، فمخزنُ سنواتٍ يبقى صغيراً.
  */
 
-import { del, list, put } from "@vercel/blob";
+import { del, get, list, put } from "@vercel/blob";
 
 /** المجلّد في المخزن — واسمُ الملفّ يحمل وقتَه، فبه يُعرف ما يُبقى */
 const FOLDER = "backups";
@@ -188,4 +188,42 @@ export async function purge(victims: readonly StoredBackup[]): Promise<number> {
   if (victims.length === 0) return 0;
   await del(victims.map((v) => v.pathname), { token: blobToken() });
   return victims.length;
+}
+
+/** بايتاتُ نسخةٍ بمسارها — مضغوطةً كما حُفظت */
+export async function readStored(pathname: string): Promise<Buffer | null> {
+  const found = await get(pathname, { access: "private", token: blobToken() });
+  if (!found?.stream) return null;
+  return Buffer.from(await new Response(found.stream).arrayBuffer());
+}
+
+/* ------------------------------------------------------------------ */
+/* حكمُ آخر فحص                                                        */
+/* ------------------------------------------------------------------ */
+/*
+  ويُحفظ في المخزن نفسه لا في القاعدة: فالمجدولُ يعمل وحده ليلاً، ولو
+  لم يُكتب حكمُه في موضعٍ يُقرأ منه لمَا عرف صاحبُه أنجح الفحصُ أم أخفق
+  إلا بقراءة دفاتر الناشر. وهو ملفٌّ صغيرٌ، فلا يثقل.
+*/
+const VERDICT = "verify/latest.json";
+
+export async function writeVerdict(verdict: unknown): Promise<void> {
+  await put(VERDICT, JSON.stringify(verdict, null, 2), {
+    access: "private",
+    contentType: "application/json",
+    addRandomSuffix: false,
+    allowOverwrite: true,
+    token: blobToken(),
+  });
+}
+
+export async function readVerdict(): Promise<unknown | null> {
+  try {
+    const found = await get(VERDICT, { access: "private", token: blobToken() });
+    if (!found?.stream) return null;
+    return JSON.parse(await new Response(found.stream).text());
+  } catch {
+    /* لا حكمَ بعد، أو تعذّرت قراءتُه — ولا يُفشل ذلك النسخةَ نفسها */
+    return null;
+  }
 }

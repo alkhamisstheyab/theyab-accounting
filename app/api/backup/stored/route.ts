@@ -24,6 +24,7 @@ import {
   blobToken,
   dateOf,
   listBackups,
+  readVerdict,
 } from "@/lib/server/backup-store";
 import { hiddenFields } from "@/lib/server/permits";
 
@@ -58,6 +59,8 @@ export async function GET(request: Request) {
       const backups = await listBackups();
       return NextResponse.json({
         store: true,
+        /* وحكمُ آخر فحصٍ معها: فالقائمةُ تقول ما يوجد، والحكمُ يقول أيعود */
+        verdict: await readVerdict(),
         backups: backups.map((b) => ({
           path: b.pathname,
           at: b.at.toISOString(),

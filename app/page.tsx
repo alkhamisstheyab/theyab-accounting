@@ -9992,12 +9992,24 @@ function OpeningPage({
  * وفيه «جرّب الآن»: يُشغّل المجدولَ بيده فيرى السلسلةَ كلّها تعمل —
  * قراءةً وضغطاً وكتابةً في المخزن — بلا أن ينتظر الليل ليعرف.
  */
+/** حكمُ فحص الاسترجاع كما يأتي من الخادم */
+type BackupVerdict = {
+  ok: boolean;
+  at: string;
+  path: string;
+  checks: { name: string; ok: boolean; detail: string }[];
+};
+
 function StoredBackupsBox() {
   const [state, setState] = useState<
     | { kind: "loading" }
     | { kind: "error"; message: string }
     | { kind: "none"; seen: string[] }
-    | { kind: "ok"; backups: { path: string; at: string; size: number }[] }
+    | {
+        kind: "ok";
+        backups: { path: string; at: string; size: number }[];
+        verdict: BackupVerdict | null;
+      }
   >({ kind: "loading" });
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
@@ -10009,6 +10021,7 @@ function StoredBackupsBox() {
         store?: boolean;
         backups?: { path: string; at: string; size: number }[];
         seen?: string[];
+        verdict?: BackupVerdict | null;
         error?: string;
       };
       if (!response.ok) {
@@ -10019,7 +10032,11 @@ function StoredBackupsBox() {
         setState({ kind: "none", seen: body.seen ?? [] });
         return;
       }
-      setState({ kind: "ok", backups: body.backups ?? [] });
+      setState({
+        kind: "ok",
+        backups: body.backups ?? [],
+        verdict: body.verdict ?? null,
+      });
     } catch {
       setState({ kind: "error", message: "تعذّر الاتصال بالخادم" });
     }
@@ -10039,14 +10056,22 @@ function StoredBackupsBox() {
         bytes?: number;
         purged?: number;
         error?: string;
+        verdict?: BackupVerdict | null;
       };
       if (!response.ok || !body.ok) {
         setNotice("تعذّر: " + (body.error ?? "لم تُؤخذ النسخة"));
       } else {
         const kb = Math.round((body.bytes ?? 0) / 1024);
+        /* والحكمُ يُقال مع البشرى: نسخةٌ كُتبت ولم تُفحص ليست تمامَ الأمر */
+        const judged = body.verdict
+          ? body.verdict.ok
+            ? " · وفُحصت فعادت"
+            : " · ولكنّ فحصَها أخفق — انظر أسفلَ الصندوق"
+          : "";
         setNotice(
           `نسخةٌ جديدةٌ في المخزن — ${kb} ك.بايت` +
-            (body.purged ? ` · وطُرحت ${body.purged} قديمة` : "")
+            (body.purged ? ` · وطُرحت ${body.purged} قديمة` : "") +
+            judged
         );
         await load();
       }
@@ -10159,10 +10184,44 @@ function StoredBackupsBox() {
         </div>
       )}
 
+      {state.kind === "ok" && state.verdict && (
+        <div
+          className={`mt-4 rounded-lg border p-3 ${
+            state.verdict.ok
+              ? "border-green-200 bg-green-50"
+              : "border-red-300 bg-red-50"
+          }`}
+        >
+          <p className="mb-1 text-sm font-bold">
+            {state.verdict.ok
+              ? "✓ آخرُ نسخةٍ فُحصت فعادت الدفاتر منها"
+              : "✗ آخرُ نسخةٍ لم تُجتَز الفحص"}{" "}
+            <span className="font-normal text-slate-500">
+              — {new Date(state.verdict.at).toLocaleString("ar-KW")}
+            </span>
+          </p>
+          {/* والشروطُ تُسمّى عند الإخفاق: «أخفق» بلا بيانٍ لا يُعمل به */}
+          {!state.verdict.ok && (
+            <ul className="mt-2 space-y-1 text-sm">
+              {state.verdict.checks
+                .filter((c) => !c.ok)
+                .map((c) => (
+                  <li key={c.name} className="text-red-800">
+                    ✗ {c.name}
+                    {c.detail ? ` — ${c.detail}` : ""}
+                  </li>
+                ))}
+            </ul>
+          )}
+        </div>
+      )}
+
       <p className="mt-3 text-xs text-slate-500">
         تُؤخذ كل ليلة في الخامسة فجراً بتوقيت الكويت، وتُحفظ مضغوطةً في مخزنٍ
         خاصٍّ خارج قاعدة البيانات. ويُبقى منها: كلُّ نسخةٍ في آخر أسبوعين، ثم
-        واحدةٌ من كلِّ أسبوعٍ إلى سنة، ثم واحدةٌ من كلِّ شهرٍ تبقى أبداً.
+        واحدةٌ من كلِّ أسبوعٍ إلى سنة، ثم واحدةٌ من كلِّ شهرٍ تبقى أبداً. وكلُّ
+        نسخةٍ تُسحب من المخزن بعد كتابتها وتُفحص: أتُقرأ، وأتعود الدفاترُ
+        منها كما هي، وأفيها كلماتُ المرور.
       </p>
     </div>
   );

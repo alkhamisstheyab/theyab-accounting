@@ -16,19 +16,23 @@
  * في المخزن، يُستنزف به الحسابُ بالتكرار.
  */
 
-import { gzipSync } from "node:zlib";
+import { gunzipSync, gzipSync } from "node:zlib";
 
 import { NextResponse } from "next/server";
 
 import { currentUser } from "@/lib/server/auth";
-import { serverBackup } from "@/lib/server/backup";
+import { backupState } from "@/lib/server/backup";
+import { exportBackup } from "@/lib/storage";
+import { verifyBackup } from "@/lib/server/backup-verify";
 import {
   blobConfigured,
   blobToken,
   listBackups,
   purge,
+  readStored,
   storeBackup,
   toPurge,
+  writeVerdict,
 } from "@/lib/server/backup-store";
 import { inTransaction } from "@/lib/server/db";
 import { hiddenFields } from "@/lib/server/permits";
@@ -79,7 +83,12 @@ export async function GET(request: Request) {
   const startedAt = Date.now();
   try {
     const at = new Date();
-    const content = await inTransaction(serverBackup);
+    /*
+      الحالةُ تُقرأ مرّةً واحدة: منها النسخةُ، ومنها القياسُ عند الفحص.
+      ولو قُرئت ثانيةً للقياس لظهر فرقٌ ليس خللاً — كتابةٌ وقعت بينهما.
+    */
+    const live = await inTransaction(backupState);
+    const content = exportBackup(live);
     const packed = gzipSync(content);
     const saved = await storeBackup(packed, at);
 
@@ -97,9 +106,37 @@ export async function GET(request: Request) {
       console.error("تعذّر طرح النسخ القديمة:", error);
     }
 
+    /*
+      ثم تُسحب من المخزن وتُفحص — من المخزن لا من الذاكرة، وإلا فُحصت
+      الذاكرةُ لا ما حُفظ. فنسخةٌ تُكتب ولا يُعلم أتعود كأنّها ليست،
+      ولا يُعلم ذلك يومَ الحاجة فذاك أسوأُ وقتٍ للعلم.
+    */
+    let verdict: ReturnType<typeof verifyBackup> | null = null;
+    try {
+      const back = await readStored(saved.pathname);
+      verdict = back
+        ? verifyBackup(gunzipSync(back).toString("utf8"), saved.pathname, live)
+        : {
+            ok: false,
+            at: new Date().toISOString(),
+            path: saved.pathname,
+            checks: [
+              {
+                name: "النسخة تُسحب من المخزن بعد كتابتها",
+                ok: false,
+                detail: "كُتبت ولم تُقرأ",
+              },
+            ],
+          };
+      await writeVerdict(verdict);
+    } catch (error) {
+      console.error("تعذّر فحص النسخة:", error);
+    }
+
     return NextResponse.json({
       ok: true,
       by,
+      verdict,
       pathname: saved.pathname,
       bytes: saved.size,
       raw: content.length,
