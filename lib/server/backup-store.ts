@@ -18,6 +18,29 @@ import { del, list, put } from "@vercel/blob";
 /** المجلّد في المخزن — واسمُ الملفّ يحمل وقتَه، فبه يُعرف ما يُبقى */
 const FOLDER = "backups";
 
+/**
+ * مفتاحُ المخزن.
+ *
+ * والمعتادُ `BLOB_READ_WRITE_TOKEN` تجده المكتبةُ وحدها. لكنّ من وصل
+ * مخزناً ثانياً إلى مشروعه جاءه الاسمُ بسابقةٍ — `backups_BLOB_READ_
+ * WRITE_TOKEN` ونحوها — فلا تجده المكتبةُ، فيُقال «لا مخزنَ موصولاً»
+ * والمخزنُ موصولٌ وموجود. فيُبحث عن أيِّ اسمٍ ينتهي به، ويُمرَّر صريحاً.
+ */
+export function blobToken(): string | undefined {
+  const direct = process.env.BLOB_READ_WRITE_TOKEN;
+  if (direct) return direct;
+  for (const [name, value] of Object.entries(process.env)) {
+    if (value && name.endsWith("BLOB_READ_WRITE_TOKEN")) return value;
+  }
+  return undefined;
+}
+
+/** أسماءُ ما يراه الخادمُ من متغيّرات المخزن — أسماءٌ بلا قيم، للتشخيص */
+export const blobEnvNames = (): string[] =>
+  Object.keys(process.env)
+    .filter((name) => name.toUpperCase().includes("BLOB"))
+    .sort();
+
 const two = (n: number) => String(n).padStart(2, "0");
 
 /** `backups/2026-10-19-0300.json.gz` — بالتوقيت العالمي، فلا يختلف ترتيبُها */
@@ -48,7 +71,7 @@ export async function listBackups(): Promise<StoredBackup[]> {
   const found: StoredBackup[] = [];
   let cursor: string | undefined;
   do {
-    const page = await list({ prefix: `${FOLDER}/`, cursor, limit: 1000 });
+    const page = await list({ prefix: `${FOLDER}/`, cursor, limit: 1000, token: blobToken() });
     for (const blob of page.blobs) {
       const at = dateOf(blob.pathname);
       if (at) found.push({ pathname: blob.pathname, at, size: blob.size });
@@ -74,6 +97,7 @@ export async function storeBackup(
     */
     addRandomSuffix: false,
     allowOverwrite: true,
+    token: blobToken(),
   });
   return { pathname: saved.pathname, size: body.byteLength };
 }
@@ -148,6 +172,6 @@ export function toPurge(backups: readonly StoredBackup[]): StoredBackup[] {
 
 export async function purge(victims: readonly StoredBackup[]): Promise<number> {
   if (victims.length === 0) return 0;
-  await del(victims.map((v) => v.pathname));
+  await del(victims.map((v) => v.pathname), { token: blobToken() });
   return victims.length;
 }

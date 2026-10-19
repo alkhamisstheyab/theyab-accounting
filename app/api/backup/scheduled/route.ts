@@ -22,7 +22,13 @@ import { NextResponse } from "next/server";
 
 import { currentUser } from "@/lib/server/auth";
 import { serverBackup } from "@/lib/server/backup";
-import { listBackups, purge, storeBackup, toPurge } from "@/lib/server/backup-store";
+import {
+  blobToken,
+  listBackups,
+  purge,
+  storeBackup,
+  toPurge,
+} from "@/lib/server/backup-store";
 import { inTransaction } from "@/lib/server/db";
 import { hiddenFields } from "@/lib/server/permits";
 
@@ -58,7 +64,7 @@ export async function GET(request: Request) {
     );
   }
 
-  if (!process.env.BLOB_READ_WRITE_TOKEN) {
+  if (!blobToken()) {
     return NextResponse.json(
       {
         error:

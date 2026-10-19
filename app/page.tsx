@@ -9996,7 +9996,7 @@ function StoredBackupsBox() {
   const [state, setState] = useState<
     | { kind: "loading" }
     | { kind: "error"; message: string }
-    | { kind: "none" }
+    | { kind: "none"; seen: string[] }
     | { kind: "ok"; backups: { path: string; at: string; size: number }[] }
   >({ kind: "loading" });
   const [busy, setBusy] = useState(false);
@@ -10008,6 +10008,7 @@ function StoredBackupsBox() {
       const body = (await response.json()) as {
         store?: boolean;
         backups?: { path: string; at: string; size: number }[];
+        seen?: string[];
         error?: string;
       };
       if (!response.ok) {
@@ -10015,7 +10016,7 @@ function StoredBackupsBox() {
         return;
       }
       if (!body.store) {
-        setState({ kind: "none" });
+        setState({ kind: "none", seen: body.seen ?? [] });
         return;
       }
       setState({ kind: "ok", backups: body.backups ?? [] });
@@ -10070,10 +10071,18 @@ function StoredBackupsBox() {
       )}
 
       {state.kind === "none" && (
-        <p className="mb-3 text-sm text-amber-800">
-          لا مخزنَ موصولاً بعد — فلا نسخةَ تلقائية. أنشئ مخزن <b>Blob خاصّاً</b>{" "}
-          في لوحة فيرسل واربطه بالمشروع.
-        </p>
+        <>
+          <p className="mb-2 text-sm text-amber-800">
+            لا مخزنَ موصولاً بعد — فلا نسخةَ تلقائية. أنشئ مخزن <b>Blob خاصّاً</b>{" "}
+            في لوحة فيرسل واربطه بالمشروع، <b>ثم أعِد النشر</b> — فالمتغيّر لا
+            تراه نشرةٌ سبقته.
+          </p>
+          {/* وأسماءُ ما يراه الخادم، بلا قيم: بها يُعرف أمشكلةُ اسمٍ أم نشرة */}
+          <p className="mb-3 text-xs text-slate-500">
+            ما يراه الخادم:{" "}
+            {state.seen.length > 0 ? state.seen.join(" · ") : "لا متغيّرَ فيه BLOB"}
+          </p>
+        </>
       )}
 
       {state.kind === "error" && (

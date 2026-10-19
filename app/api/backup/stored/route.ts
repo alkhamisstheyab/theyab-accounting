@@ -18,7 +18,12 @@ import { get } from "@vercel/blob";
 import { NextResponse } from "next/server";
 
 import { AuthError, requirePermission } from "@/lib/server/auth";
-import { dateOf, listBackups } from "@/lib/server/backup-store";
+import {
+  blobEnvNames,
+  blobToken,
+  dateOf,
+  listBackups,
+} from "@/lib/server/backup-store";
 import { hiddenFields } from "@/lib/server/permits";
 
 export const dynamic = "force-dynamic";
@@ -39,8 +44,10 @@ export async function GET(request: Request) {
       );
     }
 
-    if (!process.env.BLOB_READ_WRITE_TOKEN) {
-      return NextResponse.json({ store: false, backups: [] });
+    const token = blobToken();
+    if (!token) {
+      /* وأسماءُ ما يراه الخادم، بلا قيم — فيُعرف أمشكلةُ اسمٍ أم نشرةٍ لم تُعَد */
+      return NextResponse.json({ store: false, backups: [], seen: blobEnvNames() });
     }
 
     const wanted = new URL(request.url).searchParams.get("path");
@@ -68,7 +75,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "مسارٌ غير معروف" }, { status: 400 });
     }
 
-    const found = await get(wanted, { access: "private" });
+    const found = await get(wanted, { access: "private", token });
     if (!found || !found.stream) {
       return NextResponse.json({ error: "لا نسخةَ بهذا المسار" }, { status: 404 });
     }
