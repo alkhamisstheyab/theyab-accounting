@@ -514,3 +514,52 @@ CREATE TABLE audit_log (
 CREATE INDEX audit_log_rev_idx ON audit_log (rev);
 
 CREATE INDEX audit_at_idx ON audit_log (at DESC);
+
+-- ---------- تتبّع بنية القاعدة ----------
+
+/*
+  ما طُبّق من هجرات db/migrations. وقاعدةٌ تُبنى من هذا الملفّ تحمل
+  البنيةَ كلَّها أصلاً، فيُسجَّل لها الجميعُ مطبَّقاً (migrate.mjs) —
+  ولولا ذلك أعاد بابُ التحديث تطبيقَ ما هو قائم، وهو آمنٌ لأن الهجرات
+  إضافيّةٌ بـIF NOT EXISTS، لكنّ السجلّ يكون كاذباً.
+*/
+CREATE TABLE schema_version (
+  version    integer PRIMARY KEY,
+  name       text NOT NULL DEFAULT '',
+  applied_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- ---------- الرسائل ----------
+
+/*
+  طلبُ عملٍ يُوجَّه إلى موظّفٍ بعينه فيراه عند ولوجه.
+
+  وكانت التنبيهاتُ كلُّها مشتقّةً من الدفاتر: «حركةٌ تنتظر اعتماداً»،
+  «مضى على النسخة كذا». ولم يكن لصاحب الشركة بابٌ يقول به لموظّفٍ
+  بعينه: «افعل هذا» — فكان يُقال بالهاتف فيُنسى، ولا يبقى منه أثر.
+
+  ولا يُحذف منه شيءٌ عند الإنجاز: تُختم الرسالةُ بحالتها ويبقى أثرُها،
+  فمن أنجز يُعرف أنه أنجز ومتى، ومن تُرك طلبُه شهراً يُعرف ذلك أيضاً.
+*/
+CREATE TABLE messages (
+  id          text PRIMARY KEY,
+  from_name   text NOT NULL DEFAULT '',
+  to_user     text NOT NULL DEFAULT '',
+  to_name     text NOT NULL DEFAULT '',
+  body        text NOT NULL DEFAULT '',
+  page        text NOT NULL DEFAULT '',
+  about       text NOT NULL DEFAULT '',
+  state       text NOT NULL DEFAULT 'جديدة',
+  read_at     timestamptz,
+  done_at     timestamptz,
+  done_note   text NOT NULL DEFAULT '',
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  data        jsonb NOT NULL DEFAULT '{}',
+  rev         bigint NOT NULL DEFAULT nextval('change_seq'),
+  updated_at  timestamptz NOT NULL DEFAULT now(),
+  updated_by  text NOT NULL DEFAULT ''
+);
+
+CREATE INDEX messages_rev_idx ON messages (rev);
+
+CREATE INDEX messages_to_idx ON messages (to_user, state);

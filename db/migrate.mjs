@@ -190,6 +190,30 @@ async function main() {
 
   const schema = fs.readFileSync(path.join(HERE, "schema.sql"), "utf8");
   await db.exec(schema);
+
+  /*
+    وتُسجَّل الهجراتُ كلُّها مطبَّقةً: فالمخطَّطُ يحمل بنيتَها أصلاً.
+    ولولا ذلك أعاد بابُ التحديث تطبيقَ ما هو قائم — وهو آمنٌ لأنها
+    إضافيّةٌ بـIF NOT EXISTS، لكنّ السجلّ يكون كاذباً، ومن قرأه ظنّ
+    أن القاعدة ناقصةٌ وهي تامّة.
+  */
+  const migrationsDir = path.join(HERE, "migrations");
+  if (fs.existsSync(migrationsDir)) {
+    const applied = fs
+      .readdirSync(migrationsDir)
+      .filter((n) => n.endsWith(".sql"))
+      .sort();
+    for (const name of applied) {
+      await db.query(
+        `INSERT INTO schema_version (version, name) VALUES ($1, $2)
+           ON CONFLICT (version) DO NOTHING`,
+        [Number(name.slice(0, 3)), name]
+      );
+    }
+    if (applied.length > 0) {
+      console.log(`سُجّلت ${applied.length} هجرةً مطبَّقةً ✓\n`);
+    }
+  }
   console.log("أُنشئت الجداول ✓\n");
 
   const report = [];

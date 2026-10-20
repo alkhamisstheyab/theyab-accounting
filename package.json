@@ -75,6 +75,8 @@
     "check:receivables": "node db/check-receivables.mjs",
     "check:menu": "node db/check-menu-groups.mjs",
     "check:subsidy": "node db/check-subsidy.mjs",
+    "db:apply": "node db/apply.mjs",
+    "check:apply": "node db/check-apply.mjs",
     "restore:confirmations": "node db/restore-confirmations.mjs"
   },
   "dependencies": {

@@ -58,3 +58,4 @@ next-env.d.ts
 /.next-verify/
 /.next-check/
 /.next-render/
+/.apply-check/
