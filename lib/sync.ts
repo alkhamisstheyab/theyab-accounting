@@ -84,6 +84,18 @@ export type SyncStatus = {
    * كتبه مهندسٌ ولم يجده في شاشة الإقرار.
    */
   adopted: number;
+  /**
+   * وما وصل مفصَّلاً: المجموعةُ وعددُها وأسماءُ أوّلِ ثلاثةٍ منها.
+   *
+   * وكان العددُ وحدَه يُحفظ ويُرمى الباقي، فيقرأ صاحبُ الجهاز «وصلك
+   * ثلاثةُ صفوف» ولا يملك أن يعرف ما هي: والمطابقةُ لا تُجيبه — فالصفوفُ
+   * ضُمّت فصار الجهازُ والخادمُ سواءً فتقول «لا فرق» — وسجلُّ التدقيق
+   * يسجّل أفعالَ الناس لا وصولَ الصفوف. فيبقى يسأل عمّا لا جوابَ له.
+   *
+   * والأسماءُ ثلاثةٌ لا أكثر: فمن وصله خمسون صفّاً لا يقرأ خمسين اسماً،
+   * ويكفيه أن يعرف البابَ وأوّلَ ما فيه ثمّ يفتح شاشتَه.
+   */
+  adoptedRows: { field: string; count: number; samples: string[] }[];
 };
 
 let status: SyncStatus = {
@@ -95,6 +107,7 @@ let status: SyncStatus = {
   renumbered: [],
   refused: [],
   adopted: 0,
+  adoptedRows: [],
   lastError: "",
 };
 
@@ -511,6 +524,46 @@ export async function fetchServerState(): Promise<AppState> {
 /* ------------------------------------------------------------------ */
 
 /**
+ * اسمُ الصفّ كما يعرفه صاحبُ الدفاتر لا كما يُخزَّن.
+ *
+ * فمعرّفٌ من ستّةٍ وثلاثين حرفاً لا يدلّ على شيء، و«قيد ١٨٥١» يدلّ.
+ * ويُجرَّب الأدلُّ أوّلاً: رقمُ القيد، ثمّ الاسم، ثمّ العنوان، ثمّ
+ * التاريخ — ومن لم يكن له شيءٌ من ذلك فلا يُسمّى، ويكفي عددُه.
+ */
+export function rowLabel(row: Record<string, unknown>): string {
+  const no = row.entryNo ?? row.number;
+  if (no != null && String(no) !== "") return `قيد ${no}`;
+  for (const key of ["name", "title", "employeeName", "party", "project"]) {
+    const v = row[key];
+    if (typeof v === "string" && v.trim() !== "") return v.trim();
+  }
+  const date = row.date;
+  if (typeof date === "string" && date !== "") return date;
+  return "";
+}
+
+/** يضمّ ما وصل الآن إلى ما وصل قبله: المجموعةُ واحدةٌ فلا تُكرَّر سطرين */
+export function mergeAdopted(
+  before: SyncStatus["adoptedRows"],
+  now: { field: string; count: number; samples: string[] }[]
+): SyncStatus["adoptedRows"] {
+  const merged = before.map((entry) => ({ ...entry, samples: [...entry.samples] }));
+  for (const entry of now) {
+    const found = merged.find((m) => m.field === entry.field);
+    if (!found) {
+      merged.push({ ...entry, samples: entry.samples.slice(0, 3) });
+      continue;
+    }
+    found.count += entry.count;
+    for (const sample of entry.samples) {
+      if (found.samples.length >= 3) break;
+      if (!found.samples.includes(sample)) found.samples.push(sample);
+    }
+  }
+  return merged;
+}
+
+/**
  * يضمّ إلى الجهاز ما عند الخادم وليس عنده.
  *
  * السحبُ تزايديّ: يسأل «ما بعد الرقم كذا». فإن سقط صفٌّ من الجهاز —
@@ -539,6 +592,7 @@ function adoptFromSnapshot(): number {
 
   const tombs = readTombs();
   const upserts: Record<string, Record<string, unknown>[]> = {};
+  const arrived: { field: string; count: number; samples: string[] }[] = [];
   let rows = 0;
 
   for (const collection of ROW_COLLECTIONS) {
@@ -569,13 +623,32 @@ function adoptFromSnapshot(): number {
     if (gained.length > 0) {
       upserts[field] = gained;
       rows += gained.length;
+      /* ويُسمّى ما وصل قبل أن يُنسى: الصفوفُ بين يدينا الآن وحدَها */
+      arrived.push({
+        field,
+        count: gained.length,
+        samples: gained.map(rowLabel).filter((s) => s !== "").slice(0, 3),
+      });
     }
   }
 
   if (rows === 0) return 0;
   applier({ upserts, deletes: {}, rev: status.rev });
-  publish({ adopted: status.adopted + rows });
+  publish({
+    adopted: status.adopted + rows,
+    adoptedRows: mergeAdopted(status.adoptedRows, arrived),
+  });
   return rows;
+}
+
+/**
+ * يُنسى ما وصل بعد أن يُقرأ.
+ *
+ * فالسطرُ يبقى ما بقيت الجلسة، ومن قرأه وفتح شاشتَه لا حاجةَ له به —
+ * ولو بقي لاختلط ما وصل أمسِ بما وصل الآن.
+ */
+export function clearAdopted(): void {
+  publish({ adopted: 0, adoptedRows: [] });
 }
 
 /**

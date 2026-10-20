@@ -202,6 +202,7 @@ import {
   fetchServerState,
   pushDeletions,
   adoptExtra,
+  clearAdopted,
   onIncoming,
   type Incoming,
   record as recordForSync,
@@ -1692,9 +1693,41 @@ export default function HomeV2() {
                     {serverState.pending} في الانتظار
                   </div>
                 )}
+                {/*
+                  وما وصل يُسمّى لا يُعدّ وحده: كان يُقال «وصلك ٣ صفوف»
+                  فيسأل صاحبُ الجهاز ما هي ولا جوابَ — فالمطابقةُ تقول
+                  «لا فرق» بعد الضمّ، وسجلُّ التدقيق يسجّل أفعال الناس
+                  لا وصولَ الصفوف. فيُذكر البابُ وأوّلُ ما فيه.
+                */}
                 {serverState.adopted > 0 && (
                   <div className="mt-1 leading-5 text-green-300">
-                    وصلك {serverState.adopted} صفاً كان على الخادم ولم يكن عندك
+                    <div className="font-bold">
+                      وصلك {serverState.adopted} صفاً كان على الخادم ولم يكن
+                      عندك
+                    </div>
+                    <ul className="mt-1 space-y-0.5">
+                      {serverState.adoptedRows.map((row) => (
+                        <li key={row.field} className="text-green-200">
+                          <span className="font-medium">
+                            {FIELD_LABELS[row.field] ?? row.field}
+                          </span>{" "}
+                          {row.count}
+                          {row.samples.length > 0 && (
+                            <span className="text-green-400">
+                              {" — "}
+                              {row.samples.join(" · ")}
+                              {row.count > row.samples.length ? " …" : ""}
+                            </span>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                    <button
+                      onClick={clearAdopted}
+                      className="mt-1 text-green-400 underline hover:text-green-200"
+                    >
+                      قرأتُه
+                    </button>
                   </div>
                 )}
                 {serverState.refused.length > 0 && (
@@ -9295,6 +9328,14 @@ function PartiesPage({
   );
 }
 
+/**
+ * قيمةُ «الجميع» في قائمة الاختيار.
+ *
+ * ونجمةٌ لا معرّفٌ: فالمعرّفاتُ أرقامٌ عشوائيّة، ولو وُضع لها معرّفٌ
+ * لاحتُمل أن يوافق معرّفَ موظّفٍ يوماً فيُرسل للجميع وهو يريد واحداً.
+ */
+const ALL_USERS = "*";
+
 function TasksPage({
   messages,
   users,
@@ -9339,23 +9380,51 @@ function TasksPage({
   const waiting = toMe.filter((m) => m.state !== "أُنجزت").length;
   const sentWaiting = fromMe.filter((m) => m.state !== "أُنجزت").length;
 
+  /*
+    والعملُ قد يكون على الجميع: «أنعشوا أجهزتكم» و«سلّموا كشوفَ الأسبوع»
+    لا يُختار لها الناسُ واحداً واحداً، فيُنسى آخرُهم وهو أحقُّ من أوّلهم.
+  */
+  const everyone = users.filter((u) => u.active && u.id !== me.id);
+
   const send = () => {
-    const to = users.find((u) => u.id === draft.toUser);
-    if (!to) {
-      window.alert("اختر الموظّف");
+    const toAll = draft.toUser === ALL_USERS;
+    const to = toAll ? null : users.find((u) => u.id === draft.toUser);
+    if (!toAll && !to) {
+      window.alert("اختر الموظّف، أو «الجميع»");
       return;
     }
     if (draft.body.trim().length < 4) {
       window.alert("اكتب الطلب — وطلبٌ بكلمةٍ لا يُفهم");
       return;
     }
-    onSend({
-      toUser: to.id,
-      toName: to.name,
-      body: draft.body.trim(),
-      page: draft.page,
-      about: draft.about.trim(),
-    });
+    if (toAll && everyone.length === 0) {
+      window.alert("لا أحدَ غيرك في النظام");
+      return;
+    }
+    /*
+      ويُستأذن قبل الإرسال للجميع: فطلبٌ واحدٌ يصير عشرةَ طلباتٍ في
+      عشرة أجهزة، ولا يُسحب بعد أن يُقرأ.
+    */
+    if (
+      toAll &&
+      !window.confirm(
+        `يُرسل هذا الطلبُ إلى ${everyone.length} موظّفاً: ` +
+          `${everyone.map((u) => u.name).join(" · ")}؟`
+      )
+    ) {
+      return;
+    }
+
+    /* ولكلٍّ طلبُه باسمه: فيُنجزه وحدَه ويُسأل عنه وحدَه */
+    for (const person of toAll ? everyone : [to!]) {
+      onSend({
+        toUser: person.id,
+        toName: person.name,
+        body: draft.body.trim(),
+        page: draft.page,
+        about: draft.about.trim(),
+      });
+    }
     setDraft({ toUser: "", body: "", page: "", about: "" });
   };
 
@@ -9511,15 +9580,21 @@ function TasksPage({
               className="rounded border border-slate-300 px-3 py-2"
             >
               <option value="">— اختر الموظّف —</option>
-              {users
-                .filter((u) => u.active && u.id !== me.id)
-                .map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.name}
-                    {u.jobTitle ? ` — ${u.jobTitle}` : ""}
-                  </option>
-                ))}
+              <option value={ALL_USERS}>
+                ★ الجميع — {everyone.length} موظّفاً
+              </option>
+              {everyone.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.name}
+                  {u.jobTitle ? ` — ${u.jobTitle}` : ""}
+                </option>
+              ))}
             </select>
+            {draft.toUser === ALL_USERS && (
+              <p className="mt-1 text-xs text-slate-500">
+                لكلِّ واحدٍ طلبُه باسمه — فيُنجزه وحدَه ويُسأل عنه وحدَه
+              </p>
+            )}
           </div>
           <div>
             <p className="mb-1 text-sm font-medium">الشاشة</p>
@@ -23802,6 +23877,9 @@ const FIELD_LABELS: Record<string, string> = {
   quotations: "عروض الأسعار",
   invoices: "الفواتير",
   audit: "سجل التدقيق",
+  messages: "الرسائل",
+  parties: "سجلّ الأطراف",
+  minutes: "تقارير الاجتماعات",
   chart: "دليل الحسابات",
   items: "البنود",
   payments: "طرق الدفع",

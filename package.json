@@ -80,6 +80,7 @@
     "check:review": "node db/check-review.mjs",
     "check:freedom": "node db/check-quotation-freedom.mjs",
     "check:tasks": "node db/check-tasks.mjs",
+    "check:arrivals": "node db/check-arrivals.mjs",
     "check:parties": "node db/check-parties.mjs",
     "check:reviews": "node db/check-reviews.mjs",
     "check:closure": "node db/check-closure.mjs",
