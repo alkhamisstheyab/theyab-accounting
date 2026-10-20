@@ -42,15 +42,41 @@ const asJson = <T>(v: unknown, fallback: T): T => {
   return v as T;
 };
 
+/**
+ * جدولٌ لم تنزل هجرتُه بعد.
+ *
+ * فالشِّفْرُ يُرفع قبل أن تُطبَّق الهجرة على قاعدة الشركة — وبينهما
+ * دقائق. ولو أخفقت قراءةُ الحالة لجدولٍ غائبٍ لتوقّف النظام عن
+ * **كلِّ** من يعمل، لا عن المجموعة الجديدة وحدها: فقراءةُ الحالة
+ * واحدةٌ، ومن أخفق فيها حرفٌ أخفقت كلُّها.
+ *
+ * فالمجموعةُ الغائبةُ تُقرأ فارغةً حتى تنزل هجرتُها. ولا يُوسَّع هذا
+ * التسامحُ إلى غيره: الرمزُ 42P01 وحدَه — «جدولٌ لا وجودَ له» —
+ * وما سواه يُرمى كما هو، فخطأٌ في القاعدة يُكتم أسوأُ من توقّف.
+ */
+const MISSING_TABLE = "42P01";
+
+const isMissingTable = (error: unknown): boolean =>
+  typeof error === "object" &&
+  error !== null &&
+  (error as { code?: string }).code === MISSING_TABLE;
+
 /** صفوف جدول، كائناتُ التطبيق كما حُفظت */
 async function objects<T>(
   db: Queryable,
   table: string,
   order: string
 ): Promise<T[]> {
-  const { rows } = await db.query(
-    `SELECT data FROM ${table} ORDER BY ${order}`
-  );
+  let rows: Record<string, unknown>[];
+  try {
+    ({ rows } = await db.query(`SELECT data FROM ${table} ORDER BY ${order}`));
+  } catch (error) {
+    if (!isMissingTable(error)) throw error;
+    console.warn(
+      `الجدول ${table} لا وجودَ له بعد — يُقرأ فارغاً حتى تُطبَّق الهجرة (npm run db:apply -- --apply)`
+    );
+    return [];
+  }
   return rows
     .map((r) => asJson<T | null>(r.data, null))
     .filter((o): o is T => o != null && Object.keys(o as object).length > 0);
