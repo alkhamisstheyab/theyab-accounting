@@ -74,6 +74,7 @@
     "check:assistant": "node db/check-assistant-role.mjs",
     "check:receivables": "node db/check-receivables.mjs",
     "check:menu": "node db/check-menu-groups.mjs",
+    "check:subsidy": "node db/check-subsidy.mjs",
     "restore:confirmations": "node db/restore-confirmations.mjs"
   },
   "dependencies": {

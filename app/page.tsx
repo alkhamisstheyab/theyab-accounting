@@ -174,6 +174,8 @@ import {
   Material,
   MaterialReceipt,
   Project,
+  type SubsidyDraw,
+  type SubsidyLine,
   PROJECT_STATUSES,
   User,
   YearLocks,
@@ -273,6 +275,11 @@ import {
   clientStatements,
   type ClientStatement,
 } from "@/lib/receivables";
+import {
+  SUBSIDY_MATERIALS,
+  SUBSIDY_UNITS,
+  subsidyByProject,
+} from "@/lib/subsidy";
 import { monthInYear, todayISO } from "@/lib/today";
 import type { AppState } from "@/lib/storage";
 import {
@@ -360,6 +367,7 @@ const PAGES = [
   "التقارير",
   "التقرير الربعي",
   "المشاريع",
+  "المدعوم",
   "عروض الأسعار",
   "بنود الأعمال",
   "الفواتير",
@@ -418,6 +426,7 @@ const PAGE_GROUPS: { group: string; pages: string[] }[] = [
     group: "المشاريع والعقود",
     pages: [
       "المشاريع",
+      "المدعوم",
       "المقاولون",
       "المطلوب من العملاء",
       "ربط الحركات",
@@ -2285,6 +2294,28 @@ export default function HomeV2() {
               canManage={allow("quotations.manage")}
               currentUserName={currentUser.name}
               onLog={log}
+            />
+          )}
+
+          {page === "المدعوم" && (
+            <SubsidyPage
+              projects={projects}
+              materials={materials}
+              canManage={allow("projects.manage")}
+              onSetSubsidy={(projectId, lines) => {
+                setProjects((prev) =>
+                  prev.map((p) =>
+                    p.id === projectId ? { ...p, subsidy: lines } : p
+                  )
+                );
+              }}
+              onSetDraws={(projectId, draws) => {
+                setProjects((prev) =>
+                  prev.map((p) =>
+                    p.id === projectId ? { ...p, subsidyDraws: draws } : p
+                  )
+                );
+              }}
             />
           )}
 
@@ -6797,6 +6828,508 @@ function ClientStatementSheet({
         <div style={{ height: 14, background: DOC_GOLD_SOFT }} />
       </div>
     </div>
+  );
+}
+
+/**
+ * المدعوم: الحصّةُ لكلّ قسيمة، وما سُحب منها، وما بقي.
+ *
+ * والحصّةُ للقسيمة لا للعقد: فقد يكون لها عقدٌ وملاحقُ وعقودُ
+ * مورّدين، والحصّةُ واحدةٌ من الدولة لصاحب القسيمة.
+ *
+ * وتُعرض بوجهيها — كميّةً وقيمةً: فمن نظر في القيمة وحدها لم يعرف كم
+ * بقي له من الأكياس، ومن نظر في الكميّة لم يعرف ما أضافته إلى العقد.
+ */
+function SubsidyPage({
+  projects,
+  materials,
+  canManage,
+  onSetSubsidy,
+  onSetDraws,
+}: {
+  projects: Project[];
+  materials: Material[];
+  canManage: boolean;
+  onSetSubsidy: (projectId: string, lines: SubsidyLine[]) => void;
+  onSetDraws: (projectId: string, draws: SubsidyDraw[]) => void;
+}) {
+  const [open, setOpen] = useState<string | null>(null);
+
+  const rows = useMemo(() => subsidyByProject(projects), [projects]);
+  const totalValue = round3(rows.reduce((sum, r) => sum + r.value, 0));
+  const totalDrawn = round3(rows.reduce((sum, r) => sum + r.drawnValue, 0));
+  const overdrawn = rows.filter((r) => r.overdrawn);
+
+  /* ومن الموادّ: المقترحةُ ومواد الشركة معاً، بلا تكرار */
+  const materialNames = [
+    ...new Set([...SUBSIDY_MATERIALS, ...materials.map((m) => m.name)]),
+  ];
+
+  const withSubsidy = new Set(rows.map((r) => r.project));
+  const without = projects.filter((p) => !withSubsidy.has(p.name));
+
+  return (
+    <Panel
+      title="المدعوم"
+      subtitle="ما خصّصته الدولة لكل قسيمة، وما سُحب منه، وما بقي"
+    >
+      {rows.length === 0 ? (
+        <Banner tone="warn">
+          لا حصّةَ مدعومٍ مكتوبةٌ بعد. اختر مشروعاً من الأسفل واكتب حصّته:
+          المادةَ والكميّةَ وقيمتَها، وعلى من رسومُها.
+        </Banner>
+      ) : (
+        <div className="mb-4 flex flex-wrap gap-4">
+          <div className="rounded-xl border border-slate-300 bg-white px-5 py-3">
+            <p className="text-sm text-slate-500">قيمةُ الحصص</p>
+            <p className="text-2xl font-bold tabular-nums">{fmt(totalValue)}</p>
+          </div>
+          <div className="rounded-xl border border-slate-300 bg-white px-5 py-3">
+            <p className="text-sm text-slate-500">المسحوب</p>
+            <p className="text-2xl font-bold tabular-nums">{fmt(totalDrawn)}</p>
+          </div>
+          <div className="rounded-xl border border-green-300 bg-green-50 px-5 py-3">
+            <p className="text-sm text-green-800">الباقي</p>
+            <p className="text-2xl font-bold tabular-nums text-green-900">
+              {fmt(round3(totalValue - totalDrawn))}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {overdrawn.length > 0 && (
+        <Banner tone="error">
+          في <b>{overdrawn.length}</b>{" "}
+          {overdrawn.length === 1 ? "قسيمةٍ" : "قسائم"} سحبٌ يزيد على الحصّة:{" "}
+          {overdrawn.map((r) => r.project).join("، ")}. وذاك إمّا خطأُ تسجيلٍ
+          يُصلَح، وإمّا مادةٌ اشترتها الشركةُ بالسعر التجاريّ — فتُقيَّد على
+          حسابها لا على المدعوم.
+        </Banner>
+      )}
+
+      {rows.map((r) => {
+        const project = projects.find((p) => p.name === r.project);
+        if (!project) return null;
+        const isOpen = open === r.project;
+        const lines = project.subsidy ?? [];
+        const draws = project.subsidyDraws ?? [];
+
+        return (
+          <div
+            key={r.project}
+            className="mb-4 rounded-xl border border-slate-300 bg-white p-4"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="font-bold">{r.project}</p>
+                <p className="text-sm text-slate-600">
+                  الحصّة {fmt(r.value)} · المسحوب {fmt(r.drawnValue)} ·{" "}
+                  <b className={r.remainingValue < 0 ? "text-red-700" : ""}>
+                    الباقي {fmt(r.remainingValue)}
+                  </b>
+                  {r.feesOn.length > 0 && (
+                    <> · الرسوم على {r.feesOn.join(" و")}</>
+                  )}
+                </p>
+              </div>
+              <button
+                onClick={() => setOpen(isOpen ? null : r.project)}
+                className="rounded-lg bg-slate-100 px-4 py-2 text-sm font-bold hover:bg-slate-200"
+              >
+                {isOpen ? "إخفاء" : "الحصص والسحوب"}
+              </button>
+            </div>
+
+            {isOpen && (
+              <div className="mt-4">
+                <table className="mb-3 w-full text-sm">
+                  <thead>
+                    <tr className="border-b-2 border-slate-300 text-right">
+                      <th className="px-2 py-2">المادة</th>
+                      <th className="px-2 py-2">الكميّة</th>
+                      <th className="px-2 py-2">الوحدة</th>
+                      <th className="px-2 py-2">القيمة</th>
+                      <th className="px-2 py-2">الرسوم على</th>
+                      <th className="px-2 py-2">سُحب</th>
+                      <th className="px-2 py-2">الباقي</th>
+                      <th className="px-2 py-2"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {r.lines.map((state, index) => {
+                      const line = state.line;
+                      const edit = (patch: Partial<SubsidyLine>) =>
+                        onSetSubsidy(
+                          project.id,
+                          lines.map((l, i) => (i === index ? { ...l, ...patch } : l))
+                        );
+                      return (
+                        <tr
+                          key={line.id}
+                          className={`border-b border-slate-100 ${
+                            state.overdrawn ? "bg-red-50" : ""
+                          }`}
+                        >
+                          <td className="px-2 py-1">
+                            {canManage ? (
+                              <input
+                                list="subsidy-materials"
+                                value={line.material}
+                                onChange={(e) => edit({ material: e.target.value })}
+                                className="w-40 rounded border border-slate-300 px-2 py-1"
+                              />
+                            ) : (
+                              line.material
+                            )}
+                          </td>
+                          <td className="px-2 py-1">
+                            {canManage ? (
+                              <input
+                                type="number"
+                                step="0.001"
+                                value={line.quantity || ""}
+                                onChange={(e) =>
+                                  edit({ quantity: Number(e.target.value) || 0 })
+                                }
+                                className="w-24 rounded border border-slate-300 px-2 py-1 tabular-nums"
+                              />
+                            ) : (
+                              fmt(line.quantity)
+                            )}
+                          </td>
+                          <td className="px-2 py-1">
+                            {canManage ? (
+                              <input
+                                list="subsidy-units"
+                                value={line.unit}
+                                onChange={(e) => edit({ unit: e.target.value })}
+                                className="w-24 rounded border border-slate-300 px-2 py-1"
+                              />
+                            ) : (
+                              line.unit
+                            )}
+                          </td>
+                          <td className="px-2 py-1">
+                            {canManage ? (
+                              <input
+                                type="number"
+                                step="0.001"
+                                value={line.value || ""}
+                                onChange={(e) =>
+                                  edit({ value: Number(e.target.value) || 0 })
+                                }
+                                className="w-28 rounded border border-slate-300 px-2 py-1 tabular-nums"
+                              />
+                            ) : (
+                              fmt(line.value)
+                            )}
+                          </td>
+                          <td className="px-2 py-1">
+                            {canManage ? (
+                              <select
+                                value={line.feesOn ?? ""}
+                                onChange={(e) =>
+                                  edit({ feesOn: e.target.value || undefined })
+                                }
+                                className="rounded border border-slate-300 px-2 py-1"
+                              >
+                                <option value="">— لم يُثبت —</option>
+                                <option value="الشركة">الشركة</option>
+                                <option value="المالك">المالك</option>
+                              </select>
+                            ) : (
+                              line.feesOn ?? "—"
+                            )}
+                          </td>
+                          <td className="px-2 py-1 tabular-nums">
+                            {fmt(state.drawnQuantity)} {line.unit}
+                            <span className="block text-xs text-slate-500">
+                              {fmt(state.drawnValue)} د.ك · {state.draws} سحبة
+                            </span>
+                          </td>
+                          <td
+                            className={`px-2 py-1 tabular-nums font-bold ${
+                              state.overdrawn ? "text-red-700" : ""
+                            }`}
+                          >
+                            {fmt(state.remainingQuantity)} {line.unit}
+                            <span className="block text-xs font-normal">
+                              {fmt(state.remainingValue)} د.ك
+                              {state.overdrawn && " — زائدٌ عن الحصّة"}
+                              {state.exhausted && " — استُنفدت"}
+                            </span>
+                          </td>
+                          <td className="px-2 py-1 text-left">
+                            {canManage && (
+                              <button
+                                onClick={() => {
+                                  if (
+                                    state.draws > 0 &&
+                                    !window.confirm(
+                                      `على هذه الحصّة ${state.draws} سحبة. حذفُها يترك سحوبَها بلا حصّةٍ تُطرح منها.\n\nأتحذفها؟`
+                                    )
+                                  ) {
+                                    return;
+                                  }
+                                  onSetSubsidy(
+                                    project.id,
+                                    lines.filter((_, i) => i !== index)
+                                  );
+                                }}
+                                className="rounded bg-red-50 px-2 py-1 text-xs font-bold text-red-700"
+                              >
+                                حذف
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+
+                {canManage && (
+                  <button
+                    onClick={() =>
+                      onSetSubsidy(project.id, [
+                        ...lines,
+                        {
+                          id: newId(),
+                          material: "",
+                          quantity: 0,
+                          unit: "",
+                          value: 0,
+                        },
+                      ])
+                    }
+                    className="mb-4 rounded-lg bg-slate-900 px-4 py-2 text-sm font-bold text-white"
+                  >
+                    + حصّة مادة
+                  </button>
+                )}
+
+                {/* ---- السحوب ---- */}
+                <p className="mb-2 font-bold">السحوب</p>
+                {draws.length === 0 ? (
+                  <p className="mb-3 text-sm text-slate-600">
+                    لا سحبَ مسجَّلٌ بعد.
+                  </p>
+                ) : (
+                  <table className="mb-3 w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-300 text-right">
+                        <th className="px-2 py-1">التاريخ</th>
+                        <th className="px-2 py-1">من حصّة</th>
+                        <th className="px-2 py-1">الكميّة</th>
+                        <th className="px-2 py-1">القيمة</th>
+                        <th className="px-2 py-1">إذن الصرف</th>
+                        <th className="px-2 py-1">رقم القيد</th>
+                        <th className="px-2 py-1"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {draws.map((draw, index) => {
+                        const edit = (patch: Partial<SubsidyDraw>) =>
+                          onSetDraws(
+                            project.id,
+                            draws.map((d, i) => (i === index ? { ...d, ...patch } : d))
+                          );
+                        const line = lines.find((l) => l.id === draw.lineId);
+                        return (
+                          <tr
+                            key={draw.id}
+                            className={`border-b border-slate-100 ${
+                              line ? "" : "bg-amber-50"
+                            }`}
+                          >
+                            <td className="px-2 py-1">
+                              {canManage ? (
+                                <input
+                                  type="date"
+                                  value={draw.date}
+                                  onChange={(e) => edit({ date: e.target.value })}
+                                  className="rounded border border-slate-300 px-2 py-1"
+                                />
+                              ) : (
+                                draw.date
+                              )}
+                            </td>
+                            <td className="px-2 py-1">
+                              {canManage ? (
+                                <select
+                                  value={draw.lineId}
+                                  onChange={(e) => edit({ lineId: e.target.value })}
+                                  className="rounded border border-slate-300 px-2 py-1"
+                                >
+                                  <option value="">— بلا حصّة —</option>
+                                  {lines.map((l) => (
+                                    <option key={l.id} value={l.id}>
+                                      {l.material || "(بلا اسم)"}
+                                    </option>
+                                  ))}
+                                </select>
+                              ) : (
+                                line?.material ?? "— بلا حصّة —"
+                              )}
+                            </td>
+                            <td className="px-2 py-1">
+                              {canManage ? (
+                                <input
+                                  type="number"
+                                  step="0.001"
+                                  value={draw.quantity || ""}
+                                  onChange={(e) =>
+                                    edit({ quantity: Number(e.target.value) || 0 })
+                                  }
+                                  className="w-24 rounded border border-slate-300 px-2 py-1 tabular-nums"
+                                />
+                              ) : (
+                                fmt(draw.quantity)
+                              )}
+                            </td>
+                            <td className="px-2 py-1">
+                              {canManage ? (
+                                <input
+                                  type="number"
+                                  step="0.001"
+                                  value={draw.value || ""}
+                                  onChange={(e) =>
+                                    edit({ value: Number(e.target.value) || 0 })
+                                  }
+                                  className="w-28 rounded border border-slate-300 px-2 py-1 tabular-nums"
+                                />
+                              ) : (
+                                fmt(draw.value)
+                              )}
+                            </td>
+                            <td className="px-2 py-1">
+                              {canManage ? (
+                                <input
+                                  value={draw.permit ?? ""}
+                                  onChange={(e) =>
+                                    edit({ permit: e.target.value || undefined })
+                                  }
+                                  placeholder="رقم الإذن"
+                                  className="w-28 rounded border border-slate-300 px-2 py-1"
+                                />
+                              ) : (
+                                draw.permit ?? "—"
+                              )}
+                            </td>
+                            <td className="px-2 py-1">
+                              {canManage ? (
+                                <input
+                                  value={draw.entryNo ?? ""}
+                                  onChange={(e) =>
+                                    edit({ entryNo: e.target.value || undefined })
+                                  }
+                                  placeholder="القيد"
+                                  className="w-20 rounded border border-slate-300 px-2 py-1"
+                                />
+                              ) : (
+                                draw.entryNo ?? "—"
+                              )}
+                            </td>
+                            <td className="px-2 py-1 text-left">
+                              {canManage && (
+                                <button
+                                  onClick={() =>
+                                    onSetDraws(
+                                      project.id,
+                                      draws.filter((_, i) => i !== index)
+                                    )
+                                  }
+                                  className="rounded bg-red-50 px-2 py-1 text-xs font-bold text-red-700"
+                                >
+                                  حذف
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+
+                {r.orphanDraws.length > 0 && (
+                  <Banner tone="warn">
+                    <b>{r.orphanDraws.length}</b> سحبةً نُسبت إلى حصّةٍ لا وجودَ
+                    لها — تُعرض ولا تُطرح من مادةٍ أخرى. اختر لها حصّتَها من
+                    العمود «من حصّة».
+                  </Banner>
+                )}
+
+                {canManage && (
+                  <button
+                    onClick={() =>
+                      onSetDraws(project.id, [
+                        ...draws,
+                        {
+                          id: newId(),
+                          lineId: lines[0]?.id ?? "",
+                          date: todayISO(),
+                          quantity: 0,
+                          value: 0,
+                        },
+                      ])
+                    }
+                    className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-bold text-white"
+                  >
+                    + سحبة
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {/* ---- قسائمُ بلا حصّة ---- */}
+      {canManage && without.length > 0 && (
+        <div className="mt-6 rounded-xl border border-slate-200 bg-slate-50 p-4">
+          <p className="mb-2 font-bold">قسائمُ بلا حصّةِ مدعوم</p>
+          <p className="mb-3 text-sm text-slate-600">
+            اضغط المشروعَ لتكتب له أوّلَ حصّة.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {without.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => {
+                  onSetSubsidy(p.id, [
+                    { id: newId(), material: "", quantity: 0, unit: "", value: 0 },
+                  ]);
+                  setOpen(p.name);
+                }}
+                className="rounded-lg bg-white px-3 py-2 text-sm font-bold hover:bg-slate-100"
+              >
+                {p.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <datalist id="subsidy-materials">
+        {materialNames.map((name) => (
+          <option key={name} value={name} />
+        ))}
+      </datalist>
+      <datalist id="subsidy-units">
+        {SUBSIDY_UNITS.map((unit) => (
+          <option key={unit} value={unit} />
+        ))}
+      </datalist>
+
+      <Banner tone="ok">
+        <b>الحصّةُ للقسيمة لا للعقد</b> — فقد يكون لها عقدٌ وملاحقُ وعقودُ
+        مورّدين، والحصّةُ واحدةٌ من الدولة لصاحبها. وتُحفظ بوجهيها كميّةً
+        وقيمةً: فمن حفظ القيمةَ وحدها لم يعرف كم بقي من الأكياس. والسحبُ
+        يُسجَّل هنا لا في «استلام المواد» — فذاك تتبّعٌ عينيٌّ لكلّ ما يدخل
+        الموقع، وهذا خصمٌ من حصّةٍ لها سقف، ولو حُسب من الاثنين حُسب مرّتين.
+      </Banner>
+    </Panel>
   );
 }
 

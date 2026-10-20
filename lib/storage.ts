@@ -108,6 +108,15 @@ export type Project = {
   /** قسط التأمين */
   insuranceValue?: number;
   insuranceNote?: string;
+
+  /**
+   * حصصُ المدعوم وسحوباتُه.
+   *
+   * وموضعُها المشروعُ لا العقد: الحصّةُ للقسيمة لا لعقدٍ بعينه، وقد
+   * يكون للقسيمة عقدٌ وملاحقُ وعقودُ مورّدين — والحصّةُ واحدة.
+   */
+  subsidy?: SubsidyLine[];
+  subsidyDraws?: SubsidyDraw[];
 };
 
 /**
@@ -466,6 +475,58 @@ export type MaterialReceipt = {
   unitPrice: number | null;
   receivedBy: string;
   note: string;
+};
+
+/**
+ * حصّةُ المدعوم: مادةٌ خصّصتها الدولة لقسيمة العميل.
+ *
+ * والمدعومُ في الكويت كميّةٌ قبل أن يكون قيمة: «إسمنتٌ عدد ٢٠٠٠ كيس»،
+ * «طابوقٌ أبيض»، «حديدٌ وخرسانة». فيُحفظ بالوجهين — فمن حفظ القيمةَ
+ * وحدها لم يعرف كم بقي له من الأكياس، ومن حفظ الكميّةَ وحدها لم يعرف
+ * ما أضافته الحصّةُ إلى قيمة العقد.
+ *
+ * ورسومُه تختلف بالعقد: في عقد العجمي «يقوم المالك بدفع رسوم المدعوم
+ * للدولة»، وفي عقد بوعباس «تُسدَّد رسومُ المدعوم من قبل الشركة». فمن
+ * لم يُثبت على من الرسوم طالَب بها من لا تلزمه، أو تركها على نفسه.
+ */
+export type SubsidyLine = {
+  id: string;
+  /** المادة — حديد · خرسانة · طابوق أسود · طابوق أبيض · إسمنت · تكييف · ألومنيوم */
+  material: string;
+  /** الكميّة المخصّصة — صفرٌ إن كانت الحصّةُ بالقيمة وحدها */
+  quantity: number;
+  /** وحدتُها — كيس · متر مكعّب · طن · وحدة */
+  unit: string;
+  /** قيمتُها كما في جدول المدعوم */
+  value: number;
+  /** على من رسومُ المدعوم — «الشركة» أو «المالك»، وفراغٌ إن لم يُثبت */
+  feesOn?: string;
+  note?: string;
+};
+
+/**
+ * سحبٌ من الحصّة — ما أُخذ من الدولة أو استُعمل في الموقع.
+ *
+ * ويُسجَّل هنا لا في استلام المواد: فالاستلامُ تتبّعٌ عينيٌّ لكلّ ما
+ * يدخل الموقع مدعوماً وغيرَه، والسحبُ خصمٌ من حصّةٍ لها سقف. ولو
+ * حُسب من الاثنين لحُسب مرّتين ما دخل الموقع وقُيّد.
+ *
+ * ويُشار إلى سنده: رقمُ إذن الصرف من التموين، ورقمُ القيد إن كان له
+ * قيدٌ في الدفاتر — فسحبٌ بلا سندٍ لا يُدافَع عنه عند المراجعة.
+ */
+export type SubsidyDraw = {
+  id: string;
+  /** الحصّةُ المسحوب منها */
+  lineId: string;
+  /** yyyy-mm-dd */
+  date: string;
+  quantity: number;
+  value: number;
+  /** رقم إذن الصرف المدعوم */
+  permit?: string;
+  /** رقمُ القيد في الدفاتر إن كان له قيد */
+  entryNo?: string;
+  note?: string;
 };
 
 /** بيانات الشركة — تظهر في ترويسة كل مطبوعة وسند */
@@ -1243,6 +1304,35 @@ function migrateProject(raw: unknown): Project {
       ? round3(Number(p.insuranceValue))
       : undefined,
     insuranceNote: str(p.insuranceNote) || undefined,
+    subsidy: Array.isArray(p.subsidy)
+      ? (p.subsidy as unknown[]).map((raw) => {
+          const line = (raw ?? {}) as Record<string, unknown>;
+          return {
+            id: str(line.id) || newId(),
+            material: str(line.material),
+            quantity: round3(Number(line.quantity) || 0),
+            unit: str(line.unit),
+            value: round3(Number(line.value) || 0),
+            feesOn: str(line.feesOn) || undefined,
+            note: str(line.note) || undefined,
+          };
+        })
+      : undefined,
+    subsidyDraws: Array.isArray(p.subsidyDraws)
+      ? (p.subsidyDraws as unknown[]).map((raw) => {
+          const draw = (raw ?? {}) as Record<string, unknown>;
+          return {
+            id: str(draw.id) || newId(),
+            lineId: str(draw.lineId),
+            date: str(draw.date),
+            quantity: round3(Number(draw.quantity) || 0),
+            value: round3(Number(draw.value) || 0),
+            permit: str(draw.permit) || undefined,
+            entryNo: str(draw.entryNo) || undefined,
+            note: str(draw.note) || undefined,
+          };
+        })
+      : undefined,
   };
 }
 
