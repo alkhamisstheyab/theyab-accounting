@@ -50,7 +50,10 @@ export async function GET() {
       ولا يُرسَل إلا ما يقرؤه صاحبه: الإخفاء في الشاشة لا يمنع من يفتح
       أدوات المطوّر، وما لم يخرج من القاعدة لا يُقرأ بحيلة.
     */
-    const state = readableState(await readState(readable), user.permissions);
+    const state = readableState(await readState(readable), user.permissions, {
+      id: user.id,
+      name: user.name,
+    });
     /*
       وما لا يقرؤه يُسمّى له، فيكفّ متصفّحه عن إرساله. وإلا رأى مجموعةً
       فارغةً عنده فحسبها ناقصةً عند الخادم فدفع بما في جهازه.

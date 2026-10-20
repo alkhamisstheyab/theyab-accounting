@@ -164,6 +164,22 @@ const TABLES: Record<
       last_seen_at: when(u.lastSeenAt),
     }),
   },
+  messages: {
+    table: "messages",
+    columns: (m) => ({
+      from_name: str(m.fromName),
+      to_user: str(m.toUser),
+      to_name: str(m.toName),
+      body: str(m.body),
+      page: str(m.page),
+      about: str(m.about),
+      state: str(m.state),
+      read_at: when(m.readAt),
+      done_at: when(m.doneAt),
+      done_note: str(m.doneNote),
+      created_at: when(m.createdAt),
+    }),
+  },
   employees: {
     table: "employees",
     columns: (e) => ({ name: str(e.name), active: e.active !== false }),

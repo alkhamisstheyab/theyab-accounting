@@ -20,7 +20,8 @@ import {
   BackupMeta,
   daysSince,
 } from "./file-backup";
-import { Contractor, Installment, Project, isInstallmentDue } from "./storage";
+import {
+  type Message, Contractor, Installment, Project, isInstallmentDue } from "./storage";
 import { allDurations, daysBetween } from "./contract-dates";
 
 export type NoticeTone = "action" | "warn" | "info";
@@ -48,6 +49,8 @@ export type NoticeInput = {
   quotations: Quotation[];
   workItems: WorkItem[];
   audit: AuditEntry[];
+  /** طلباتُ العمل — ما وصل هذا الجهازَ منها، وهو مُرشَّحٌ على الخادم */
+  messages: Message[];
   backup: BackupMeta | null;
   /** آخر دخول سابق لهذا المستخدم — لعرض ما استجدّ بعده */
   lastSeenAt: string;
@@ -286,8 +289,46 @@ export function staffDocuments(
   };
 }
 
+/**
+ * طلبُ عملٍ موجَّهٌ إليه — وهو أوّلُ ما يجب أن يراه.
+ *
+ * فالتنبيهاتُ كلُّها مشتقّةٌ من الدفاتر: تقول له «ثَمَّ حركةٌ تنتظر».
+ * وهذا وحده نداءٌ باسمه من إنسان. فيُقدَّم عليها جميعاً في الترتيب،
+ * ولا يُنتظر به دخولُه شاشةَ الأعمال — فطلبٌ لا يراه صاحبُه كأنه لم
+ * يُرسل، وذاك نقضُ البابِ كلِّه.
+ */
+function taskNotices(input: NoticeInput): Notice[] {
+  const mine = (input.messages ?? []).filter(
+    (m) => m.toName === input.userName && m.state !== "أُنجزت"
+  );
+  if (mine.length === 0) return [];
+
+  const fresh = mine.filter((m) => m.state === "جديدة");
+  const asker = [...new Set(mine.map((m) => m.fromName))].join(" و");
+
+  return [
+    {
+      id: "my-tasks",
+      tone: "warn",
+      title:
+        mine.length === 1
+          ? `طلبُ عملٍ من ${asker}`
+          : `${mine.length} طلباتِ عملٍ من ${asker}`,
+      detail:
+        (fresh.length > 0 && fresh.length !== mine.length
+          ? `${fresh.length} منها لم تُقرأ بعد. `
+          : "") + mine[0].body.slice(0, 120),
+      page: "الأعمال",
+      count: mine.length,
+    },
+  ];
+}
+
 export function buildNotices(input: NoticeInput): Notice[] {
   const notices: Notice[] = [];
+
+  /* ونداءُ إنسانٍ باسمه يُقدَّم على كلّ ما اشتُقّ من الدفاتر */
+  notices.push(...taskNotices(input));
 
   /* ---- ما ينتظر قراراً ---- */
 

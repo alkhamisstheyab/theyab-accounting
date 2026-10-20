@@ -642,6 +642,43 @@ async function main() {
     )
   );
 
+  /* الرسائل — طلباتُ عملٍ موجَّهةٌ إلى موظّفين */
+  add(
+    "الرسائل",
+    await insertMany(
+      db,
+      "messages",
+      [
+        "id",
+        "from_name",
+        "to_user",
+        "to_name",
+        "body",
+        "page",
+        "about",
+        "state",
+        "read_at",
+        "done_at",
+        "done_note",
+        "created_at",
+      ],
+      (d.messages ?? []).map((m) => [
+        str(m.id),
+        str(m.fromName),
+        str(m.toUser),
+        str(m.toName),
+        str(m.body),
+        str(m.page),
+        str(m.about),
+        str(m.state) || "جديدة",
+        stamp(m.readAt),
+        stamp(m.doneAt),
+        str(m.doneNote),
+        stamp(m.createdAt) ?? new Date().toISOString(),
+      ])
+    )
+  );
+
   /* ---------------- التقرير ---------------- */
 
   console.log("ما نُقل:");
@@ -668,6 +705,7 @@ async function main() {
   await fillData(db, "invoices", d.invoices ?? []);
   await fillData(db, "payroll_runs", d.payrollRuns ?? []);
   await fillData(db, "audit_log", d.audit ?? []);
+  await fillData(db, "messages", d.messages ?? []);
   for (const a of d.attendance ?? []) {
     if (!a?.employeeId || !date(a.date)) continue;
     await db.query(

@@ -173,6 +173,7 @@ import {
   installmentDeduction,
   Material,
   MaterialReceipt,
+  type Message,
   Project,
   type SubsidyDraw,
   type SubsidyLine,
@@ -376,6 +377,8 @@ const PAGES = [
   "الرئيسية",
   /* دليلُ العمل بابُ من لا يعرف، فموضعُه قبل العمل لا بعده */
   "دليل العمل",
+  /* والأعمالُ ظاهرةٌ دائماً: فيها ما طُلب منك، ولا تُطوى في باب */
+  "الأعمال",
   "إدخال حركة",
   "جدول الحركات",
   "مراجعة المدخلات",
@@ -573,6 +576,8 @@ export default function HomeV2() {
     setLockedState(on);
   };
   const [audit, setAudit] = useState<AuditEntry[]>([]);
+  /* طلباتُ العمل — وما يصل هذا الجهازَ منها مُرشَّحٌ على الخادم */
+  const [messages, setMessages] = useState<Message[]>([]);
   const [yearLocks, setYearLocks] = useState<YearLocks>({});
   const [chart, setChart] = useState<Account[]>(GENERATED_CHART);
   const [items, setItems] = useState<ItemDefinition[]>(GENERATED_ITEMS);
@@ -712,6 +717,7 @@ export default function HomeV2() {
       company,
       users,
       audit,
+      messages,
       yearLocks,
       chart,
       items,
@@ -915,6 +921,7 @@ export default function HomeV2() {
     company,
     users,
     audit,
+    messages,
     yearLocks,
     chart,
     items,
@@ -1221,6 +1228,7 @@ export default function HomeV2() {
         quotations,
         workItems,
         audit,
+        messages,
         backup: backupMeta,
         today: todayISO(),
         lastSeenAt: sessionLastSeen,
@@ -1235,6 +1243,7 @@ export default function HomeV2() {
       quotations,
       workItems,
       audit,
+      messages,
       backupMeta,
       sessionLastSeen,
       currentUser,
@@ -2317,6 +2326,51 @@ export default function HomeV2() {
             />
           )}
 
+          {page === "الأعمال" && currentUser && (
+            <TasksPage
+              messages={messages}
+              users={activeUsers}
+              me={{ id: currentUserId ?? "", name: currentUser.name }}
+              pages={visiblePages}
+              onNavigate={setPage}
+              onSend={(sent) => {
+                const row: Message = {
+                  id: newId(),
+                  fromName: currentUser.name,
+                  toUser: sent.toUser,
+                  toName: sent.toName,
+                  body: sent.body,
+                  page: sent.page,
+                  about: sent.about,
+                  state: "جديدة",
+                  createdAt: new Date().toISOString(),
+                  readAt: "",
+                  doneAt: "",
+                  doneNote: "",
+                };
+                setMessages((prev) => [row, ...prev]);
+                log(
+                  "إنشاء",
+                  "جلسة",
+                  `طلبُ عملٍ إلى ${sent.toName}: ${sent.body.slice(0, 60)}`
+                );
+              }}
+              onUpdate={(id, change) => {
+                setMessages((prev) =>
+                  prev.map((m) => (m.id === id ? { ...m, ...change } : m))
+                );
+                if (change.state === "أُنجزت") {
+                  const row = messages.find((m) => m.id === id);
+                  log(
+                    "تعديل",
+                    "جلسة",
+                    `أنجز طلبَ ${row?.fromName ?? "?"}: ${change.doneNote ?? ""}`
+                  );
+                }
+              }}
+            />
+          )}
+
           {page === "مراجعة المدخلات" && (
             <ReviewPage
               movements={yearMovements}
@@ -2931,6 +2985,7 @@ export default function HomeV2() {
                 company,
                 users,
                 audit,
+                messages,
                 yearLocks,
                 chart,
                 items,
@@ -6902,6 +6957,295 @@ function ClientStatementSheet({
  * وتُعلَّم مواضعُ النظر ولا يُحكم عليها: «بلا مشروع» قد تكون إداريّةً
  * صحيحة، وقد تكون مصروفَ قسيمةٍ نُسي مشروعُها فلا يدخل ربحيّتَها.
  */
+/**
+ * الأعمال: ما طُلب منك، وما طلبتَ من غيرك.
+ *
+ * وكانت التنبيهاتُ كلُّها مشتقّةً من الدفاتر — «حركةٌ تنتظر اعتماداً»،
+ * «مضى على النسخة كذا» — ولم يكن لصاحب الشركة بابٌ يقول به لموظّفٍ
+ * بعينه: «افعل هذا». فكان يُقال بالهاتف فيُنسى، ولا يبقى منه أثرٌ
+ * يُراجع: من طلب، ومتى، وهل أُنجز.
+ *
+ * ولا يُحذف طلبٌ عند إنجازه: يُختم بحالته ويبقى أثرُه. فمن أنجز يُعرف
+ * أنه أنجز ومتى، ومن تُرك طلبُه شهراً يُعرف ذلك أيضاً.
+ */
+function TasksPage({
+  messages,
+  users,
+  me,
+  pages,
+  onSend,
+  onUpdate,
+  onNavigate,
+}: {
+  messages: Message[];
+  users: User[];
+  me: { id: string; name: string };
+  /** الشاشاتُ التي يُنجَز فيها العمل — يُنقل إليها بضغطة */
+  pages: string[];
+  onSend: (draft: {
+    toUser: string;
+    toName: string;
+    body: string;
+    page: string;
+    about: string;
+  }) => void;
+  onUpdate: (id: string, change: Partial<Message>) => void;
+  onNavigate: (page: string) => void;
+}) {
+  const [tab, setTab] = useState<"إليّ" | "منّي">("إليّ");
+  const [showDone, setShowDone] = useState(false);
+  const [draft, setDraft] = useState({
+    toUser: "",
+    body: "",
+    page: "",
+    about: "",
+  });
+  const [doneNote, setDoneNote] = useState<Record<string, string>>({});
+
+  /* وبالاسم كما بالمعرّف — فالمعرّفان مختلفان والاسمُ فريد */
+  const isMine = (m: Message) => m.toUser === me.id || m.toName === me.name;
+  const toMe = messages.filter(isMine);
+  const fromMe = messages.filter((m) => m.fromName === me.name && !isMine(m));
+  const mine = tab === "إليّ" ? toMe : fromMe;
+  const shown = showDone ? mine : mine.filter((m) => m.state !== "أُنجزت");
+
+  const waiting = toMe.filter((m) => m.state !== "أُنجزت").length;
+  const sentWaiting = fromMe.filter((m) => m.state !== "أُنجزت").length;
+
+  const send = () => {
+    const to = users.find((u) => u.id === draft.toUser);
+    if (!to) {
+      window.alert("اختر الموظّف");
+      return;
+    }
+    if (draft.body.trim().length < 4) {
+      window.alert("اكتب الطلب — وطلبٌ بكلمةٍ لا يُفهم");
+      return;
+    }
+    onSend({
+      toUser: to.id,
+      toName: to.name,
+      body: draft.body.trim(),
+      page: draft.page,
+      about: draft.about.trim(),
+    });
+    setDraft({ toUser: "", body: "", page: "", about: "" });
+  };
+
+  return (
+    <>
+      <Panel
+        title="الأعمال"
+        subtitle="ما طُلب منك، وما طلبتَ من غيرك — ويبقى أثرُه بعد إنجازه"
+      >
+        <div className="mb-4 flex flex-wrap gap-2">
+          <button
+            onClick={() => setTab("إليّ")}
+            className={`rounded-lg px-5 py-2 font-bold ${
+              tab === "إليّ" ? "bg-blue-600 text-white" : "bg-slate-100"
+            }`}
+          >
+            إليّ {waiting > 0 && `(${waiting})`}
+          </button>
+          <button
+            onClick={() => setTab("منّي")}
+            className={`rounded-lg px-5 py-2 font-bold ${
+              tab === "منّي" ? "bg-blue-600 text-white" : "bg-slate-100"
+            }`}
+          >
+            منّي {sentWaiting > 0 && `(${sentWaiting})`}
+          </button>
+          <button
+            onClick={() => setShowDone((v) => !v)}
+            className="rounded-lg bg-slate-100 px-4 py-2 text-sm font-bold"
+          >
+            {showDone ? "أخفِ المنجَز" : "أظهِر المنجَز"}
+          </button>
+        </div>
+
+        {shown.length === 0 ? (
+          <Banner tone="ok">
+            {tab === "إليّ"
+              ? "لا عملَ مطلوبٌ منك الآن."
+              : "لم تطلب من أحدٍ شيئاً بعد."}
+          </Banner>
+        ) : (
+          <div className="space-y-3">
+            {shown.map((m) => (
+              <div
+                key={m.id}
+                className={`rounded-xl border p-4 ${
+                  m.state === "أُنجزت"
+                    ? "border-green-200 bg-green-50"
+                    : m.state === "قُرئت"
+                    ? "border-slate-300 bg-white"
+                    : "border-amber-300 bg-amber-50"
+                }`}
+              >
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <p className="font-bold">
+                    {tab === "إليّ" ? `من ${m.fromName}` : `إلى ${m.toName}`}
+                    {m.about && (
+                      <span className="font-normal text-slate-600">
+                        {" "}· {m.about}
+                      </span>
+                    )}
+                  </p>
+                  <span className="text-xs text-slate-500">
+                    {new Date(m.createdAt).toLocaleString("ar-KW")}
+                    {" · "}
+                    {m.state}
+                    {m.doneAt &&
+                      ` ${new Date(m.doneAt).toLocaleDateString("ar-KW")}`}
+                  </span>
+                </div>
+
+                <p className="mb-3 whitespace-pre-wrap">{m.body}</p>
+
+                {m.doneNote && (
+                  <p className="mb-3 rounded-lg bg-white/70 px-3 py-2 text-sm">
+                    <b>ما قيل عند الإنجاز:</b> {m.doneNote}
+                  </p>
+                )}
+
+                <div className="flex flex-wrap items-center gap-2">
+                  {m.page && (
+                    <button
+                      onClick={() => {
+                        /* وفتحُها قراءةٌ لها: فمن ذهب لينجزَ فقد قرأ */
+                        if (isMine(m) && m.state === "جديدة") {
+                          onUpdate(m.id, {
+                            state: "قُرئت",
+                            readAt: new Date().toISOString(),
+                          });
+                        }
+                        onNavigate(m.page);
+                      }}
+                      className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-bold text-white"
+                    >
+                      افتح {m.page}
+                    </button>
+                  )}
+
+                  {isMine(m) && m.state !== "أُنجزت" && (
+                    <>
+                      <input
+                        value={doneNote[m.id] ?? ""}
+                        onChange={(e) =>
+                          setDoneNote((prev) => ({
+                            ...prev,
+                            [m.id]: e.target.value,
+                          }))
+                        }
+                        placeholder="ما فعلتَ — يُكتب ويبقى"
+                        className="min-w-48 flex-1 rounded border border-slate-300 px-3 py-2 text-sm"
+                      />
+                      <button
+                        onClick={() => {
+                          const note = (doneNote[m.id] ?? "").trim();
+                          /*
+                            و«أُنجز» بلا بيانٍ لا يُراجَع: فيُشترط قولُ
+                            ما فعل — لا ليُثقل عليه، بل ليُقرأ بعد شهر.
+                          */
+                          if (note.length < 3) {
+                            window.alert(
+                              "اكتب ما فعلتَ — فـ«أُنجز» بلا بيانٍ لا يُراجَع"
+                            );
+                            return;
+                          }
+                          onUpdate(m.id, {
+                            state: "أُنجزت",
+                            doneAt: new Date().toISOString(),
+                            doneNote: note,
+                            readAt: m.readAt || new Date().toISOString(),
+                          });
+                        }}
+                        className="rounded-lg bg-green-600 px-4 py-2 text-sm font-bold text-white"
+                      >
+                        أنجزتُه
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Panel>
+
+      {/* ---- طلبُ عمل ---- */}
+      <Panel title="اطلب عملاً" subtitle="يراه صاحبُه عند ولوجه النظام">
+        <div className="mb-3 flex flex-wrap gap-3">
+          <div>
+            <p className="mb-1 text-sm font-medium">إلى</p>
+            <select
+              value={draft.toUser}
+              onChange={(e) => setDraft({ ...draft, toUser: e.target.value })}
+              className="rounded border border-slate-300 px-3 py-2"
+            >
+              <option value="">— اختر الموظّف —</option>
+              {users
+                .filter((u) => u.active && u.id !== me.id)
+                .map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.name}
+                    {u.jobTitle ? ` — ${u.jobTitle}` : ""}
+                  </option>
+                ))}
+            </select>
+          </div>
+          <div>
+            <p className="mb-1 text-sm font-medium">الشاشة</p>
+            <select
+              value={draft.page}
+              onChange={(e) => setDraft({ ...draft, page: e.target.value })}
+              className="rounded border border-slate-300 px-3 py-2"
+            >
+              <option value="">— بلا شاشة —</option>
+              {pages.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex-1">
+            <p className="mb-1 text-sm font-medium">عمّا هو</p>
+            <input
+              value={draft.about}
+              onChange={(e) => setDraft({ ...draft, about: e.target.value })}
+              placeholder="قيد ١٨٨٦ · العقد ٦٠٠١ · مشروع بوعباس"
+              className="w-full rounded border border-slate-300 px-3 py-2"
+            />
+          </div>
+        </div>
+
+        <textarea
+          value={draft.body}
+          onChange={(e) => setDraft({ ...draft, body: e.target.value })}
+          rows={3}
+          placeholder="اكتب الطلب كما تقوله: «راجع دفعة ٥ من عقد العجمي واعتمدها إن تمّت المرحلة»"
+          className="mb-3 w-full rounded border border-slate-300 px-3 py-2"
+        />
+
+        <button
+          onClick={send}
+          className="rounded-lg bg-slate-900 px-6 py-3 font-bold text-white"
+        >
+          أرسِل الطلب
+        </button>
+
+        <Banner tone="ok">
+          <b>ولا يُحذف طلبٌ عند إنجازه</b> — يُختم بحالته ويبقى أثرُه. فمن
+          أنجز يُعرف أنه أنجز ومتى وبمَ، ومن تُرك طلبُه شهراً يُعرف ذلك
+          أيضاً. ولا يقرأ الطلبَ إلا صاحبُه ومن أرسله — والترشيحُ على
+          الخادم لا في الشاشة.
+        </Banner>
+      </Panel>
+    </>
+  );
+}
+
 function ReviewPage({
   movements,
   audit,

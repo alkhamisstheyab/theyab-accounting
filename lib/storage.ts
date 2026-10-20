@@ -533,6 +533,42 @@ export type SubsidyDraw = {
   note?: string;
 };
 
+/**
+ * طلبُ عملٍ يُوجَّه إلى موظّفٍ بعينه فيراه عند ولوجه.
+ *
+ * وكانت التنبيهاتُ كلُّها مشتقّةً من الدفاتر: «حركةٌ تنتظر اعتماداً»،
+ * «مضى على النسخة كذا». ولم يكن لصاحب الشركة بابٌ يقول به لموظّفٍ
+ * بعينه: «افعل هذا» — فكان يُقال بالهاتف فيُنسى، ولا يبقى منه أثرٌ
+ * يُراجع: من طلب، ومتى، وهل أُنجز.
+ *
+ * ولا يُحذف عند الإنجاز: تُختم الرسالةُ بحالتها ويبقى أثرُها. فمن
+ * أنجز يُعرف أنه أنجز ومتى، ومن تُرك طلبُه شهراً يُعرف ذلك أيضاً.
+ */
+export type Message = {
+  id: string;
+  /** من أرسل — بالاسم كما في سجل التدقيق، فالحسابُ يُحذف والأثرُ يبقى */
+  fromName: string;
+  /** إلى من: المعرّفُ للترشيح، والاسمُ للعرض ولو زال الحساب */
+  toUser: string;
+  toName: string;
+  body: string;
+  /** الشاشةُ التي يُنجَز فيها الطلب — يُنقل إليها بضغطة */
+  page: string;
+  /** ما يُشار إليه: رقمُ قيدٍ أو عقدٍ أو مشروع */
+  about: string;
+  state: MessageState;
+  /** ISO datetime */
+  createdAt: string;
+  readAt: string;
+  doneAt: string;
+  /** ملاحظةُ المنجِز — «أُنجز» بلا بيانٍ لا يُراجَع */
+  doneNote: string;
+};
+
+export type MessageState = "جديدة" | "قُرئت" | "أُنجزت";
+
+export const MESSAGE_STATES: MessageState[] = ["جديدة", "قُرئت", "أُنجزت"];
+
 /** بيانات الشركة — تظهر في ترويسة كل مطبوعة وسند */
 export type CompanyProfile = {
   name: string;
@@ -643,6 +679,8 @@ export type AppState = {
   company: CompanyProfile;
   users: User[];
   audit: AuditEntry[];
+  /** طلباتُ العمل — تُرشَّح صفّاً صفّاً على الخادم */
+  messages: Message[];
   yearLocks: YearLocks;
   /** البيانات الأساسية القابلة للتحرير — تبدأ من المولّدة من الإكسل */
   chart: Account[];
@@ -710,6 +748,7 @@ export const emptyState = (): AppState => ({
   company: defaultCompany(),
   users: [],
   audit: [],
+  messages: [],
   yearLocks: {},
   chart: GENERATED_CHART,
   items: GENERATED_ITEMS,
@@ -1339,6 +1378,27 @@ function migrateMovement(raw: unknown): Movement {
   };
 }
 
+function migrateMessage(raw: unknown): Message {
+  const m = (raw ?? {}) as Record<string, unknown>;
+  const state = str(m.state);
+  return {
+    id: str(m.id) || newId(),
+    fromName: str(m.fromName),
+    toUser: str(m.toUser),
+    toName: str(m.toName),
+    body: str(m.body),
+    page: str(m.page),
+    about: str(m.about),
+    state: (MESSAGE_STATES as string[]).includes(state)
+      ? (state as MessageState)
+      : "جديدة",
+    createdAt: str(m.createdAt) || new Date().toISOString(),
+    readAt: str(m.readAt),
+    doneAt: str(m.doneAt),
+    doneNote: str(m.doneNote),
+  };
+}
+
 function migrateProject(raw: unknown): Project {
   const p = (raw ?? {}) as Record<string, unknown>;
   return {
@@ -1855,6 +1915,8 @@ export function normalizeState(raw: unknown): AppState {
   const state = emptyState();
   if (Array.isArray(data.movements))
     state.movements = data.movements.map(migrateMovement);
+  if (Array.isArray(data.messages))
+    state.messages = data.messages.map(migrateMessage);
   if (Array.isArray(data.projects))
     state.projects = data.projects.map(migrateProject);
   if (Array.isArray(data.contractors))

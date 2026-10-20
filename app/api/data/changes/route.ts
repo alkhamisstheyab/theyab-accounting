@@ -33,7 +33,9 @@ export async function GET(request: Request) {
 
     /* وما يصل بالسحب يُصفّى كما تُصفّى القراءة الأولى، وإلا دخل من الباب الآخر */
     const changes = await changesSince(readable, since);
-    return NextResponse.json(readableChanges(changes, user.permissions));
+    return NextResponse.json(
+      readableChanges(changes, user.permissions, { id: user.id, name: user.name })
+    );
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

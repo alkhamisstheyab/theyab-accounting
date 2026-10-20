@@ -79,6 +79,7 @@
     "check:apply": "node db/check-apply.mjs",
     "check:review": "node db/check-review.mjs",
     "check:freedom": "node db/check-quotation-freedom.mjs",
+    "check:tasks": "node db/check-tasks.mjs",
     "restore:confirmations": "node db/restore-confirmations.mjs"
   },
   "dependencies": {

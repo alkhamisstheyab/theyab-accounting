@@ -75,8 +75,9 @@ check(
   grouped.filter((p, i) => grouped.indexOf(p) !== i).join("، ") || "لا تكرار"
 );
 check(
-  "والظاهرُ وحده هو ما يُقصد قصداً",
-  loose.length === 2 && loose.includes("الرئيسية") && loose.includes("دليل العمل"),
+  "والظاهرُ وحده هو ما يُقصد قصداً — والأعمالُ منه، فيها ما طُلب منك",
+  loose.length === 3 &&
+    ["الرئيسية", "دليل العمل", "الأعمال"].every((n) => loose.includes(n)),
   loose.join("، ")
 );
 

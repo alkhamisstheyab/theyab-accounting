@@ -39,6 +39,12 @@ const RULES: Record<string, Rule> = {
     remove: ["materials.manage"],
   },
   users: { write: ["users.manage"], remove: ["users.manage"] },
+  /*
+    ويكتبها كلُّ من له حساب: الموظّفُ يُنجز رسالتَه فيختمها، والمديرُ
+    يُرسل. ولا تُحذف — تُختم بحالتها ويبقى أثرُها، فمن تُرك طلبُه
+    شهراً يُعرف ذلك. فلا صلاحيةَ حذفٍ لها أصلاً.
+  */
+  messages: { write: [], remove: ["__لا أحد__" as Permission] },
   employees: { write: ["employees.manage"], remove: ["employees.manage"] },
   attendance: { write: ["attendance.manage"], remove: ["attendance.manage"] },
   payrollRuns: { write: ["payroll.run"], remove: ["payroll.run"] },
@@ -256,6 +262,12 @@ const READ_RULES: Record<string, Permission[]> = {
     الشركة ولا ما لكلٍّ من صلاحية.
   */
   users: ["users.manage"],
+  /*
+    والرسائلُ تُقرأ بلا صلاحيةٍ خاصّة: كلُّ من له حسابٌ يقرأ رسائله.
+    والحجبُ الحقيقيُّ في MINE_ONLY — فلا يرى إلا ما أُرسل إليه أو
+    أرسله هو.
+  */
+  messages: [],
 
   chart: [],
   items: [],
@@ -312,9 +324,61 @@ function clean(field: string, row: unknown): unknown {
  * وما لا يُقرأ يُفرَّغ ولا يُحذف مفتاحه: المتصفّح يتوقّع الشكل نفسه،
  * ومجموعةٌ غائبة تصير عنده undefined فتتعطّل شاشةٌ لا علاقة لها بالأمر.
  */
+/**
+ * صاحبُ الجلسة — يُعرف به ما يُقرأ من الصفوف المرشَّحة.
+ *
+ * والصلاحيّاتُ لا تكفي للرسائل: صلاحيّتان متساويتان ورسالتان، ولكلٍّ
+ * صاحبُها. فلا بدّ من الهويّة نفسها.
+ */
+export type Viewer = { id: string; name: string };
+
+/**
+ * المجموعاتُ التي تُرشَّح صفّاً صفّاً.
+ *
+ * وكان الحجبُ كلُّه بالمجموعة: تُقرأ كلُّها أو تُحجب كلُّها. والرسائلُ
+ * ليست كذلك — طلبُ عملٍ موجَّهٌ إلى موظّفٍ بعينه، لا يقرؤه غيرُه ولو
+ * كان زميلَه في الصلاحية.
+ *
+ * والترشيحُ على الخادم لا في الشاشة: فالإخفاءُ في الشاشة لا يمنع من
+ * يفتح أدوات المطوّر، وما لم يخرج من القاعدة لا يُقرأ بحيلة.
+ */
+const MINE_ONLY: Record<
+  string,
+  (row: Record<string, unknown>, viewer: Viewer) => boolean
+> = {
+  /*
+    ويُطابق بالاسم كما يُطابق بالمعرّف: فمعرّفُ الخادم غير معرّف
+    الجهاز — ذاك uuid في العمود وهذا معرّفُ التطبيق في data — والاسمُ
+    فريدٌ في الموضعين. فلو طُوبق بالمعرّف وحده لم تصل رسالةٌ إلى
+    أحدٍ أصلاً، ولظهر البابُ عاملاً وهو مغلق.
+  */
+  messages: (row, viewer) =>
+    str(row.toUser) === viewer.id ||
+    str(row.toName) === viewer.name ||
+    str(row.fromName) === viewer.name,
+};
+
+const str = (v: unknown): string => (v == null ? "" : String(v));
+
+/** يُرشّح صفوفَ مجموعةٍ إن كانت من المرشَّحة — وإلا أعادها كما هي */
+function mine(field: string, rows: unknown[], viewer: Viewer | undefined): unknown[] {
+  const keep = MINE_ONLY[field];
+  if (!keep) return rows;
+  /*
+    وبلا مُشاهِدٍ لا شيء: فمن لم يُعرَّف لا يُعطى صفّاً من المرشَّحة.
+    والسكوتُ هنا منعٌ لا إذن — ولو كان العكسَ لصار نسيانُ تمريرِ
+    الهويّة في مسارٍ جديدٍ بابَ قراءةٍ لرسائل الناس كلِّها.
+  */
+  if (!viewer) return [];
+  return rows.filter((row) =>
+    keep((row ?? {}) as Record<string, unknown>, viewer)
+  );
+}
+
 export function readableState<T extends Record<string, unknown>>(
   state: T,
-  permissions: readonly Permission[]
+  permissions: readonly Permission[],
+  viewer?: Viewer
 ): T {
   const out: Record<string, unknown> = {};
   for (const [field, value] of Object.entries(state)) {
@@ -322,9 +386,10 @@ export function readableState<T extends Record<string, unknown>>(
       out[field] = Array.isArray(value) ? [] : {};
       continue;
     }
-    out[field] = SECRETS[field] && Array.isArray(value)
-      ? value.map((row) => clean(field, row))
-      : value;
+    const rows = Array.isArray(value) ? mine(field, value, viewer) : value;
+    out[field] = SECRETS[field] && Array.isArray(rows)
+      ? rows.map((row) => clean(field, row))
+      : rows;
   }
   return out as T;
 }
@@ -337,11 +402,13 @@ export function readableState<T extends Record<string, unknown>>(
  */
 export function readableChanges<
   T extends { upserts?: Record<string, unknown[]>; deletes?: Record<string, string[]> }
->(changes: T, permissions: readonly Permission[]): T {
+>(changes: T, permissions: readonly Permission[], viewer?: Viewer): T {
   const upserts: Record<string, unknown[]> = {};
   for (const [field, rows] of Object.entries(changes.upserts ?? {})) {
     if (!canRead(field, permissions)) continue;
-    upserts[field] = SECRETS[field] ? rows.map((row) => clean(field, row)) : rows;
+    /* والمرشَّحةُ تُرشَّح في السحب أيضاً، وإلّا وصلت رسالةُ غيره بعد لحظة */
+    const kept = mine(field, rows, viewer);
+    upserts[field] = SECRETS[field] ? kept.map((row) => clean(field, row)) : kept;
   }
 
   const deletes: Record<string, string[]> = {};

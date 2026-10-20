@@ -56,6 +56,12 @@ export const ROW_COLLECTIONS: RowCollection[] = [
   { field: "quotations", keyOf: (q) => str(q.id) },
   { field: "invoices", keyOf: (i) => str(i.id) },
   { field: "audit", keyOf: (a) => str(a.id) },
+  /*
+    والرسائلُ تُرشَّح صفّاً صفّاً لا مجموعةً: لا يقرؤها إلا مُرسِلُها
+    ومن أُرسلت إليه — بخلاف كلِّ ما قبلها، فذاك يُقرأ كلُّه أو يُحجب
+    كلُّه. وموضعُ الترشيح الخادم (permits.ts) لا الشاشة.
+  */
+  { field: "messages", keyOf: (m) => str(m.id) },
 ];
 
 /**

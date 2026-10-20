@@ -78,6 +78,7 @@ export async function readState(db: Queryable): Promise<AppState> {
   state.workItems = await objects(db, "work_items", "stage, section, name");
   state.quotations = await objects(db, "quotations", "number");
   state.invoices = await objects(db, "invoices", "number");
+  state.messages = await objects(db, "messages", "created_at DESC");
   state.audit = await objects(db, "audit_log", "at DESC");
 
   /* ---- البيانات الأساسية: أعمدتها هي النوع نفسه ---- */
