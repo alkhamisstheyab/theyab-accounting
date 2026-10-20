@@ -383,6 +383,80 @@ const PAGES = [
   "الإعدادات",
 ];
 
+/**
+ * القائمةُ مجموعاتٌ لا سرداً.
+ *
+ * إحدى وثلاثون صفحةً في عمودٍ واحدٍ تُقرأ بالبحث لا بالنظر: فمن أراد
+ * «مسيّر الرواتب» مرّ على دفتر الأستاذ وميزان المراجعة واعتماد المراحل.
+ * فتُجمع على أبوابها، ويُفتح البابُ الذي فيه عملُك.
+ *
+ * وما خرج عن مجموعةٍ يبقى في أعلى القائمة ظاهراً دائماً — الرئيسيةُ
+ * ودليلُ العمل: الأولى مبتدأُ كلِّ جلسة، والثاني بابُ من لا يعرف،
+ * فطيُّهما يُخفي ما يُقصد قصداً.
+ *
+ * وترتيبُ المجموعات ترتيبُ اليوم: يُدخل القيدَ، ثم يُراجع، ثم يتابع
+ * مشاريعه، ثم يُقرّ، ثم رواتبَ شهره، ثم الإعدادُ والصيانةُ آخراً —
+ * فتلك تُفتح مرّةً في العمر لا كلَّ يوم.
+ */
+const PAGE_GROUPS: { group: string; pages: string[] }[] = [
+  {
+    group: "القيود والدفاتر",
+    pages: [
+      "إدخال حركة",
+      "جدول الحركات",
+      "القيود اليومية",
+      "دفتر الأستاذ",
+      "ميزان المراجعة",
+      "القوائم المالية",
+    ],
+  },
+  {
+    group: "التقارير",
+    pages: ["التقارير", "التقرير الربعي"],
+  },
+  {
+    group: "المشاريع والعقود",
+    pages: [
+      "المشاريع",
+      "المقاولون",
+      "المطلوب من العملاء",
+      "ربط الحركات",
+      "استلام المواد",
+      "عروض الأسعار",
+      "بنود الأعمال",
+      "الفواتير",
+    ],
+  },
+  {
+    group: "الرقابة والاعتماد",
+    pages: [
+      "اعتماد الحركات",
+      "اعتماد المراحل",
+      "متابعة السلف",
+      "المستحقات",
+      "سجل التدقيق",
+    ],
+  },
+  {
+    group: "الموظفون والرواتب",
+    pages: ["الموظفون", "الحضور والانصراف", "مسيّر الرواتب"],
+  },
+  {
+    group: "الإعداد والصيانة",
+    pages: [
+      "دليل الحسابات",
+      "البيانات الأساسية",
+      "الأرصدة الافتتاحية",
+      "المستخدمون",
+      "مطابقة الخادم",
+      "الإعدادات",
+    ],
+  },
+];
+
+/** ما فُتح من المجموعات — يبقى بعد إغلاق المتصفّح، فعادةُ صاحبه لا تُنسى */
+const MENU_KEY = "theyab:menu-open";
+
 const MOVEMENT_TYPES = [
   "مصروف",
   "إيرادات",
@@ -1147,6 +1221,35 @@ export default function HomeV2() {
     [audit, sessionLastSeen, currentUser]
   );
 
+  /*
+    وما فُتح يُقرأ عند الإقلاع ويُكتب عند كل فتح: فمن يعمل في الرواتب
+    يومَه لا يُعيد فتحَ بابها كلَّ مرّةٍ يُنعش الصفحة.
+  */
+  const [openGroups, setOpenGroups] = useState<string[]>(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const raw = window.localStorage.getItem(MENU_KEY);
+      const parsed = raw ? JSON.parse(raw) : null;
+      return Array.isArray(parsed) ? parsed.map(String) : [];
+    } catch {
+      /* تخزينٌ ممنوع أو تالف — تُفتح المجموعةُ التي فيها عملُه وحدها */
+      return [];
+    }
+  });
+
+  const toggleGroup = (group: string) =>
+    setOpenGroups((prev) => {
+      const next = prev.includes(group)
+        ? prev.filter((g) => g !== group)
+        : [...prev, group];
+      try {
+        window.localStorage.setItem(MENU_KEY, JSON.stringify(next));
+      } catch {
+        /* التخزين ممتلئ — والفتحُ يبقى لهذه الجلسة */
+      }
+      return next;
+    });
+
   const visiblePages = PAGES.filter((name) => {
     const needed = PAGE_PERMISSION[name];
     return !needed || allow(needed);
@@ -1527,30 +1630,106 @@ export default function HomeV2() {
           </div>
 
           <nav className="space-y-1">
-            {visiblePages.map((name) => {
-              // شارة العدد على الشاشة التي يعالَج فيها الإشعار
-              const badge = notices
-                .filter((n) => n.page === name && n.count)
-                .reduce((sum, n) => sum + (n.count ?? 0), 0);
-              return (
-              <button
-                key={name}
-                onClick={() => setPage(name)}
-                className={`flex w-full items-center justify-between gap-2 rounded-lg px-4 py-2 text-right text-sm transition ${
-                  page === name
-                    ? "bg-blue-600 font-bold text-white"
-                    : "hover:bg-slate-800"
-                }`}
-              >
-                <span>{name}</span>
-                {badge > 0 && (
-                  <span className="rounded-full bg-amber-500 px-2 py-0.5 text-xs font-bold text-white">
-                    {badge}
-                  </span>
-                )}
-              </button>
+            {(() => {
+              /* شارةُ العدد على الشاشة التي يُعالَج فيها الإشعار */
+              const badgeOf = (name: string) =>
+                notices
+                  .filter((n) => n.page === name && n.count)
+                  .reduce((sum, n) => sum + (n.count ?? 0), 0);
+
+              const item = (name: string, inGroup: boolean) => {
+                const badge = badgeOf(name);
+                return (
+                  <button
+                    key={name}
+                    onClick={() => setPage(name)}
+                    className={`flex w-full items-center justify-between gap-2 rounded-lg py-2 text-right text-sm transition ${
+                      inGroup ? "pr-7 pl-4" : "px-4"
+                    } ${
+                      page === name
+                        ? "bg-blue-600 font-bold text-white"
+                        : "hover:bg-slate-800"
+                    }`}
+                  >
+                    <span>{name}</span>
+                    {badge > 0 && (
+                      <span className="rounded-full bg-amber-500 px-2 py-0.5 text-xs font-bold text-white">
+                        {badge}
+                      </span>
+                    )}
+                  </button>
+                );
+              };
+
+              const grouped = new Set(
+                PAGE_GROUPS.flatMap((g) => g.pages)
               );
-            })}
+              const loose = visiblePages.filter((name) => !grouped.has(name));
+
+              return (
+                <>
+                  {loose.map((name) => item(name, false))}
+
+                  {PAGE_GROUPS.map(({ group, pages }) => {
+                    /* ولا تُعرض مجموعةٌ حُجبت صفحاتُها كلُّها */
+                    const mine = pages.filter((name) =>
+                      visiblePages.includes(name)
+                    );
+                    if (mine.length === 0) return null;
+
+                    /*
+                      ومجموعةٌ بصفحةٍ واحدةٍ تُعرض صفحةً: فبابٌ يُفتح على
+                      شيءٍ واحدٍ زيادةُ ضغطةٍ بلا فائدة.
+                    */
+                    if (mine.length === 1) return item(mine[0], false);
+
+                    /*
+                      والمجموعةُ التي فيها صفحتُك مفتوحةٌ ولو طواها —
+                      وإلّا ضلّ موضعَه في القائمة وهو فيه.
+                    */
+                    const here = mine.includes(page);
+                    const open = here || openGroups.includes(group);
+
+                    /*
+                      وشارةُ المطويّ تَصعد إلى رأسه: ولولا ذلك لاختفى
+                      التنبيهُ بطيّ بابه — فيُطوى بابُ الاعتماد وفيه
+                      حركةٌ تنتظر، ولا يعلم.
+                    */
+                    const badge = mine.reduce((sum, name) => sum + badgeOf(name), 0);
+
+                    return (
+                      <div key={group}>
+                        <button
+                          onClick={() => toggleGroup(group)}
+                          className={`flex w-full items-center justify-between gap-2 rounded-lg px-4 py-2 text-right text-sm transition ${
+                            here && !open
+                              ? "bg-slate-800 font-bold"
+                              : "hover:bg-slate-800"
+                          }`}
+                        >
+                          <span className="flex items-center gap-2">
+                            <span className="text-xs text-slate-400">
+                              {open ? "▾" : "▸"}
+                            </span>
+                            <span className={here ? "font-bold" : ""}>{group}</span>
+                          </span>
+                          {!open && badge > 0 && (
+                            <span className="rounded-full bg-amber-500 px-2 py-0.5 text-xs font-bold text-white">
+                              {badge}
+                            </span>
+                          )}
+                        </button>
+                        {open && (
+                          <div className="mt-1 space-y-1 border-r border-slate-700 pr-1">
+                            {mine.map((name) => item(name, true))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </>
+              );
+            })()}
           </nav>
         </aside>
 
