@@ -59,6 +59,11 @@ import {
   WorkItem,
 } from "./quotations";
 import type { Party } from "./parties";
+import {
+  REVIEW_MAX,
+  REVIEW_PERIODS,
+  type WorkReview,
+} from "./reviews";
 import { SEED_WORK_ITEMS } from "./work-items-seed";
 import { Invoice } from "./invoices";
 
@@ -803,6 +808,10 @@ function migrateEmployee(raw: unknown): Employee {
     workPermitExpiry: str(e.workPermitExpiry),
     residencyExpiry: str(e.residencyExpiry),
     notes: str(e.notes),
+    /* وتقييماتُه تُقرأ كما كُتبت — وحقلٌ يُحفظ ولا يُحمَّل يسقط صامتاً */
+    reviews: Array.isArray(e.reviews)
+      ? (e.reviews as unknown[]).map(migrateReview)
+      : undefined,
   };
 }
 
@@ -1379,6 +1388,40 @@ function migrateMovement(raw: unknown): Movement {
     /* والفراغُ هو العادة، فلا يُحفظ لها اسم */
     urgency: str(m.urgency) || undefined,
     source: m.source === "excel" ? "excel" : "app",
+  };
+}
+
+function migrateReview(raw: unknown): WorkReview {
+  const r = (raw ?? {}) as Record<string, unknown>;
+  const period = str(r.period);
+  const score = (key: string) => {
+    const n = Number(r[key]);
+    if (!Number.isFinite(n) || n <= 0) return 0;
+    /* ولا تُقبل درجةٌ فوق الحدّ: فمن كتب عشرةً من خمسةٍ أفسد كلَّ متوسّط */
+    return Math.min(Math.round(n), REVIEW_MAX);
+  };
+  return {
+    id: str(r.id) || newId(),
+    period: (REVIEW_PERIODS as readonly string[]).includes(period)
+      ? (period as (typeof REVIEW_PERIODS)[number])
+      : "أسبوعيّ",
+    from: str(r.from),
+    to: str(r.to) || str(r.from),
+    attendance: score("attendance"),
+    output: score("output"),
+    activity: score("activity"),
+    obedience: score("obedience"),
+    tasks: score("tasks"),
+    note: str(r.note),
+    by: str(r.by),
+    at: str(r.at) || new Date().toISOString(),
+    proposedBonus:
+      Number(r.proposedBonus) > 0 ? round3(Number(r.proposedBonus)) : undefined,
+    orderedBy: str(r.orderedBy) || undefined,
+    orderedAt: str(r.orderedAt) || undefined,
+    orderedAmount:
+      Number(r.orderedAmount) > 0 ? round3(Number(r.orderedAmount)) : undefined,
+    bonusDate: str(r.bonusDate) || undefined,
   };
 }
 

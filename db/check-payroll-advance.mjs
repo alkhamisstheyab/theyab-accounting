@@ -46,16 +46,55 @@ const f = (n) => Number(n).toFixed(3);
 const state = parseBackup(fs.readFileSync(BACKUP, "utf8"));
 const settings = state.payrollSettings ?? defaultPayrollSettings();
 const employee = state.employees.find((e) => e.active) ?? state.employees[0];
-check("موظفٌ من ملف الشركة", Boolean(employee), employee?.name);
+check(
+  "موظفٌ من ملف الشركة",
+  Boolean(employee),
+  employee ? `${employee.name} — أجرٌ ${employee.wageType}` : ""
+);
 
-const ADVANCE = 100;
+/*
+  والسلفةُ جزءٌ من الصافي لا رقمٌ ثابت.
+  وكانت مئةً، وراتبُ أوّلِ العاملين في الدفاتر مئةٌ أيضاً — الراتبُ
+  الصوريُّ للشؤون — فصار الصافي صفراً، فخرج قيدُ راتبٍ بصفرٍ فيُردّ.
+  وهو إخفاقٌ في الفرض لا في الشِّفْر: فلا تُسلَّف لرجلٍ كلُّ راتبه
+  ثم يُرحَّل له قيدٌ بلا مبلغ.
+*/
+
+/*
+  وشهرُ حضورٍ كامل.
+
+  وكان الحسابُ على `attendance: []` — بلا حضورٍ أصلاً. وذاك يصلح لأجرٍ
+  شهريٍّ يُستحقّ بالعقد، ولا يصلح لأجرٍ يوميٍّ يُستحقّ بالعمل: فمن
+  أجرُه يوميٌّ ولا حضورَ له أجرُه صفر، فيخرج قيدُ راتبٍ بصفرٍ فيُردّ.
+  فأخفق الفحصُ يومَ صار أوّلُ العاملين يوميَّ الأجر — وهو إخفاقٌ في
+  الفرض لا في الشِّفْر.
+
+  والمسيَّرُ لا يُرحَّل بلا حضور، فيُعطى ما يُعطاه في الواقع.
+*/
+const MONTH = "2026-09";
+const workedMonth = Array.from({ length: 30 }, (_, i) => {
+  const day = String(i + 1).padStart(2, "0");
+  return {
+    id: `${MONTH}-${day}`,
+    employeeId: employee.id,
+    date: `${MONTH}-${day}`,
+    status: "حاضر",
+    hours: settings.dailyHours,
+    overtimeHours: 0,
+    restDayHours: 0,
+    holidayHours: 0,
+    note: "",
+  };
+});
 
 console.log("\nالخصم يُنقص الصافي ولا يُنقص الراتب:\n");
 
-const plain = computePayrollLine({ employee, attendance: [], settings });
+const plain = computePayrollLine({ employee, attendance: workedMonth, settings });
+/* رُبعُ الصافي، ولا تقلّ عن دينار — فيبقى للقيد مبلغٌ يُقبل */
+const ADVANCE = Math.max(1, Number((plain.net / 4).toFixed(3)));
 const withAdvance = computePayrollLine({
   employee,
-  attendance: [],
+  attendance: workedMonth,
   settings,
   advanceDeduction: ADVANCE,
 });
@@ -78,7 +117,12 @@ check(
 check(
   "وهو غير «الخصومات الأخرى»",
   withAdvance.otherDeductions === 0 &&
-    computePayrollLine({ employee, attendance: [], settings, otherDeductions: 5 })
+    computePayrollLine({
+      employee,
+      attendance: workedMonth,
+      settings,
+      otherDeductions: 5,
+    })
       .advanceDeduction === 0
 );
 

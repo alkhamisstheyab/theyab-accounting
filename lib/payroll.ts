@@ -92,6 +92,8 @@ export type Employee = {
   workPermitExpiry: string;
   residencyExpiry: string;
   notes: string;
+  /** تقييماتُ عمله — تُكتب في ملفّه ولا تُحذف، فتاريخُه يُقرأ */
+  reviews?: WorkReviewRow[];
 };
 
 /**
@@ -232,6 +234,16 @@ export const ATTENDANCE_STATUSES = [
 
 export type AttendanceStatus = (typeof ATTENDANCE_STATUSES)[number];
 
+/**
+ * تقييماتُ عمله — يوميّةً أو أسبوعيّةً أو شهريّة.
+ *
+ * وموضعُها الموظَّفُ نفسُه: فالتقييمُ له لا لشهر، وتاريخُه يُقرأ من
+ * أوّله إلى آخره في ملفٍّ واحد. ولو كان في مجموعةٍ مستقلّةٍ لاحتاج
+ * جدولاً ثالثاً بلا حاجة — والصفُّ ذو وجهين، فالحقلُ ينزل في jsonb.
+ */
+import type { WorkReview as WorkReviewRow } from "./reviews";
+export type { WorkReview } from "./reviews";
+
 export type AttendanceDay = {
   id: string;
   employeeId: string;
@@ -278,6 +290,39 @@ export type AttendanceDay = {
   penaltyApproved?: boolean;
   penaltyApprovedBy?: string;
   penaltyApprovedAt?: string;
+
+  /**
+   * مكافأةٌ على إحسانٍ في هذا اليوم — بالدينار.
+   *
+   * وكان الاستثناءُ للغياب وحده: يُثبت على المقصّر جزاؤه، ولا يُثبت
+   * للمحسن شيء. فصار العاملُ يَعرف أنّ تقصيرَه يُحسَب ولا يَعرف أنّ
+   * إحسانَه يُحسَب — وتلك رقابةٌ بنصف وجه.
+   *
+   * وهي مقابلُ الجزاء بعينه، فلها حرزُه: تُثبت في يومها لا في آخر
+   * الشهر — فما نُسي سببُه لم يُدافَع عنه ولم يُشكر عليه — ولها سببٌ
+   * مكتوب، ولا تدخل المسيَّر حتى تُقرَّ.
+   *
+   * وتختلف عن «الإضافي»: ذاك أجرُ ساعاتٍ عُمِلت بحساب، وهذه تقديرٌ
+   * على إحسانٍ لا يُقاس بالساعة.
+   */
+  bonus?: number;
+
+  /** سببُها — ولا تُحفظ مكافأةٌ بغيره، كالجزاء */
+  bonusReason?: string;
+
+  /** من أثبتها — المهندسُ المشرفُ غالباً، فهو من يرى الموقع */
+  bonusBy?: string;
+
+  /**
+   * أمرُ صاحب الشركة.
+   *
+   * «ولا تحوَّل إلى مكافأةٍ إلا بأمرٍ منّي» — وهذا نصُّ قراره. فالمهندسُ
+   * يرى الإحسانَ ولا يملك المال، والإدارةُ تملكه. فلا يُزاد في أجر
+   * رجلٍ إلا بتوقيعين، كما لا يُخصم منه إلا بتوقيعين.
+   */
+  bonusApproved?: boolean;
+  bonusApprovedBy?: string;
+  bonusApprovedAt?: string;
   /** ساعات عمل في عطلة رسمية */
   holidayHours: number;
   note: string;
@@ -380,6 +425,18 @@ export type PayrollLine = {
 
   /** تفصيل الجزاءات — يومها ومبلغها وسببها، ليُطبع في كشف الراتب */
   penaltyLines: { date: string; amount: number; reason: string }[];
+
+  /**
+   * المكافآتُ المأمورُ بها — تُزاد على الأجر.
+   *
+   * ومستقلّةٌ عن «البدلات» عمداً: البدلُ حقٌّ ثابتٌ في العقد يُصرف كلَّ
+   * شهر، والمكافأةُ تقديرٌ على إحسانٍ في يومٍ بعينه. ولو خُلطا لظنّ
+   * العاملُ المكافأةَ حقّاً دائماً، فيُطالب بها شهراً لم يُحسن فيه.
+   */
+  bonuses: number;
+
+  /** تفصيلُها — يومها ومبلغها وسببها، ليُقرأ في كشف الراتب فيُشكر عليه */
+  bonusLines: { date: string; amount: number; reason: string }[];
 
   /**
    * ما خُصم من الراتب سداداً لسلفةٍ سابقة.
@@ -505,6 +562,8 @@ export function computePayrollLine(input: {
   let holidayHours = 0;
   let penalties = 0;
   const penaltyLines: { date: string; amount: number; reason: string }[] = [];
+  let bonuses = 0;
+  const bonusLines: { date: string; amount: number; reason: string }[] = [];
 
   // ترتيب الأيام المرضية يحدّد شريحتها، فالحساب يتبع التسلسل الزمني
   const sorted = [...attendance].sort((a, b) => a.date.localeCompare(b.date));
@@ -522,6 +581,21 @@ export function computePayrollLine(input: {
         date: record.date,
         amount: penalty,
         reason: record.penaltyReason ?? "",
+      });
+    }
+
+    /*
+      والمكافأةُ المأمورُ بها وحدَها تُزاد. والمُثبتةُ التي لم يأمر بها
+      صاحبُ الشركة تبقى معلّقةً ولا تمسّ أجراً — ونصُّ قراره: «ولا
+      تحوَّل إلى مكافأةٍ إلا بأمرٍ منّي».
+    */
+    const bonus = round3(record.bonus ?? 0);
+    if (bonus > 0 && record.bonusApproved) {
+      bonuses = round3(bonuses + bonus);
+      bonusLines.push({
+        date: record.date,
+        amount: bonus,
+        reason: record.bonusReason ?? "",
       });
     }
 
@@ -579,12 +653,20 @@ export function computePayrollLine(input: {
   const holidayPay = round3(holidayHours * hour * settings.holidayRate);
 
   const gross = round3(
-    basic + allowances + overtimePay + restDayPay + holidayPay
+    basic + allowances + overtimePay + restDayPay + holidayPay + bonuses
   );
 
+  /*
+    ووعاءُ التأمين لا يَشمل المكافأة.
+    فالتأمينُ على الأجر المتعاقَد عليه، والمكافأةُ تقديرٌ على إحسانٍ
+    في يومٍ بعينه. ولو دخلت الوعاءَ لزاد خصمُ التأمين من أجر من
+    أُحسن إليه — فتصير المكافأةُ عقوبةً على الإحسان، ويخرج منها
+    جزءٌ من يد صاحبها.
+  */
+  const insuranceBase = round3(gross - bonuses);
   const insurable = settings.socialInsuranceCeiling
-    ? Math.min(gross, settings.socialInsuranceCeiling)
-    : gross;
+    ? Math.min(insuranceBase, settings.socialInsuranceCeiling)
+    : insuranceBase;
   /* الاشتراك لا الجنسية: صاحب المكافأة كويتيٌّ ولا يُخصم منه */
   const subscribed = employee.insured ?? employee.isKuwaiti;
   const socialInsurance =
@@ -648,6 +730,8 @@ export function computePayrollLine(input: {
     advanceDeduction,
     penalties,
     penaltyLines,
+    bonuses,
+    bonusLines,
     socialInsurance,
     totalDeductions,
     net: round3(gross - totalDeductions),

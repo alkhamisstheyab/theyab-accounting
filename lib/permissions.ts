@@ -390,6 +390,7 @@ export const PAGE_PERMISSION: Record<string, Permission> = {
   "البيانات الأساسية": "chart.manage",
   الموظفون: "employees.view",
   "الحضور والانصراف": "attendance.manage",
+  "تقييم العمل": "attendance.manage",
   "مسيّر الرواتب": "payroll.run",
   // شاشة النقل إلى الخادم: يفتحها من يملك الإعدادات، لا كل من يُدخل حركة
   "مطابقة الخادم": "settings.manage",

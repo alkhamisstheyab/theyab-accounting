@@ -278,6 +278,16 @@ import {
   type ClientStatement,
 } from "@/lib/receivables";
 import {
+  REVIEW_CRITERIA,
+  REVIEW_PERIODS,
+  REVIEW_TOTAL,
+  criterionValue,
+  employeeReviews,
+  reviewWindowFor,
+  type ReviewPeriod,
+  type WorkReview,
+} from "@/lib/reviews";
+import {
   SPECIALTIES,
   partiesBySpecialty,
   partyContracts,
@@ -411,6 +421,7 @@ const PAGES = [
   "استلام المواد",
   "الموظفون",
   "الحضور والانصراف",
+  "تقييم العمل",
   "مسيّر الرواتب",
   "دليل الحسابات",
   "البيانات الأساسية",
@@ -480,7 +491,12 @@ const PAGE_GROUPS: { group: string; pages: string[] }[] = [
   },
   {
     group: "الموظفون والرواتب",
-    pages: ["الموظفون", "الحضور والانصراف", "مسيّر الرواتب"],
+    pages: [
+      "الموظفون",
+      "الحضور والانصراف",
+      "تقييم العمل",
+      "مسيّر الرواتب",
+    ],
   },
   {
     group: "الإعداد والصيانة",
@@ -2336,6 +2352,110 @@ export default function HomeV2() {
               canManage={allow("quotations.manage")}
               currentUserName={currentUser.name}
               onLog={log}
+            />
+          )}
+
+          {page === "تقييم العمل" && (
+            <ReviewsPage
+              employees={employees}
+              today={todayISO()}
+              canReview={allow("attendance.manage")}
+              /* والأمرُ بالصرف لمن يملك المال: صاحبُ الشركة والمديرُ العام */
+              canOrder={allow("payroll.run")}
+              reviewerName={currentUser?.name ?? ""}
+              onSaveReview={(employeeId, review) => {
+                setEmployees((prev) =>
+                  prev.map((e) =>
+                    e.id === employeeId
+                      ? { ...e, reviews: [...(e.reviews ?? []), review] }
+                      : e
+                  )
+                );
+                const who = employees.find((e) => e.id === employeeId);
+                log(
+                  "إنشاء",
+                  "بيانات النظام",
+                  `تقييم ${who?.name ?? "?"} — ${review.period} ${review.to}` +
+                    (review.proposedBonus
+                      ? ` · مكافأةٌ مقترحة ${fmt(review.proposedBonus)}`
+                      : "")
+                );
+              }}
+              onOrderBonus={(employeeId, reviewId, amount) => {
+                const who = employees.find((e) => e.id === employeeId);
+                const review = (who?.reviews ?? []).find((r) => r.id === reviewId);
+                if (!who || !review) return;
+
+                /*
+                  والأمرُ يُحوّل الاقتراحَ مالاً: يُختم التقييمُ باسم
+                  الآمرِ ووقته، وتنزل مكافأةٌ **مُقرَّةٌ** في يوم
+                  التقييم فتدخل المسيَّر. وطريقُ المال واحد — الحضورُ —
+                  فلا يُصرف مرّتين من بابين.
+                */
+                const day = review.to || review.from || todayISO();
+                setEmployees((prev) =>
+                  prev.map((e) =>
+                    e.id !== employeeId
+                      ? e
+                      : {
+                          ...e,
+                          reviews: (e.reviews ?? []).map((r) =>
+                            r.id !== reviewId
+                              ? r
+                              : {
+                                  ...r,
+                                  orderedBy: currentUser?.name ?? "",
+                                  orderedAt: new Date().toISOString(),
+                                  orderedAmount: amount,
+                                  bonusDate: day,
+                                }
+                          ),
+                        }
+                  )
+                );
+
+                const existing = attendance.find(
+                  (a) => a.employeeId === employeeId && a.date === day
+                );
+                const stamp = {
+                  bonus: amount,
+                  bonusReason: `مكافأةُ تقييم ${review.period} ${review.to || review.from}`,
+                  bonusBy: review.by,
+                  bonusApproved: true,
+                  bonusApprovedBy: currentUser?.name ?? "",
+                  bonusApprovedAt: new Date().toISOString(),
+                };
+                if (existing) {
+                  setAttendance((prev) =>
+                    prev.map((a) => (a.id === existing.id ? { ...a, ...stamp } : a))
+                  );
+                } else {
+                  setAttendance((prev) => [
+                    ...prev,
+                    {
+                      id: newId(),
+                      employeeId,
+                      date: day,
+                      status: "حاضر",
+                      hours: payrollSettings.dailyHours,
+                      overtimeHours: 0,
+                      restDayHours: 0,
+                      holidayHours: 0,
+                      note: "",
+                      ...stamp,
+                    },
+                  ]);
+                }
+
+                log(
+                  "اعتماد",
+                  "بيانات النظام",
+                  `أمرٌ بمكافأة ${fmt(amount)} د.ك لـ${who.name} — تقييم ${review.to || review.from}`
+                );
+                window.alert(
+                  `أُمر بالمكافأة ${fmt(amount)} د.ك، ونزلت في ${day} فتدخل المسيَّر.`
+                );
+              }}
             />
           )}
 
@@ -7071,6 +7191,434 @@ function ClientStatementSheet({
  * وعزلُهم عن العملاء مقصود: فالاستعلامُ عن مقاولٍ لا يُخالطه عميل،
  * والعقدُ معه صادرٌ لا وارد.
  */
+/**
+ * تقييمُ عمل العمالة: من أحسن فيُكافأ، ومن تقاعس فيُجازى.
+ *
+ * ومعاييرُه خمسةٌ نصَّ عليها صاحبُ الشركة: الحضورُ والغياب، والعملُ
+ * المنجَز، والنشاطُ في الموقع، وطاعةُ المهندس، والأوامرُ المسندةُ إليه.
+ *
+ * **ولا تتحوّل إلى مكافأةٍ إلا بأمره.** فالتقييمُ يقترح، والأمرُ وحدَه
+ * يُحوّل الاقتراحَ مالاً — ومن قيَّم لم يَصرِف، ومن صرف لم يُقيّم.
+ */
+function ReviewsPage({
+  employees,
+  today,
+  canReview,
+  canOrder,
+  reviewerName,
+  onSaveReview,
+  onOrderBonus,
+}: {
+  employees: Employee[];
+  today: string;
+  canReview: boolean;
+  /** من يملك الأمرَ بالصرف — صاحبُ الشركة والمديرُ العام */
+  canOrder: boolean;
+  reviewerName: string;
+  onSaveReview: (employeeId: string, review: WorkReview) => void;
+  onOrderBonus: (employeeId: string, reviewId: string, amount: number) => void;
+}) {
+  const [period, setPeriod] = useState<ReviewPeriod>("أسبوعيّ");
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<Record<string, number>>({});
+  const [note, setNote] = useState("");
+  const [proposed, setProposed] = useState("");
+
+  const active = employees.filter((e) => e.active !== false);
+  const rows = active.map((e) =>
+    employeeReviews(e.id, e.name, e.reviews ?? [])
+  );
+  const ranked = [...rows].sort((a, b) => b.average - a.average);
+
+  const awaiting = rows.reduce((n, r) => n + r.awaiting, 0);
+  const awaitingAmount = round3(rows.reduce((n, r) => n + r.awaitingAmount, 0));
+  const slackers = rows.filter(
+    (r) => r.reviews.length > 0 && r.reviews[0].percent < 45
+  );
+
+  const window_ = reviewWindowFor(period, today);
+
+  const save = (employee: Employee) => {
+    const scores = REVIEW_CRITERIA.map((c) => draft[c.key] ?? 0);
+    if (scores.every((n) => n === 0)) {
+      window.alert("ضع الدرجات — وتقييمٌ بلا درجةٍ ليس تقييماً");
+      return;
+    }
+    const review: WorkReview = {
+      id: newId(),
+      period,
+      from: window_.from,
+      to: window_.to,
+      attendance: draft.attendance ?? 0,
+      output: draft.output ?? 0,
+      activity: draft.activity ?? 0,
+      obedience: draft.obedience ?? 0,
+      tasks: draft.tasks ?? 0,
+      note: note.trim(),
+      by: reviewerName,
+      at: new Date().toISOString(),
+      proposedBonus: Number(proposed) > 0 ? round3(Number(proposed)) : undefined,
+    };
+    onSaveReview(employee.id, review);
+    setDraft({});
+    setNote("");
+    setProposed("");
+    setOpenId(null);
+  };
+
+  return (
+    <>
+      <Panel
+        title="تقييم العمل"
+        subtitle="الحضور · العمل المنجَز · النشاط · طاعة المهندس · الأوامر المسندة"
+      >
+        <div className="mb-4 flex flex-wrap items-center gap-3">
+          <div>
+            <p className="mb-1 text-sm font-medium">المدّة</p>
+            <div className="flex gap-2">
+              {REVIEW_PERIODS.map((name) => (
+                <button
+                  key={name}
+                  onClick={() => setPeriod(name)}
+                  className={`rounded-lg px-4 py-2 text-sm font-bold ${
+                    period === name ? "bg-blue-600 text-white" : "bg-slate-100"
+                  }`}
+                >
+                  {name}
+                </button>
+              ))}
+            </div>
+          </div>
+          <p className="self-end pb-2 text-sm text-slate-600">
+            {window_.from === window_.to
+              ? window_.from
+              : `${window_.from} → ${window_.to}`}
+          </p>
+        </div>
+
+        {awaiting > 0 && (
+          <Banner tone="warn">
+            <b>{awaiting}</b> مكافأةً مقترحةً بمجموع{" "}
+            <b>{fmt(awaitingAmount)} د.ك</b> تنتظر أمرك.{" "}
+            {canOrder
+              ? "والأمرُ وحدَه يُحوّلها مالاً — وتنزل في يوم التقييم فتدخل المسيّر."
+              : "ولا يأمر بها إلا صاحبُ الشركة أو المديرُ العام."}
+          </Banner>
+        )}
+
+        {slackers.length > 0 && (
+          <Banner tone="error">
+            <b>{slackers.length}</b>{" "}
+            {slackers.length === 1 ? "عاملٌ" : "عمّالٍ"} آخرُ تقييمه «متقاعس»:{" "}
+            {slackers.map((r) => r.name).join("، ")}. ويُنظر في أمره — والجزاءُ
+            في شاشة الحضور، يُثبت في يوم المخالفة لا في آخر الشهر.
+          </Banner>
+        )}
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b-2 border-slate-300 text-right">
+                <Th>العامل</Th>
+                <Th>المهنة</Th>
+                <Th>آخرُ تقييم</Th>
+                <Th>حُكمُه</Th>
+                <Th>متوسّطُه</Th>
+                <Th>عددُ تقييماته</Th>
+                <Th>مكافآتٌ تنتظر</Th>
+                <Th>ما أُمر به</Th>
+                <Th>{""}</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {ranked.map((row) => {
+                const employee = active.find((e) => e.id === row.employeeId)!;
+                const last = row.reviews[0];
+                return (
+                  <Fragment key={row.employeeId}>
+                    <tr className="border-b border-slate-100">
+                      <Td>
+                        <b>{row.name}</b>
+                      </Td>
+                      <Td>{employee.jobTitle || "—"}</Td>
+                      <Td className="tabular-nums">
+                        {last ? `${last.score} من ${REVIEW_TOTAL}` : "—"}
+                        {last && (
+                          <span className="block text-xs text-slate-500">
+                            {last.review.to || last.review.from} ·{" "}
+                            {last.review.period}
+                          </span>
+                        )}
+                      </Td>
+                      <Td>
+                        {last ? (
+                          <span
+                            className={`rounded px-2 py-0.5 text-xs font-bold ${
+                              last.percent >= 75
+                                ? "bg-green-100 text-green-800"
+                                : last.percent >= 45
+                                ? "bg-slate-100"
+                                : "bg-red-100 text-red-800"
+                            }`}
+                          >
+                            {last.verdict}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400">لم يُقيَّم</span>
+                        )}
+                      </Td>
+                      <Td className="tabular-nums">
+                        {row.reviews.length > 0 ? `${fmt(row.average)}%` : "—"}
+                      </Td>
+                      <Td className="tabular-nums">{row.reviews.length}</Td>
+                      <Td className="tabular-nums">
+                        {row.awaiting > 0 ? (
+                          <b className="text-amber-800">
+                            {fmt(row.awaitingAmount)}
+                          </b>
+                        ) : (
+                          "—"
+                        )}
+                      </Td>
+                      <Td className="tabular-nums">
+                        {row.orderedAmount > 0 ? fmt(row.orderedAmount) : "—"}
+                      </Td>
+                      <Td>
+                        <span className="flex flex-wrap gap-2">
+                          <button
+                            onClick={() =>
+                              setOpenId(
+                                openId === row.employeeId ? null : row.employeeId
+                              )
+                            }
+                            className="rounded bg-slate-100 px-3 py-1 text-xs font-bold"
+                          >
+                            {openId === row.employeeId ? "إخفاء" : "تاريخُه"}
+                          </button>
+                          {canReview && (
+                            <button
+                              onClick={() => {
+                                setOpenId(row.employeeId);
+                                setDraft({});
+                                setNote("");
+                                setProposed("");
+                              }}
+                              className="rounded bg-slate-900 px-3 py-1 text-xs font-bold text-white"
+                            >
+                              قيِّمه
+                            </button>
+                          )}
+                        </span>
+                      </Td>
+                    </tr>
+
+                    {openId === row.employeeId && (
+                      <tr className="bg-slate-50">
+                        <td colSpan={9} className="px-3 py-4">
+                          {/* ---- نموذجُ التقييم ---- */}
+                          {canReview && (
+                            <div className="mb-4 rounded-xl border border-slate-300 bg-white p-4">
+                              <p className="mb-3 font-bold">
+                                تقييمٌ {period} — {window_.from}
+                                {window_.to !== window_.from && ` → ${window_.to}`}
+                              </p>
+
+                              <div className="mb-3 grid gap-3 md:grid-cols-5">
+                                {REVIEW_CRITERIA.map((c) => (
+                                  <div key={c.key}>
+                                    <p className="mb-1 text-xs font-medium">
+                                      {c.label}
+                                    </p>
+                                    <div className="flex gap-1">
+                                      {[1, 2, 3, 4, 5].map((n) => (
+                                        <button
+                                          key={n}
+                                          onClick={() =>
+                                            setDraft({ ...draft, [c.key]: n })
+                                          }
+                                          className={`h-8 w-8 rounded text-sm font-bold ${
+                                            (draft[c.key] ?? 0) >= n
+                                              ? "bg-blue-600 text-white"
+                                              : "bg-slate-100"
+                                          }`}
+                                        >
+                                          {n}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+
+                              <div className="mb-3 grid gap-3 md:grid-cols-2">
+                                <div>
+                                  <p className="mb-1 text-sm font-medium">
+                                    ملاحظة
+                                  </p>
+                                  <input
+                                    value={note}
+                                    onChange={(e) => setNote(e.target.value)}
+                                    placeholder="ما لوحظ عليه أو له"
+                                    className="w-full rounded border border-slate-300 px-3 py-2"
+                                  />
+                                </div>
+                                <div>
+                                  <p className="mb-1 text-sm font-medium">
+                                    مكافأةٌ مقترحة (د.ك)
+                                  </p>
+                                  <input
+                                    type="number"
+                                    step="0.001"
+                                    value={proposed}
+                                    onChange={(e) => setProposed(e.target.value)}
+                                    placeholder="تُكتب ولا تُصرف حتى يُؤمَر بها"
+                                    className="w-full rounded border border-slate-300 px-3 py-2"
+                                  />
+                                </div>
+                              </div>
+
+                              <button
+                                onClick={() => save(employee)}
+                                className="rounded-lg bg-slate-900 px-6 py-2 font-bold text-white"
+                              >
+                                احفظ التقييم
+                              </button>
+                            </div>
+                          )}
+
+                          {/* ---- تاريخُه ---- */}
+                          {row.reviews.length === 0 ? (
+                            <p className="text-sm text-slate-600">
+                              لم يُقيَّم بعد.
+                            </p>
+                          ) : (
+                            <table className="w-full text-sm">
+                              <thead>
+                                <tr className="border-b border-slate-300 text-right">
+                                  <Th>المدّة</Th>
+                                  {REVIEW_CRITERIA.map((c) => (
+                                    <Th key={c.key}>{c.label}</Th>
+                                  ))}
+                                  <Th>المجموع</Th>
+                                  <Th>الحُكم</Th>
+                                  <Th>المقيِّم</Th>
+                                  <Th>المكافأة</Th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {row.reviews.map((state) => (
+                                  <tr
+                                    key={state.review.id}
+                                    className="border-b border-slate-100"
+                                  >
+                                    <Td>
+                                      {state.review.to || state.review.from}
+                                      <span className="block text-xs text-slate-500">
+                                        {state.review.period}
+                                      </span>
+                                    </Td>
+                                    {REVIEW_CRITERIA.map((c) => (
+                                      <Td key={c.key} className="tabular-nums">
+                                        {criterionValue(state.review, c.key)}
+                                      </Td>
+                                    ))}
+                                    <Td className="tabular-nums font-bold">
+                                      {state.score}
+                                    </Td>
+                                    <Td>{state.verdict}</Td>
+                                    <Td className="text-xs">{state.review.by}</Td>
+                                    <Td>
+                                      {state.ordered ? (
+                                        <span className="text-green-700">
+                                          أُمر بـ
+                                          {fmt(
+                                            state.review.orderedAmount ??
+                                              state.review.proposedBonus ??
+                                              0
+                                          )}
+                                          <span className="block text-xs text-slate-500">
+                                            {state.review.orderedBy}
+                                          </span>
+                                        </span>
+                                      ) : state.awaitingOrder ? (
+                                        <span className="flex flex-col gap-1">
+                                          <span className="text-amber-800">
+                                            مقترَحٌ {fmt(state.review.proposedBonus ?? 0)}
+                                          </span>
+                                          {canOrder && (
+                                            <button
+                                              onClick={() => {
+                                                const amount = window.prompt(
+                                                  "المبلغ المأمور به — والأمرُ لك ولو خالف المقترَح:",
+                                                  String(
+                                                    state.review.proposedBonus ?? 0
+                                                  )
+                                                );
+                                                if (amount == null) return;
+                                                const value = round3(
+                                                  Number(amount) || 0
+                                                );
+                                                if (value <= 0) {
+                                                  window.alert("مبلغٌ غيرُ صحيح");
+                                                  return;
+                                                }
+                                                onOrderBonus(
+                                                  row.employeeId,
+                                                  state.review.id,
+                                                  value
+                                                );
+                                              }}
+                                              className="rounded bg-emerald-700 px-3 py-1 text-xs font-bold text-white"
+                                            >
+                                              آمر بها
+                                            </button>
+                                          )}
+                                        </span>
+                                      ) : (
+                                        "—"
+                                      )}
+                                    </Td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          )}
+
+                          {row.reviews.some((s) => s.review.note) && (
+                            <div className="mt-3 space-y-1 text-sm">
+                              {row.reviews
+                                .filter((s) => s.review.note)
+                                .map((s) => (
+                                  <p key={s.review.id}>
+                                    <b>{s.review.to || s.review.from}:</b>{" "}
+                                    {s.review.note}
+                                  </p>
+                                ))}
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        <Banner tone="ok">
+          <b>التقييمُ يقترح، والأمرُ وحدَه يُحوّله مالاً</b> — «ولا تحوَّل إلى
+          مكافأةٍ إلا بأمرٍ منّي». فمن قيَّم لم يَصرِف، ومن صرف لم يُقيّم. وما
+          أُمر به ينزل مكافأةً مُقرَّةً في يوم التقييم، فتدخل المسيَّر — ولا
+          تدخل وعاءَ التأمين، فمكافأةٌ تُزيد خصمَ التأمين عقوبةٌ على الإحسان.
+          والأوزانُ متساوية: فمن رفع وزنَ «طاعة المهندس» على «العمل المنجَز»
+          قيَّم الطاعةَ لا العمل.
+        </Banner>
+      </Panel>
+    </>
+  );
+}
+
 function PartiesPage({
   parties,
   contractors,
@@ -23967,6 +24515,12 @@ function AttendancePage({
     ويُثبت في يومه لا في آخر الشهر — من أُثبت عليه بعد ثلاثين يوماً نسي
     الواقعة وجادل فيها، ومن أُثبت عليه في حينه عَلِم.
   */
+  const [bonus, setBonus] = useState({
+    employeeId: "",
+    date: today,
+    amount: "",
+    reason: "",
+  });
   const [penalty, setPenalty] = useState({
     employeeId: "",
     date: today,
@@ -24064,6 +24618,126 @@ function AttendancePage({
   };
 
   /** الإدارة تُقرّ المثبَت، فيدخل المسيّر */
+  /*
+    المكافأةُ مقابلُ الجزاء، ولها حرزُه.
+
+    وكان الاستثناءُ للغياب وحده: يُثبت على المقصّر جزاؤه ولا يُثبت
+    للمحسن شيء — فيعرف العاملُ أنّ تقصيرَه يُحسَب ولا يعرف أنّ إحسانَه
+    يُحسَب، وتلك رقابةٌ بنصف وجه.
+
+    ولا تدخل المسيَّر حتى يأمر بها صاحبُ الشركة: «ولا تحوَّل إلى
+    مكافأةٍ إلا بأمرٍ منّي».
+  */
+  const addBonus = () => {
+    const employee = active.find((e) => e.id === bonus.employeeId);
+    if (!employee) {
+      window.alert("اختر الموظف");
+      return;
+    }
+    const amount = round3(Number(bonus.amount) || 0);
+    if (amount <= 0) {
+      window.alert("اكتب مبلغ المكافأة");
+      return;
+    }
+    const reason = bonus.reason.trim();
+    if (reason.length < 4) {
+      window.alert("اكتب السبب — ولا تُحفظ مكافأةٌ بغيره، كالجزاء");
+      return;
+    }
+    if (!bonus.date) {
+      window.alert("اختر يوم الإحسان");
+      return;
+    }
+
+    /*
+      ومن يملك الأمرَ يأمر في حينه، ومن لا يملكه يُثبتها معلّقة.
+      فالمهندسُ يرى الإحسانَ ولا يملك المال، والإدارةُ تملكه.
+    */
+    const settled = canApprovePenalty;
+    const existing = attendance.find(
+      (a) => a.employeeId === employee.id && a.date === bonus.date
+    );
+
+    const stamp = {
+      bonus: amount,
+      bonusReason: reason,
+      bonusBy: currentUserName,
+      bonusApproved: settled ? true : undefined,
+      bonusApprovedBy: settled ? currentUserName : undefined,
+      bonusApprovedAt: settled ? new Date().toISOString() : undefined,
+    };
+
+    if (existing) {
+      setAttendance((prev) =>
+        prev.map((a) => (a.id === existing.id ? { ...a, ...stamp } : a))
+      );
+    } else {
+      setAttendance((prev) => [
+        ...prev,
+        {
+          id: newId(),
+          employeeId: employee.id,
+          date: bonus.date,
+          status: "حاضر",
+          hours: settings.dailyHours,
+          overtimeHours: 0,
+          restDayHours: 0,
+          holidayHours: 0,
+          note: "",
+          ...stamp,
+        },
+      ]);
+    }
+
+    onLog(
+      "تعديل",
+      "بيانات النظام",
+      `مكافأة ${fmt(amount)} د.ك لـ${employee.name} في ${bonus.date}` +
+        (settled ? " — مأمورٌ بها" : " — تنتظر أمر الإدارة"),
+      { after: reason }
+    );
+    setBonus({ employeeId: "", date: today, amount: "", reason: "" });
+  };
+
+  const approveBonus = (row: AttendanceDay) => {
+    setAttendance((prev) =>
+      prev.map((a) =>
+        a.id === row.id
+          ? {
+              ...a,
+              bonusApproved: true,
+              bonusApprovedBy: currentUserName,
+              bonusApprovedAt: new Date().toISOString(),
+            }
+          : a
+      )
+    );
+    onLog(
+      "اعتماد",
+      "بيانات النظام",
+      `أمرٌ بمكافأة ${fmt(row.bonus ?? 0)} د.ك في ${row.date}`
+    );
+  };
+
+  const withdrawBonus = (row: AttendanceDay) => {
+    setAttendance((prev) =>
+      prev.map((a) =>
+        a.id === row.id
+          ? {
+              ...a,
+              bonus: undefined,
+              bonusReason: undefined,
+              bonusBy: undefined,
+              bonusApproved: undefined,
+              bonusApprovedBy: undefined,
+              bonusApprovedAt: undefined,
+            }
+          : a
+      )
+    );
+    onLog("تعديل", "بيانات النظام", `سُحبت مكافأةُ ${row.date}`);
+  };
+
   const approvePenalty = (row: AttendanceDay) => {
     setAttendance((prev) =>
       prev.map((a) =>
@@ -24518,6 +25192,141 @@ function AttendancePage({
               />
             </Field>
           </div>
+        </div>
+
+        {/* ---------------- المكافآت ---------------- */}
+        <div className="mb-5 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+          <p className="mb-1 font-bold">مكافأة على إحسان</p>
+          <p className="mb-3 text-sm text-slate-600">
+            زيادةٌ على الأجر تقديراً لإحسانٍ في يومٍ بعينه — وهي غير
+            «الإضافي»، فذاك أجرُ ساعاتٍ عُمِلت بحساب. تُثبت{" "}
+            <b>في يوم الإحسان</b>، ولها سببٌ مكتوب كالجزاء،{" "}
+            <b>ولا تدخل المسيّر حتى يأمر بها صاحبُ الشركة</b>.
+          </p>
+
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+            <Field label="الموظف">
+              <select
+                value={bonus.employeeId}
+                onChange={(e) => setBonus({ ...bonus, employeeId: e.target.value })}
+                className={inputClass}
+              >
+                <option value="">اختر الموظف</option>
+                {active.map((e) => (
+                  <option key={e.id} value={e.id}>
+                    {e.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+
+            <Field label="يوم الإحسان">
+              <input
+                type="date"
+                value={bonus.date}
+                onChange={(e) => setBonus({ ...bonus, date: e.target.value })}
+                className={inputClass}
+              />
+            </Field>
+
+            <Field
+              label="المبلغ (د.ك)"
+              hint="ولا حدَّ لها في القانون — والحدُّ تقديرُك"
+            >
+              <input
+                type="number"
+                step="0.001"
+                value={bonus.amount}
+                onChange={(e) => setBonus({ ...bonus, amount: e.target.value })}
+                className={inputClass}
+              />
+            </Field>
+
+            <div className="flex items-end pb-3">
+              <button
+                onClick={addBonus}
+                className="w-full rounded-lg bg-emerald-700 px-5 py-3 font-bold text-white"
+              >
+                {canApprovePenalty ? "أثبتها وآمر بها" : "أثبت المكافأة"}
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-3">
+            <Field label="السبب" hint="مطلوب — ولا تُحفظ مكافأةٌ بغيره">
+              <input
+                type="text"
+                value={bonus.reason}
+                onChange={(e) => setBonus({ ...bonus, reason: e.target.value })}
+                placeholder="أنجز صبَّ السقف في يومٍ واحد · بقي بعد الدوام لإغلاق الموقع"
+                className={inputClass}
+              />
+            </Field>
+          </div>
+
+          {/* ---- ما ينتظر أمر الإدارة ---- */}
+          {(() => {
+            const waiting = attendance.filter(
+              (a) => (a.bonus ?? 0) > 0 && !a.bonusApproved
+            );
+            if (waiting.length === 0) return null;
+            return (
+              <div className="mt-4 rounded-lg border border-emerald-300 bg-white p-3">
+                <p className="mb-2 font-bold">
+                  مكافآتٌ تنتظر أمرك — {waiting.length}
+                </p>
+                <table className="w-full text-sm">
+                  <tbody>
+                    {waiting.map((row) => (
+                      <tr key={row.id} className="border-b border-slate-100">
+                        <td className="px-2 py-1">
+                          {employees.find((e) => e.id === row.employeeId)?.name ??
+                            "—"}
+                        </td>
+                        <td className="px-2 py-1 tabular-nums">{row.date}</td>
+                        <td className="px-2 py-1 tabular-nums font-bold">
+                          {fmt(row.bonus ?? 0)}
+                        </td>
+                        <td className="px-2 py-1">{row.bonusReason}</td>
+                        <td className="px-2 py-1 text-xs text-slate-500">
+                          أثبتها {row.bonusBy}
+                        </td>
+                        <td className="px-2 py-1 text-left">
+                          {canApprovePenalty && (
+                            <span className="flex gap-2">
+                              <button
+                                onClick={() => approveBonus(row)}
+                                className="rounded bg-emerald-700 px-3 py-1 text-xs font-bold text-white"
+                              >
+                                آمر بها
+                              </button>
+                              <button
+                                onClick={() => {
+                                  if (
+                                    window.confirm(
+                                      `تُسحب مكافأةُ ${fmt(row.bonus ?? 0)} د.ك؟`
+                                    )
+                                  ) {
+                                    withdrawBonus(row);
+                                  }
+                                }}
+                                className="rounded bg-slate-100 px-3 py-1 text-xs font-bold"
+                              >
+                                اسحبها
+                              </button>
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <p className="mt-2 text-xs text-slate-600">
+                  وما لم يُؤمَر به لا يمسّ أجراً — كالحركة التي تنتظر اعتماداً.
+                </p>
+              </div>
+            );
+          })()}
         </div>
 
         {/* ---------------- الجزاءات ---------------- */}
