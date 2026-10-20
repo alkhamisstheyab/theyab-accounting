@@ -74,6 +74,8 @@ export const CHART_OF_ACCOUNTS: Account[] = [
   { code: "5120", name: "أجور المقاولين", parent: "5100", type: "مصروفات", nature: "مدين", level: 3, statement: "قائمة الدخل", active: true, postable: true },
   { code: "5130", name: "أجور العمالة المباشرة", parent: "5100", type: "مصروفات", nature: "مدين", level: 3, statement: "قائمة الدخل", active: true, postable: true },
   { code: "5140", name: "إيجار المعدات", parent: "5100", type: "مصروفات", nature: "مدين", level: 3, statement: "قائمة الدخل", active: true, postable: true },
+  /* أُضيف من الشاشة في دفاتر الشركة ثم نُقل إلى الدليل — ١٦ حركةً تُرحَّل إليه */
+  { code: "5145", name: "إيجار سيارات ومركبات", parent: "5100", type: "مصروفات", nature: "مدين", level: 3, statement: "قائمة الدخل", active: true, postable: true },
   { code: "5150", name: "نقليات", parent: "5100", type: "مصروفات", nature: "مدين", level: 3, statement: "قائمة الدخل", active: true, postable: true },
   { code: "5160", name: "بنزين وديزل", parent: "5100", type: "مصروفات", nature: "مدين", level: 3, statement: "قائمة الدخل", active: true, postable: true },
   { code: "5170", name: "مصروفات حكومية للمشاريع", parent: "5100", type: "مصروفات", nature: "مدين", level: 3, statement: "قائمة الدخل", active: true, postable: true },
@@ -145,6 +147,7 @@ export const ITEM_MAP: ItemDefinition[] = [
   { code: "EXP031", name: "سلف وعهد الموظفين", account: "1140" },
   { code: "EXP032", name: "تجهيز موقع", account: "5193" },
   { code: "EXP033", name: "أعمال مساحية", account: "5194" },
+  { code: "EXP035", name: "إيجار سيارة", account: "5145" },
 ];
 
 /** طريقة الدفع والحساب المقابل، من ورقة PostingMap */
