@@ -1283,6 +1283,8 @@ function migrateMovement(raw: unknown): Movement {
     dueId: str(m.dueId) || undefined,
     /* توزيع السداد على المستحقات — يُقرأ كما كُتب، والفارغ undefined */
     dueSplits: dueSplitsOf(m.dueSplits),
+    /* والفراغُ هو العادة، فلا يُحفظ لها اسم */
+    urgency: str(m.urgency) || undefined,
     source: m.source === "excel" ? "excel" : "app",
   };
 }

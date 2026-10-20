@@ -88,6 +88,19 @@ export const isDue = (m: Movement): boolean =>
 export const isDueSettlement = (m: Movement): boolean =>
   DUES_ACCOUNTS.includes(m.debitCode);
 
+/**
+ * درجاتُ الاستعجال، من الأشدّ.
+ *
+ * والفراغُ آخرُها: فما لم يُوسم فهو عادةٌ لا تأخير.
+ */
+export const URGENCY_LEVELS = ["عاجل", "مستعجل"] as const;
+
+/** رتبةُ الدرجة — بها يُرتَّب، والأصغرُ أشدّ */
+export const urgencyRank = (urgency: string | undefined): number => {
+  const at = (URGENCY_LEVELS as readonly string[]).indexOf((urgency ?? "").trim());
+  return at < 0 ? URGENCY_LEVELS.length : at;
+};
+
 export type DueRow = {
   movement: Movement;
   /** المبلغ المستحقّ كما أُقرّ */
@@ -101,6 +114,8 @@ export type DueRow = {
   settlements: Movement[];
   /** استحقاقٌ لم تُقرّه الإدارة بعد — لا يدخل الحسابات ولا يُسدَّد */
   pending: boolean;
+  /** درجةُ استعجال سداده — فراغٌ إن كان على العادة */
+  urgency: string;
 };
 
 export type DuePerson = {
@@ -111,6 +126,8 @@ export type DuePerson = {
   waiting: number;
   /** أقدم استحقاقٍ لم يُسدَّد، بالأيام */
   oldestDays: number;
+  /** أشدُّ درجةِ استعجالٍ فيما لم يُسدَّد له — فراغٌ إن كان كلُّه على العادة */
+  urgency: string;
   rows: DueRow[];
 };
 
@@ -186,17 +203,29 @@ export function buildDues(movements: Movement[], today: string) {
       ageDays: daysBetween(m.date, today),
       settlements,
       pending: !isApproved(m),
+      urgency: (m.urgency ?? "").trim(),
     });
   }
 
-  dues.sort((a, b) => (a.movement.date < b.movement.date ? -1 : 1));
+  dues.sort(
+    (a, b) =>
+      urgencyRank(a.urgency) - urgencyRank(b.urgency) ||
+      (a.movement.date < b.movement.date ? -1 : 1)
+  );
 
   const byPerson = new Map<string, DuePerson>();
   for (const row of dues) {
     const person = (row.movement.person || "").trim() || "بلا اسم";
     const entry =
       byPerson.get(person) ??
-      ({ person, owed: 0, waiting: 0, oldestDays: 0, rows: [] } as DuePerson);
+      ({
+        person,
+        owed: 0,
+        waiting: 0,
+        oldestDays: 0,
+        urgency: "",
+        rows: [],
+      } as DuePerson);
     entry.rows.push(row);
     if (row.pending) {
       entry.waiting = round3(entry.waiting + row.amount);
@@ -204,12 +233,21 @@ export function buildDues(movements: Movement[], today: string) {
       entry.owed = round3(entry.owed + row.remaining);
       if (row.remaining > 0) {
         entry.oldestDays = Math.max(entry.oldestDays, row.ageDays);
+        /*
+          وأشدُّ ما بقي لا أشدُّ ما كان: فمستحقٌّ وُسم «عاجل» ثم سُدّد
+          لا يُبقي صاحبَه عاجلاً — وإلّا بقي الوسمُ على من قُضي حقُّه.
+        */
+        if (urgencyRank(row.urgency) < urgencyRank(entry.urgency)) {
+          entry.urgency = row.urgency;
+        }
       }
     }
     byPerson.set(person, entry);
   }
 
-  const people = [...byPerson.values()].sort((a, b) => b.owed - a.owed);
+  const people = [...byPerson.values()].sort(
+    (a, b) => urgencyRank(a.urgency) - urgencyRank(b.urgency) || b.owed - a.owed
+  );
 
   return {
     dues,

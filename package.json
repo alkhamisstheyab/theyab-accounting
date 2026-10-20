@@ -77,6 +77,7 @@
     "check:subsidy": "node db/check-subsidy.mjs",
     "db:apply": "node db/apply.mjs",
     "check:apply": "node db/check-apply.mjs",
+    "check:review": "node db/check-review.mjs",
     "restore:confirmations": "node db/restore-confirmations.mjs"
   },
   "dependencies": {

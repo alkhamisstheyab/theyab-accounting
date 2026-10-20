@@ -214,6 +214,7 @@ import {
   type SyncStatus,
 } from "@/lib/sync";
 import {
+  URGENCY_LEVELS,
   DUE_KINDS,
   allocate,
   allocationProblem,
@@ -275,6 +276,13 @@ import {
   clientStatements,
   type ClientStatement,
 } from "@/lib/receivables";
+import {
+  REVIEW_RANGES,
+  reviewMovements,
+  reviewSummary,
+  reviewWindow,
+  type ReviewRange,
+} from "@/lib/review";
 import {
   SUBSIDY_MATERIALS,
   SUBSIDY_UNITS,
@@ -360,6 +368,7 @@ const PAGES = [
   "دليل العمل",
   "إدخال حركة",
   "جدول الحركات",
+  "مراجعة المدخلات",
   "القيود اليومية",
   "دفتر الأستاذ",
   "ميزان المراجعة",
@@ -412,6 +421,7 @@ const PAGE_GROUPS: { group: string; pages: string[] }[] = [
     pages: [
       "إدخال حركة",
       "جدول الحركات",
+      "مراجعة المدخلات",
       "القيود اليومية",
       "دفتر الأستاذ",
       "ميزان المراجعة",
@@ -2297,6 +2307,18 @@ export default function HomeV2() {
             />
           )}
 
+          {page === "مراجعة المدخلات" && (
+            <ReviewPage
+              movements={yearMovements}
+              audit={audit}
+              onOpen={(movement) => {
+                /* الضغطُ يفتح الحركةَ في جدولها، فيُصحَّح من موضعه */
+                setEditing(movement);
+                setPage("جدول الحركات");
+              }}
+            />
+          )}
+
           {page === "المدعوم" && (
             <SubsidyPage
               projects={projects}
@@ -2560,6 +2582,26 @@ export default function HomeV2() {
               today={todayISO()}
               canCreate={allow("dues.create")}
               canSettle={allow("movements.create")}
+              onSetUrgency={(movementId, urgency) => {
+                const row = movements.find((m) => m.id === movementId);
+                setMovements((prev) =>
+                  prev.map((m) =>
+                    m.id === movementId
+                      ? { ...m, urgency: urgency || undefined }
+                      : m
+                  )
+                );
+                /*
+                  ويُسجَّل: فوسمُ «عاجل» يُقدّم مستحقّاً على غيره في
+                  السداد، فيُعرف من قدّمه ومتى.
+                */
+                log(
+                  "تعديل",
+                  "حركة",
+                  `قيد ${row?.entryNo ?? "?"} — استعجال السداد`,
+                  { before: row?.urgency || "عادي", after: urgency || "عادي" }
+                );
+              }}
               payments={payments}
               onRegister={(draft) => {
                 if (!allow("dues.create")) return;
@@ -6840,6 +6882,253 @@ function ClientStatementSheet({
  * وتُعرض بوجهيها — كميّةً وقيمةً: فمن نظر في القيمة وحدها لم يعرف كم
  * بقي له من الأكياس، ومن نظر في الكميّة لم يعرف ما أضافته إلى العقد.
  */
+/**
+ * مراجعةُ المدخلات.
+ *
+ * وليست جدولَ حركاتٍ آخر: الجدولُ يُعرض بتاريخ الحركة، وهذه **بوقت
+ * إدخالها**. فمن أدخل اليومَ حركةَ شهرٍ ماضٍ لا تظهر له في «حركات
+ * اليوم» — وهي التي يجب أن تُراجَع اليوم.
+ *
+ * وتُعلَّم مواضعُ النظر ولا يُحكم عليها: «بلا مشروع» قد تكون إداريّةً
+ * صحيحة، وقد تكون مصروفَ قسيمةٍ نُسي مشروعُها فلا يدخل ربحيّتَها.
+ */
+function ReviewPage({
+  movements,
+  audit,
+  onOpen,
+}: {
+  movements: Movement[];
+  audit: AuditEntry[];
+  onOpen: (movement: Movement) => void;
+}) {
+  const [range, setRange] = useState<ReviewRange>("آخر ٧ أيام");
+  const [by, setBy] = useState<"وقت الإدخال" | "تاريخ الحركة">("وقت الإدخال");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [onlyFlagged, setOnlyFlagged] = useState(false);
+
+  const window_ = useMemo(
+    () => reviewWindow(range, new Date(), from, to),
+    [range, from, to]
+  );
+  const rows = useMemo(
+    () => reviewMovements(movements, audit, { window: window_, by }),
+    [movements, audit, window_, by]
+  );
+  const shown = onlyFlagged ? rows.filter((r) => r.flags.length > 0) : rows;
+  const summary = useMemo(() => reviewSummary(rows), [rows]);
+
+  return (
+    <Panel
+      title="مراجعة المدخلات"
+      subtitle="ما أُدخل في المدّة، ومن أدخله، وما يُستوقف فيه"
+    >
+      <div className="mb-4 flex flex-wrap items-end gap-3">
+        <div>
+          <p className="mb-1 text-sm font-medium">المدّة</p>
+          <div className="flex flex-wrap gap-2">
+            {REVIEW_RANGES.map((name) => (
+              <button
+                key={name}
+                onClick={() => setRange(name)}
+                className={`rounded-lg px-4 py-2 text-sm font-bold ${
+                  range === name
+                    ? "bg-blue-600 text-white"
+                    : "bg-slate-100 hover:bg-slate-200"
+                }`}
+              >
+                {name}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {range === "مدّة أختارها" && (
+          <div className="flex items-end gap-2">
+            <div>
+              <p className="mb-1 text-xs text-slate-500">من</p>
+              <input
+                type="date"
+                value={from}
+                onChange={(e) => setFrom(e.target.value)}
+                className="rounded border border-slate-300 px-2 py-2"
+              />
+            </div>
+            <div>
+              <p className="mb-1 text-xs text-slate-500">إلى</p>
+              <input
+                type="date"
+                value={to}
+                onChange={(e) => setTo(e.target.value)}
+                className="rounded border border-slate-300 px-2 py-2"
+              />
+            </div>
+          </div>
+        )}
+
+        <div>
+          <p className="mb-1 text-sm font-medium">تُقاس بـ</p>
+          <div className="flex gap-2">
+            {(["وقت الإدخال", "تاريخ الحركة"] as const).map((name) => (
+              <button
+                key={name}
+                onClick={() => setBy(name)}
+                className={`rounded-lg px-4 py-2 text-sm font-bold ${
+                  by === name
+                    ? "bg-slate-900 text-white"
+                    : "bg-slate-100 hover:bg-slate-200"
+                }`}
+              >
+                {name}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="mb-4 flex flex-wrap gap-4">
+        <div className="rounded-xl border border-slate-300 bg-white px-5 py-3">
+          <p className="text-sm text-slate-500">حركات</p>
+          <p className="text-2xl font-bold tabular-nums">{summary.rows}</p>
+          <p className="text-xs text-slate-500">
+            {window_.from} → {window_.to}
+          </p>
+        </div>
+        <div className="rounded-xl border border-slate-300 bg-white px-5 py-3">
+          <p className="text-sm text-slate-500">مجموعُها</p>
+          <p className="text-2xl font-bold tabular-nums">{fmt(summary.total)}</p>
+        </div>
+        {summary.flagged > 0 && (
+          <button
+            onClick={() => setOnlyFlagged((v) => !v)}
+            className={`rounded-xl border px-5 py-3 text-right ${
+              onlyFlagged
+                ? "border-amber-500 bg-amber-100"
+                : "border-amber-300 bg-amber-50"
+            }`}
+          >
+            <p className="text-sm text-amber-900">مواضعُ نظر</p>
+            <p className="text-2xl font-bold tabular-nums text-amber-900">
+              {summary.flagged}
+            </p>
+            <p className="text-xs text-amber-900">
+              {onlyFlagged ? "اضغط لعرض الكلّ" : "اضغط لعرضها وحدها"}
+            </p>
+          </button>
+        )}
+      </div>
+
+      {summary.byUser.length > 1 && (
+        <div className="mb-4 flex flex-wrap gap-2">
+          {summary.byUser.map((u) => (
+            <span
+              key={u.user}
+              className="rounded-lg bg-slate-100 px-3 py-1 text-sm"
+            >
+              <b>{u.user}</b>: {u.rows} حركة · {fmt(u.total)} د.ك
+            </span>
+          ))}
+        </div>
+      )}
+
+      {shown.length === 0 ? (
+        <Banner tone="ok">
+          لا حركةَ في هذه المدّة
+          {by === "وقت الإدخال" && " بوقت الإدخال — وجرّب «تاريخ الحركة»"}.
+        </Banner>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b-2 border-slate-300 text-right">
+                <th className="px-3 py-2">القيد</th>
+                <th className="px-3 py-2">تاريخ الحركة</th>
+                <th className="px-3 py-2">أُدخلت</th>
+                <th className="px-3 py-2">من</th>
+                <th className="px-3 py-2">البند</th>
+                <th className="px-3 py-2">المبلغ</th>
+                <th className="px-3 py-2">المشروع</th>
+                <th className="px-3 py-2">الطرف</th>
+                <th className="px-3 py-2">البيان</th>
+                <th className="px-3 py-2">نظر</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shown.map(({ movement, stamp, flags }) => (
+                <tr
+                  key={movement.id}
+                  onClick={() => onOpen(movement)}
+                  className={`cursor-pointer border-b border-slate-100 hover:bg-slate-50 ${
+                    flags.length > 0 ? "bg-amber-50/60" : ""
+                  }`}
+                >
+                  <td className="px-3 py-2 tabular-nums font-bold">
+                    {movement.entryNo}
+                  </td>
+                  <td className="px-3 py-2 tabular-nums">{movement.date}</td>
+                  <td className="px-3 py-2 tabular-nums">
+                    {stamp ? (
+                      new Date(stamp.at).toLocaleString("ar-KW", {
+                        dateStyle: "short",
+                        timeStyle: "short",
+                      })
+                    ) : (
+                      <span className="text-slate-400">—</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2">
+                    {stamp?.user ?? <span className="text-slate-400">—</span>}
+                  </td>
+                  <td className="px-3 py-2">{movement.itemName}</td>
+                  <td className="px-3 py-2 tabular-nums font-bold">
+                    {fmt(movement.amount)}
+                  </td>
+                  <td className="px-3 py-2">{movement.project || "—"}</td>
+                  <td className="px-3 py-2">
+                    {movement.party || movement.person || "—"}
+                  </td>
+                  <td className="max-w-xs truncate px-3 py-2" title={movement.description}>
+                    {movement.description}
+                  </td>
+                  <td className="px-3 py-2">
+                    {flags.length === 0 ? (
+                      <span className="text-green-700">✓</span>
+                    ) : (
+                      <span className="flex flex-wrap gap-1">
+                        {flags.map((flag) => (
+                          <span
+                            key={flag}
+                            className={`rounded px-2 py-0.5 text-xs font-bold ${
+                              flag === "بلا سجلّ إدخال"
+                                ? "bg-slate-200 text-slate-700"
+                                : "bg-amber-200 text-amber-900"
+                            }`}
+                          >
+                            {flag}
+                          </span>
+                        ))}
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <Banner tone="ok">
+        <b>بوقت الإدخال لا بتاريخ الحركة</b> — فمن أدخل اليومَ حركةَ شهرٍ ماضٍ
+        لا تظهر في «حركات اليوم»، وهي التي تُراجَع اليوم. ووقتُ الإدخال من
+        سجلّ التدقيق، ويُطابق بالرقم والتاريخ معاً — فأرقامُ القيود تُعاد كلَّ
+        سنةٍ ماليّة. وما لا سجلَّ له — كحركات ٢٠٢٥ المنقولة من الإكسل — يُقال
+        فيه «بلا سجلّ إدخال» ولا يُنسب إلى أحد. والعلاماتُ مواضعُ نظرٍ تُسأل
+        عنها، لا أحكامٌ: الضغطُ على السطر يفتح الحركة.
+      </Banner>
+    </Panel>
+  );
+}
+
 function SubsidyPage({
   projects,
   materials,
@@ -16378,6 +16667,7 @@ function DuesPage({
   canCreate,
   canSettle,
   payments,
+  onSetUrgency,
   onRegister,
   onSettle,
   onSettlePerson,
@@ -16389,6 +16679,8 @@ function DuesPage({
   canCreate: boolean;
   canSettle: boolean;
   payments: PaymentMethod[];
+  /** وسمُ استعجال السداد — يضعه من يُقرّ لا من يَكتب الاستحقاق */
+  onSetUrgency: (movementId: string, urgency: string) => void;
   onRegister: (draft: {
     person: string;
     kind: string;
@@ -16607,6 +16899,7 @@ function DuesPage({
                   <Th>المتبقي</Th>
                   <Th>العمر</Th>
                   <Th>الحال</Th>
+                  <Th>استعجال</Th>
                   <Th>{""}</Th>
                 </tr>
               </thead>
@@ -16639,6 +16932,50 @@ function DuesPage({
                           <span className="text-blue-700">سُدّد بعضه</span>
                         ) : (
                           <span className="text-slate-600">مستحقّ</span>
+                        )}
+                      </Td>
+                      <Td>
+                        {/*
+                          والوسمُ لمن بقي له شيء: فمستحقٌّ سُدّد لا
+                          يُستعجل سدادُه، ووسمٌ عليه لغوٌ يُشوّش الترتيب.
+                        */}
+                        {row.remaining > 0.0005 ? (
+                          canSettle ? (
+                            <select
+                              value={row.urgency}
+                              onChange={(e) =>
+                                onSetUrgency(row.movement.id, e.target.value)
+                              }
+                              className={`rounded border px-2 py-1 text-xs font-bold ${
+                                row.urgency === "عاجل"
+                                  ? "border-red-400 bg-red-50 text-red-800"
+                                  : row.urgency === "مستعجل"
+                                  ? "border-amber-400 bg-amber-50 text-amber-900"
+                                  : "border-slate-300"
+                              }`}
+                            >
+                              <option value="">عادي</option>
+                              {URGENCY_LEVELS.map((level) => (
+                                <option key={level} value={level}>
+                                  {level}
+                                </option>
+                              ))}
+                            </select>
+                          ) : row.urgency ? (
+                            <span
+                              className={`rounded px-2 py-0.5 text-xs font-bold ${
+                                row.urgency === "عاجل"
+                                  ? "bg-red-100 text-red-800"
+                                  : "bg-amber-100 text-amber-900"
+                              }`}
+                            >
+                              {row.urgency}
+                            </span>
+                          ) : (
+                            "—"
+                          )
+                        ) : (
+                          "—"
                         )}
                       </Td>
                       <Td>

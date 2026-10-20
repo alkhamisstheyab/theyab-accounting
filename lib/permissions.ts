@@ -353,6 +353,7 @@ export const roleDefinition = (key: RoleKey): RoleDefinition =>
 export const PAGE_PERMISSION: Record<string, Permission> = {
   "إدخال حركة": "movements.create",
   "جدول الحركات": "movements.view",
+  "مراجعة المدخلات": "movements.view",
   "القيود اليومية": "journal.view",
   "دفتر الأستاذ": "ledger.view",
   "ميزان المراجعة": "trialBalance.view",
