@@ -291,6 +291,16 @@ import {
 import { monthInYear, todayISO } from "@/lib/today";
 import type { AppState } from "@/lib/storage";
 import {
+  type FreeRow,
+  emptyGroups,
+  type FreePlace,
+  type FreeSection,
+  type QuotationGroup,
+  printedRows,
+  sectionsAt,
+  freeSectionsTotal,
+  hiddenExclusions,
+  FREE_PLACES,
   COST_STALE_DAYS,
   ESSENTIAL_DRAFT,
   QUOTATION_DEFAULTS,
@@ -2116,7 +2126,7 @@ export default function HomeV2() {
                     return null;
                   }
                 }
-                const totals = quotationTotals(quotation.lines, quotation.pricingMode);
+                const totals = quotationTotals(quotation.lines, quotation.pricingMode, quotation.freeSections);
                 const rows = installmentsFromQuotation(quotation, terms);
                 if (rows.length === 0) {
                   window.alert("لا توجد بنود مختارة بقيمة — راجع العرض أولاً.");
@@ -13765,7 +13775,7 @@ function ContractTermsSheet({
     () => installmentsFromQuotation(quotation, terms),
     [quotation, terms]
   );
-  const contractValue = quotationTotals(quotation.lines, quotation.pricingMode).price;
+  const contractValue = quotationTotals(quotation.lines, quotation.pricingMode, quotation.freeSections).price;
   const payable = installments.filter((i) => !i.informational);
   /** دفعةٌ بلا قسم = قيمتها صفر، فتسقط من الجدول ويُنبَّه عليها */
   const emptyParts = plan.reduce(
@@ -14857,7 +14867,7 @@ function QuotationsPage({
               </thead>
               <tbody>
                 {quotations.map((q) => {
-                  const totals = quotationTotals(q.lines, q.pricingMode);
+                  const totals = quotationTotals(q.lines, q.pricingMode, q.freeSections);
                   return (
                     <tr key={q.id} className="border-b border-slate-200">
                       <Td className="font-bold">{q.number}</Td>
@@ -14938,7 +14948,7 @@ function QuotationsPage({
   /* ---------------- جلسة العميل ---------------- */
 
   const mode = open.pricingMode;
-  const totals = quotationTotals(open.lines, mode);
+  const totals = quotationTotals(open.lines, mode, open.freeSections);
   const stages = stagesOfScope(open.scope);
   const freeForm = isFreeFormScope(open.scope);
   const set = (change: Partial<Quotation>) => patch(open.id, change);
@@ -15453,6 +15463,8 @@ function QuotationsPage({
                     <Th>سعر البيع</Th>
                     <Th>منه مواد</Th>
                     <Th>الإجمالي</Th>
+                    <Th>المجموعة</Th>
+                    <Th>يُذكر إن لم يُختر</Th>
                     {canManage && <Th>{""}</Th>}
                   </tr>
                 </thead>
@@ -15579,6 +15591,65 @@ function QuotationsPage({
                         />
                       </Td>
                       <Td className="font-bold">{fmt(linePrice(l, mode))}</Td>
+
+                      {/*
+                        المجموعةُ: تُضمّ إليها البنودُ فتُطبع سطراً
+                        واحداً باسمها ومجموعِ أسعارها — والحسابُ من
+                        البنود نفسها لا من المجموع.
+                      */}
+                      <Td>
+                        {canManage ? (
+                          <select
+                            value={l.groupId ?? ""}
+                            onChange={(e) =>
+                              setLine(l.itemId, {
+                                groupId: e.target.value || undefined,
+                              })
+                            }
+                            className="rounded border border-slate-300 px-2 py-1 text-xs"
+                          >
+                            <option value="">— مستقلّ —</option>
+                            {(open.groups ?? []).map((g) => (
+                              <option key={g.id} value={g.id}>
+                                {g.name || "(بلا اسم)"}
+                                {g.detailed ? " · مفصَّلة" : " · مجموعة"}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          (open.groups ?? []).find((g) => g.id === l.groupId)?.name ??
+                          "—"
+                        )}
+                      </Td>
+
+                      {/*
+                        والذكرُ في «غير المشمول»: أصلُه الذكرُ، فيُسدّ به
+                        بابُ الخلاف. ولا يُسأل عنه إلا في بندٍ لم يُختر.
+                      */}
+                      <Td>
+                        {l.chosen ? (
+                          <span className="text-xs text-slate-400">—</span>
+                        ) : canManage ? (
+                          <label className="flex items-center gap-1 text-xs">
+                            <input
+                              type="checkbox"
+                              checked={l.showExcluded !== false}
+                              onChange={(e) =>
+                                setLine(l.itemId, {
+                                  showExcluded: e.target.checked ? undefined : false,
+                                })
+                              }
+                              className="h-4 w-4"
+                            />
+                            <span>يُذكر</span>
+                          </label>
+                        ) : l.showExcluded === false ? (
+                          <span className="text-xs text-slate-500">لا يُذكر</span>
+                        ) : (
+                          <span className="text-xs">يُذكر</span>
+                        )}
+                      </Td>
+
                       {canManage && (
                         <Td>
                           {l.custom && (
@@ -15619,6 +15690,317 @@ function QuotationsPage({
         );
       })}
 
+
+      {/* ================= المجموعات ================= */}
+      {canManage && (
+        <Panel
+          title="مجموعات الطباعة"
+          subtitle="بنودٌ تُطبع سطراً واحداً بمجموعها واسمٍ تختاره"
+        >
+          <Banner tone="ok">
+            فمن البنود ما لا يُفصَّل للعميل: عشرون سطراً في التشطيب تُجمع في
+            «أعمال التشطيب الكامل» بسعرٍ واحد. <b>والجمعُ عرضٌ لا حذف</b> —
+            البنودُ باقيةٌ في الحساب، فالتكلفةُ والهامشُ وجدولُ الدفعات تُحسب
+            منها، ولولا ذلك لم تعرف أيَّ بندٍ أكل ربحَك.
+          </Banner>
+
+          {(open.groups ?? []).length === 0 ? (
+            <p className="mb-3 text-sm text-slate-600">
+              لا مجموعةَ بعد. أضِف واحدةً وسمِّها، ثم اختَرها في عمود «المجموعة»
+              عند البنود التي تُضمّ إليها.
+            </p>
+          ) : (
+            <table className="mb-3 w-full text-sm">
+              <thead>
+                <tr className="border-b-2 border-slate-300 text-right">
+                  <Th>اسمُها كما يُطبع</Th>
+                  <Th>العرض</Th>
+                  <Th>بنودُها</Th>
+                  <Th>مجموعُها</Th>
+                  <Th>{""}</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {(open.groups ?? []).map((g, index) => {
+                  const mine = open.lines.filter(
+                    (l) => l.groupId === g.id && l.chosen
+                  );
+                  const sum = mine.reduce((t, l) => t + linePrice(l, mode), 0);
+                  return (
+                    <tr key={g.id} className="border-b border-slate-100">
+                      <Td>
+                        <input
+                          value={g.name}
+                          onChange={(e) =>
+                            set({
+                              groups: (open.groups ?? []).map((x, i) =>
+                                i === index ? { ...x, name: e.target.value } : x
+                              ),
+                            })
+                          }
+                          placeholder="أعمال التشطيب الكامل"
+                          className="w-56 rounded border border-slate-300 px-2 py-1"
+                        />
+                      </Td>
+                      <Td>
+                        <select
+                          value={g.detailed ? "مفصَّلة" : "مجموعة"}
+                          onChange={(e) =>
+                            set({
+                              groups: (open.groups ?? []).map((x, i) =>
+                                i === index
+                                  ? { ...x, detailed: e.target.value === "مفصَّلة" }
+                                  : x
+                              ),
+                            })
+                          }
+                          className="rounded border border-slate-300 px-2 py-1"
+                        >
+                          <option value="مفصَّلة">كلُّ بندٍ بسعره</option>
+                          <option value="مجموعة">سطرٌ واحدٌ بالمجموع</option>
+                        </select>
+                      </Td>
+                      <Td className="tabular-nums">{mine.length}</Td>
+                      <Td className="tabular-nums font-bold">{fmt(sum)}</Td>
+                      <Td>
+                        <button
+                          onClick={() => {
+                            /* وفكُّ المجموعة يُعيد بنودَها مستقلّةً، ولا يحذفها */
+                            set({
+                              groups: (open.groups ?? []).filter(
+                                (_, i) => i !== index
+                              ),
+                              lines: open.lines.map((l) =>
+                                l.groupId === g.id
+                                  ? { ...l, groupId: undefined }
+                                  : l
+                              ),
+                            });
+                          }}
+                          className="rounded-lg bg-red-50 px-3 py-1 text-xs font-bold text-red-700"
+                        >
+                          فكُّها
+                        </button>
+                      </Td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+
+          <button
+            onClick={() =>
+              set({
+                groups: [
+                  ...(open.groups ?? []),
+                  { id: newId(), name: "", detailed: false },
+                ],
+              })
+            }
+            className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-bold text-white"
+          >
+            + مجموعة
+          </button>
+
+          {emptyGroups(open.lines, open.groups).length > 0 && (
+            <Banner tone="warn">
+              <b>{emptyGroups(open.lines, open.groups).length}</b> مجموعةً لا بندَ
+              فيها — لا تُطبع، فإمّا تُملأ من عمود «المجموعة» وإمّا تُفكّ.
+            </Banner>
+          )}
+        </Panel>
+      )}
+
+      {/* ================= الأقسام الحرّة ================= */}
+      {canManage && (
+        <Panel
+          title="أقسام حرّة"
+          subtitle="بنودٌ وشروطٌ والتزاماتٌ تكتبها بنفسك، بأعدادها وأسعارها"
+        >
+          <Banner tone="ok">
+            فالكتالوجُ لا يحيط بكلِّ عمل: يأتي عميلٌ بطلبٍ لم يُسبق إليه، أو
+            يُتّفق على شرطٍ لا نظيرَ له. <b>وأسعارُ سطورها تدخل مجموعَ العرض</b>
+            — فقسمٌ بسعرٍ لا يُجمع عرضٌ ناقصُه، ويُسلَّم للعميل رقمٌ أقلُّ مما
+            اتُّفق.
+            {freeSectionsTotal(open.freeSections) > 0 && (
+              <>
+                {" "}
+                ومجموعُ أقسامك الآن{" "}
+                <b>{fmt(freeSectionsTotal(open.freeSections))} د.ك</b>.
+              </>
+            )}
+          </Banner>
+
+          {(open.freeSections ?? []).map((section, si) => {
+            const setSection = (change: Partial<FreeSection>) =>
+              set({
+                freeSections: (open.freeSections ?? []).map((x, i) =>
+                  i === si ? { ...x, ...change } : x
+                ),
+              });
+
+            return (
+              <div
+                key={section.id}
+                className="mb-4 rounded-xl border border-slate-300 bg-white p-4"
+              >
+                <div className="mb-3 flex flex-wrap items-end gap-3">
+                  <div>
+                    <p className="mb-1 text-xs text-slate-500">عنوانُ القسم</p>
+                    <input
+                      value={section.title}
+                      onChange={(e) => setSection({ title: e.target.value })}
+                      placeholder="أعمال خاصّة بطلب العميل"
+                      className="w-64 rounded border border-slate-300 px-2 py-1"
+                    />
+                  </div>
+                  <div>
+                    <p className="mb-1 text-xs text-slate-500">يُطبع في</p>
+                    <select
+                      value={section.place}
+                      onChange={(e) =>
+                        setSection({ place: e.target.value as FreePlace })
+                      }
+                      className="rounded border border-slate-300 px-2 py-1"
+                    >
+                      {FREE_PLACES.map((place) => (
+                        <option key={place} value={place}>
+                          {place}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <button
+                    onClick={() =>
+                      set({
+                        freeSections: (open.freeSections ?? []).filter(
+                          (_, i) => i !== si
+                        ),
+                      })
+                    }
+                    className="rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-700"
+                  >
+                    حذفُ القسم
+                  </button>
+                </div>
+
+                <table className="mb-2 w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-300 text-right">
+                      <Th>النصّ</Th>
+                      <Th>الكميّة</Th>
+                      <Th>الوحدة</Th>
+                      <Th>السعر</Th>
+                      <Th>{""}</Th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {section.rows.map((row, ri) => {
+                      const setRow = (change: Partial<FreeRow>) =>
+                        setSection({
+                          rows: section.rows.map((x, i) =>
+                            i === ri ? { ...x, ...change } : x
+                          ),
+                        });
+                      return (
+                        <tr key={row.id} className="border-b border-slate-100">
+                          <Td>
+                            <input
+                              value={row.text}
+                              onChange={(e) => setRow({ text: e.target.value })}
+                              placeholder="وصفُ العمل أو الشرط"
+                              className="w-full rounded border border-slate-300 px-2 py-1"
+                            />
+                          </Td>
+                          <Td>
+                            <input
+                              type="number"
+                              step="0.001"
+                              value={row.quantity ?? ""}
+                              onChange={(e) =>
+                                setRow({
+                                  quantity: Number(e.target.value) || undefined,
+                                })
+                              }
+                              className="w-20 rounded border border-slate-300 px-2 py-1 tabular-nums"
+                            />
+                          </Td>
+                          <Td>
+                            <input
+                              value={row.unit ?? ""}
+                              onChange={(e) =>
+                                setRow({ unit: e.target.value || undefined })
+                              }
+                              className="w-20 rounded border border-slate-300 px-2 py-1"
+                            />
+                          </Td>
+                          <Td>
+                            <input
+                              type="number"
+                              step="0.001"
+                              value={row.price ?? ""}
+                              onChange={(e) =>
+                                setRow({
+                                  price: Number(e.target.value) || undefined,
+                                })
+                              }
+                              className="w-24 rounded border border-slate-300 px-2 py-1 tabular-nums"
+                            />
+                          </Td>
+                          <Td>
+                            <button
+                              onClick={() =>
+                                setSection({
+                                  rows: section.rows.filter((_, i) => i !== ri),
+                                })
+                              }
+                              className="rounded bg-red-50 px-2 py-1 text-xs text-red-700"
+                            >
+                              حذف
+                            </button>
+                          </Td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+
+                <button
+                  onClick={() =>
+                    setSection({
+                      rows: [...section.rows, { id: newId(), text: "" }],
+                    })
+                  }
+                  className="rounded-lg bg-slate-100 px-3 py-1 text-xs font-bold"
+                >
+                  + سطر
+                </button>
+              </div>
+            );
+          })}
+
+          <button
+            onClick={() =>
+              set({
+                freeSections: [
+                  ...(open.freeSections ?? []),
+                  {
+                    id: newId(),
+                    title: "",
+                    place: "بنود الأعمال",
+                    rows: [{ id: newId(), text: "" }],
+                  },
+                ],
+              })
+            }
+            className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-bold text-white"
+          >
+            + قسم حرّ
+          </button>
+        </Panel>
+      )}
+
       {/* ---- ما لا يشمله ---- */}
       <Panel
         title="ما لا يشمله هذا العرض"
@@ -15650,6 +16032,56 @@ function QuotationsPage({
  * `internal` تجعلها الورقة الداخلية: تُضاف أعمدة التكلفة والهامش. وبدونها
  * لا يظهر رقم تكلفة واحد — فالورقة التي تُسلَّم للعميل لا تحمل أسرارك.
  */
+/**
+ * أقسامٌ حرّةٌ في موضعٍ من المطبوعة.
+ *
+ * وسطرٌ له سعرٌ يُطبع بسعره، وسطرٌ بلا سعرٍ يُطبع نصّاً — فالقسمُ
+ * الحرُّ يحمل البنودَ والشروطَ والالتزاماتَ جميعاً، ولا يُفرض عليه
+ * شكلُ جدولٍ لا يَسعه.
+ */
+function FreeSections({
+  sections,
+  place,
+  heading,
+}: {
+  sections: FreeSection[] | undefined;
+  place: FreePlace;
+  /** أتُطبع العناوينُ عناوينَ كبيرة أم سطوراً في قائمة */
+  heading: boolean;
+}) {
+  const mine = sectionsAt(sections, place);
+  if (mine.length === 0) return null;
+
+  return (
+    <>
+      {mine.map((section) => (
+        <Fragment key={section.id}>
+          {heading ? (
+            <h3 className="mt-6 text-lg font-bold">{section.title || "بنود إضافية"}</h3>
+          ) : (
+            <p className="mt-3 font-bold">{section.title}</p>
+          )}
+          <ul className="mt-1 list-inside list-disc space-y-1 text-sm">
+            {section.rows
+              .filter((row) => row.text.trim() !== "")
+              .map((row) => (
+                <li key={row.id}>
+                  {row.text}
+                  {row.quantity ? ` — ${fmt(row.quantity)} ${row.unit ?? ""}` : ""}
+                  {row.price ? (
+                    <b>{` — ${fmt(row.price)} د.ك`}</b>
+                  ) : (
+                    ""
+                  )}
+                </li>
+              ))}
+          </ul>
+        </Fragment>
+      ))}
+    </>
+  );
+}
+
 function QuotationSheet({
   quotation,
   company,
@@ -15661,7 +16093,7 @@ function QuotationSheet({
   internal: boolean;
   onClose: () => void;
 }) {
-  const totals = quotationTotals(quotation.lines, quotation.pricingMode);
+  const totals = quotationTotals(quotation.lines, quotation.pricingMode, quotation.freeSections);
   const stages = stagesOfScope(quotation.scope);
   const chosen = quotation.lines.filter((l) => l.chosen);
   const dropped = exclusions(quotation.lines);
@@ -15834,8 +16266,15 @@ function QuotationSheet({
               const st = quotationTotals(lines, quotation.pricingMode);
               return (
                 <Fragment key={stage}>
-                  {lines.map((l, i) => (
-                    <tr key={l.itemId}>
+                  {/*
+                    والمجموعةُ تُعرض سطراً واحداً باسمها ومجموعِ أسعارها،
+                    ولا يُحذف بندٌ: الحسابُ من البنود نفسها — التكلفةُ
+                    والهامشُ وجدولُ الدفعات — والجمعُ عرضٌ لا حذف.
+                  */}
+                  {printedRows(lines, quotation.groups, (l) =>
+                    linePrice(l, quotation.pricingMode)
+                  ).map((row, i) => (
+                    <tr key={row.kind === "بند" ? row.line.itemId : row.group.id}>
                       <td className="border border-slate-300 px-2 py-1 text-center">
                         {i + 1}
                       </td>
@@ -15843,28 +16282,43 @@ function QuotationSheet({
                         {i === 0 ? stage : ""}
                       </td>
                       <td className="border border-slate-300 px-2 py-1">
-                        {l.section}
+                        {row.kind === "بند" ? row.line.section : ""}
                       </td>
                       <td className="border border-slate-300 px-2 py-1">
-                        {[l.name, l.detail].filter(Boolean).join(" — ")}
-                        {l.description ? ` (${l.description})` : ""}
+                        {row.kind === "بند" ? (
+                          <>
+                            {[row.line.name, row.line.detail]
+                              .filter(Boolean)
+                              .join(" — ")}
+                            {row.line.description ? ` (${row.line.description})` : ""}
+                          </>
+                        ) : (
+                          <b>{row.group.name || "مجموعة أعمال"}</b>
+                        )}
                       </td>
                       <td className="border border-slate-300 px-2 py-1 text-center">
-                        {l.unit || "—"}
+                        {row.kind === "بند" ? row.line.unit || "—" : "مقطوعة"}
                       </td>
                       <td className="border border-slate-300 px-2 py-1 text-center tabular-nums">
-                        {l.quantity || 1}
+                        {row.kind === "بند" ? row.line.quantity || 1 : 1}
                       </td>
                       {internal && (
                         <td className="border border-slate-300 px-2 py-1 tabular-nums">
-                          {fmt(lineCost(l, quotation.pricingMode))}
+                          {row.kind === "بند"
+                            ? fmt(lineCost(row.line, quotation.pricingMode))
+                            : fmt(
+                                row.lines.reduce(
+                                  (sum, l) => sum + lineCost(l, quotation.pricingMode),
+                                  0
+                                )
+                              )}
                         </td>
                       )}
                       <td className="border border-slate-300 px-2 py-1 tabular-nums">
-                        {fmt(l.price)}
+                        {row.kind === "بند" ? fmt(row.line.price) : fmt(row.price)}
                       </td>
                       <td className="border border-slate-300 px-2 py-1 tabular-nums">
-                        {fmt(linePrice(l, quotation.pricingMode))}
+                        {fmt(row.price)}
                       </td>
                     </tr>
                   ))}
@@ -15908,6 +16362,12 @@ function QuotationSheet({
           </tbody>
         </table>
 
+        <FreeSections
+          sections={quotation.freeSections}
+          place="بنود الأعمال"
+          heading
+        />
+
         {/* ما لا يشمله */}
         {dropped.length > 0 && (
           <>
@@ -15926,6 +16386,18 @@ function QuotationSheet({
             <p className="mt-1 text-sm">{quotation.notes}</p>
           </>
         )}
+
+        <FreeSections
+          sections={quotation.freeSections}
+          place="ملاحظات"
+          heading
+        />
+
+        <FreeSections
+          sections={quotation.freeSections}
+          place="الالتزامات"
+          heading
+        />
 
         {/* الشروط */}
         {!internal && (
@@ -15954,6 +16426,18 @@ function QuotationSheet({
                 أي أعمال إضافية خارج نطاق هذا العرض لا تُنفَّذ إلا بموافقة كتابية
                 واعتماد سعرها.
               </li>
+              {/* وشروطُ صاحب العرض بعد الشروط الثابتة، فلا تُزاحمها */}
+              {sectionsAt(quotation.freeSections, "الشروط").flatMap((section) =>
+                section.rows
+                  .filter((row) => row.text.trim() !== "")
+                  .map((row) => (
+                    <li key={row.id}>
+                      {section.title ? <b>{section.title}: </b> : null}
+                      {row.text}
+                      {row.price ? <b>{` — ${fmt(row.price)} د.ك`}</b> : ""}
+                    </li>
+                  ))
+              )}
               <li>
                 المواد المدعومة تكون لصالح الطرف الأول ويقوم الطرف الثاني بدفع
                 الرسوم للجهات الحكومية.

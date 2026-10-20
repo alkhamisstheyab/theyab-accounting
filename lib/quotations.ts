@@ -81,6 +81,82 @@ export type QuotationLine = {
   chosen: boolean;
   /** بند أُضيف لهذا العرض وحده، ليس من الكتالوج */
   custom?: boolean;
+
+  /**
+   * أيُذكر في العقد إن لم يُختر؟
+   *
+   * والبنودُ غير المختارة تُطبع في آخر العقد تحت «غير مشمول» — وذاك
+   * مقصود: يُسدّ بها بابُ الخلاف، فلا يقول العميل «حسبتُ المصعد
+   * داخلاً». لكنّ بعضَها لا معنى لذكره: بندٌ عُرض ثم سقط من المفاوضة
+   * كلِّها، أو بندٌ لم يُسأل عنه أصلاً — فذكرُه يُطيل العقدَ ويُثقله،
+   * وقد يُوقظ طلباً نائماً.
+   *
+   * فالأصلُ الذكرُ — ولولا ذلك لاختفت بنودُ العقود القائمة بسكوتِ
+   * الحقل — ومن أراد إخفاءَ بندٍ بعينه أخفاه.
+   */
+  showExcluded?: boolean;
+
+  /** المجموعةُ التي يُضمّ إليها في الطباعة — فارغٌ إن كان مستقلّاً */
+  groupId?: string;
+};
+
+/**
+ * مجموعةُ بنودٍ تُطبع سطراً واحداً بمجموعها.
+ *
+ * فمن البنود ما لا يُفصَّل للعميل: عشرون سطراً في التشطيب تُجمع في
+ * «أعمال التشطيب الكامل» بسعرٍ واحد. والتفصيلُ يُبقي للعميل بابَ
+ * المساومة بنداً بنداً، والجمعُ يُقدّم له رقماً واحداً.
+ *
+ * والبنودُ باقيةٌ كما هي في الحساب: الجمعُ عرضٌ لا حذف. فالتكلفةُ
+ * والهامشُ وجدولُ الدفعات تُحسب من البنود نفسها — ومن حسبها من
+ * المجموع خسر معرفةَ أيِّ بندٍ أكل ربحَه.
+ */
+export type QuotationGroup = {
+  id: string;
+  /** اسمُها كما يُطبع — يكتبه من يُعدّ العرض */
+  name: string;
+  /** تُعرض بنودُها مفصَّلةً أم مجموعةً في سطر */
+  detailed: boolean;
+};
+
+/** موضعُ القسم الحرّ في المطبوعة */
+export type FreePlace = "بنود الأعمال" | "الشروط" | "الالتزامات" | "ملاحظات";
+
+export const FREE_PLACES: FreePlace[] = [
+  "بنود الأعمال",
+  "الشروط",
+  "الالتزامات",
+  "ملاحظات",
+];
+
+/** سطرٌ حرٌّ — نصُّه وحده يكفي، والكميّةُ والسعرُ اختيار */
+export type FreeRow = {
+  id: string;
+  text: string;
+  quantity?: number;
+  unit?: string;
+  price?: number;
+};
+
+/**
+ * قسمٌ حرٌّ يكتبه مُعدُّ العرض بلا قيد.
+ *
+ * فالكتالوجُ لا يحيط بكلِّ عمل: يأتي عميلٌ بطلبٍ لم يُسبق إليه، أو
+ * يُتّفق على شرطٍ لا نظيرَ له. وكان الطريقُ أن يُحشى في «الملاحظات»
+ * نصّاً واحداً طويلاً — فلا يُسعَّر ولا يُعدّ ولا يُفصَّل.
+ *
+ * فصار له قسمٌ: عنوانٌ يختاره، وسطورٌ يكتبها بأعدادها وأسعارها إن
+ * شاء، وموضعٌ يُطبع فيه — مع البنود أو في الشروط أو الالتزامات أو
+ * الملاحظات.
+ *
+ * وأسعارُ سطوره تدخل مجموعَ العرض: فقسمٌ حرٌّ بسعرٍ لا يُجمع عرضٌ
+ * ناقصُه، ويُسلَّم للعميل رقمٌ أقلُّ مما اتُّفق.
+ */
+export type FreeSection = {
+  id: string;
+  title: string;
+  place: FreePlace;
+  rows: FreeRow[];
 };
 
 /**
@@ -134,6 +210,10 @@ export type Quotation = {
   submittedAt?: string;
 
   lines: QuotationLine[];
+  /** مجموعاتُ الطباعة — تُعرّف هنا ويُشار إليها من البنود */
+  groups?: QuotationGroup[];
+  /** أقسامٌ حرّةٌ يكتبها مُعدُّ العرض */
+  freeSections?: FreeSection[];
   notes: string;
 
   /** رقم العقد الذي تحوّل إليه — فارغ ما لم يُقبل */
@@ -342,10 +422,19 @@ export type QuotationTotals = {
 /** مجاميع العرض — على المختار وحده، فالمشطوب ليس جزءاً من الالتزام */
 export function quotationTotals(
   lines: QuotationLine[],
-  mode: PricingMode = "مصنعية ومواد"
+  mode: PricingMode = "مصنعية ومواد",
+  /*
+    والأقسامُ الحرّة تدخل السعر: فعرضٌ لا يجمعها يُسلَّم للعميل برقمٍ
+    أقلَّ مما اتُّفق عليه، وذاك نقصٌ صامتٌ لا يُكشف إلا عند المطالبة.
+    ولا تكلفةَ محسوبةٌ لها — فهامشُها كلُّه ربحٌ ظاهريّ، والحقيقةُ عند
+    صاحبها. فتُحسب في السعر، والهامشُ فرقٌ لا جمع.
+  */
+  free: FreeSection[] | undefined = undefined
 ): QuotationTotals {
   const chosen = lines.filter((l) => l.chosen);
-  const price = round3(chosen.reduce((s, l) => s + linePrice(l, mode), 0));
+  const price = round3(
+    chosen.reduce((s, l) => s + linePrice(l, mode), 0) + freeSectionsTotal(free)
+  );
   const cost = round3(chosen.reduce((s, l) => s + lineCost(l, mode), 0));
   const margin = round3(price - cost);
   return {
@@ -376,13 +465,114 @@ export function stageTotals(
  * أكثر ما يُختصم عليه في المقاولات هو ما لم يُكتب، وهذه القائمة تخرج
  * من الجلسة نفسها فلا يمكن أن يُنسى بند شطبه العميل بحضوره.
  */
+/**
+ * ما يُذكر في العقد تحت «غير مشمول».
+ *
+ * والأصلُ ذكرُ كلِّ ما لم يُختر: يُسدّ به بابُ الخلاف، فلا يقول العميل
+ * «حسبتُ المصعد داخلاً». ومن أراد إخفاءَ بندٍ بعينه وسَمه
+ * `showExcluded: false` — ولا يُخفى بسكوتٍ، فالسكوتُ ذكر.
+ */
 export function exclusions(lines: QuotationLine[]): string[] {
   return lines
-    .filter((l) => !l.chosen)
-    .map((l) =>
-      [l.section, l.name, l.detail].filter(Boolean).join(" — ")
-    );
+    .filter((l) => !l.chosen && l.showExcluded !== false)
+    .map((l) => [l.section, l.name, l.detail].filter(Boolean).join(" — "));
 }
+
+/** ما أُخفي منها — يُعدّ لصاحبه في الشاشة فيعلم أنه أخفى */
+export const hiddenExclusions = (lines: QuotationLine[]): number =>
+  lines.filter((l) => !l.chosen && l.showExcluded === false).length;
+
+/* ------------------------------------------------------------------ */
+/* المجموعات والأقسام الحرّة                                           */
+/* ------------------------------------------------------------------ */
+
+export type PrintedRow =
+  | {
+      kind: "بند";
+      line: QuotationLine;
+      price: number;
+    }
+  | {
+      kind: "مجموعة";
+      group: QuotationGroup;
+      /** البنودُ المضمومة — تُحسب ولا تُعرض */
+      lines: QuotationLine[];
+      price: number;
+    };
+
+/**
+ * صفوفُ المطبوعة: بنودٌ مفصَّلةٌ ومجموعاتٌ مضمومة.
+ *
+ * والمضمومُ يُعرض سطراً واحداً باسم مجموعته ومجموع أسعارها. ولا يُحذف
+ * شيء: البنودُ باقيةٌ في الحساب — التكلفةُ والهامشُ وجدولُ الدفعات
+ * تُحسب منها، ومن حسبها من المجموع خسر معرفةَ أيِّ بندٍ أكل ربحَه.
+ *
+ * وترتيبُ المجموعة موضعُ أوّلِ بندٍ فيها: فلو جُمعت في آخر الجدول
+ * لانتقلت أعمالُ التجهيز إلى ما بعد التسليم.
+ */
+export function printedRows(
+  lines: QuotationLine[],
+  groups: QuotationGroup[] | undefined,
+  priceOf: (line: QuotationLine) => number
+): PrintedRow[] {
+  const byId = new Map((groups ?? []).map((g) => [g.id, g]));
+  const rows: PrintedRow[] = [];
+  const emitted = new Set<string>();
+
+  for (const line of lines) {
+    const group = line.groupId ? byId.get(line.groupId) : undefined;
+
+    /* وما لا مجموعةَ له، أو مجموعتُه مفصَّلةٌ، يُعرض بنداً */
+    if (!group || group.detailed) {
+      rows.push({ kind: "بند", line, price: priceOf(line) });
+      continue;
+    }
+
+    if (emitted.has(group.id)) continue;
+    emitted.add(group.id);
+
+    const mine = lines.filter((l) => l.groupId === group.id);
+    rows.push({
+      kind: "مجموعة",
+      group,
+      lines: mine,
+      price: mine.reduce((sum, l) => sum + priceOf(l), 0),
+    });
+  }
+
+  return rows;
+}
+
+/** مجموعةٌ لا بندَ فيها — تُعرض لصاحبها لتُحذف أو تُملأ */
+export const emptyGroups = (
+  lines: QuotationLine[],
+  groups: QuotationGroup[] | undefined
+): QuotationGroup[] =>
+  (groups ?? []).filter((g) => !lines.some((l) => l.groupId === g.id));
+
+/**
+ * مجموعُ أسعار الأقسام الحرّة.
+ *
+ * ويدخل مجموعَ العرض: فقسمٌ حرٌّ بسعرٍ لا يُجمع عرضٌ ناقصُه، ويُسلَّم
+ * للعميل رقمٌ أقلُّ مما اتُّفق عليه — وذاك خسارةٌ صامتة.
+ */
+export const freeSectionsTotal = (sections: FreeSection[] | undefined): number =>
+  (sections ?? []).reduce(
+    (sum, section) =>
+      sum + section.rows.reduce((inner, row) => inner + (row.price ?? 0), 0),
+    0
+  );
+
+/** أقسامُ موضعٍ بعينه من المطبوعة */
+export const sectionsAt = (
+  sections: FreeSection[] | undefined,
+  place: FreePlace
+): FreeSection[] =>
+  (sections ?? []).filter(
+    (section) =>
+      section.place === place &&
+      (section.title.trim() !== "" || section.rows.some((r) => r.text.trim() !== ""))
+  );
 
 /**
  * دفعات العقد من مراحل العرض.

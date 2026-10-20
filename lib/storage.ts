@@ -45,7 +45,11 @@ import {
 import {
   QUOTATION_DEFAULTS,
   QUOTATION_STATUSES,
+  FREE_PLACES,
+  type FreePlace,
+  type FreeSection,
   Quotation,
+  QuotationGroup,
   QuotationLine,
   QuotationStatus,
   PRICING_MODES,
@@ -895,6 +899,46 @@ function migrateQuotationLine(raw: unknown): QuotationLine {
     essential: l.essential === true,
     chosen: l.chosen === true,
     custom: l.custom === true,
+    /*
+      والأصلُ الذكرُ: `false` وحدَها تُخفي. ولو كان الأصلُ الإخفاءَ
+      لاختفت بنودُ العقود القائمة كلُّها بسكوتِ الحقل عنها.
+    */
+    showExcluded: l.showExcluded === false ? false : undefined,
+    groupId: str(l.groupId) || undefined,
+  };
+}
+
+function migrateQuotationGroup(raw: unknown): QuotationGroup {
+  const g = (raw ?? {}) as Record<string, unknown>;
+  return {
+    id: str(g.id) || newId(),
+    name: str(g.name),
+    /* والأصلُ التفصيلُ: فمجموعةٌ بلا رأيٍ تُعرض كما كانت البنود */
+    detailed: g.detailed === false ? false : true,
+  };
+}
+
+function migrateFreeSection(raw: unknown): FreeSection {
+  const f = (raw ?? {}) as Record<string, unknown>;
+  const place = str(f.place);
+  return {
+    id: str(f.id) || newId(),
+    title: str(f.title),
+    place: (FREE_PLACES as string[]).includes(place)
+      ? (place as FreePlace)
+      : "ملاحظات",
+    rows: Array.isArray(f.rows)
+      ? (f.rows as unknown[]).map((entry) => {
+          const r = (entry ?? {}) as Record<string, unknown>;
+          return {
+            id: str(r.id) || newId(),
+            text: str(r.text),
+            quantity: Number(r.quantity) > 0 ? Number(r.quantity) : undefined,
+            unit: str(r.unit) || undefined,
+            price: Number(r.price) > 0 ? round3(Number(r.price)) : undefined,
+          };
+        })
+      : [],
   };
 }
 
@@ -948,6 +992,12 @@ function migrateQuotations(raw: unknown): Quotation[] {
         lines: Array.isArray(q.lines)
           ? q.lines.map(migrateQuotationLine)
           : [],
+        groups: Array.isArray(q.groups)
+          ? (q.groups as unknown[]).map(migrateQuotationGroup)
+          : undefined,
+        freeSections: Array.isArray(q.freeSections)
+          ? (q.freeSections as unknown[]).map(migrateFreeSection)
+          : undefined,
         notes: str(q.notes),
         contractNumber: str(q.contractNumber),
         createdBy: str(q.createdBy),
