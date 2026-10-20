@@ -679,6 +679,43 @@ async function main() {
     )
   );
 
+  /* الأطراف — سجلُّ المقاولين والموردين والعملاء */
+  add(
+    "الأطراف",
+    await insertMany(
+      db,
+      "parties",
+      [
+        "id",
+        "name",
+        "kind",
+        "specialty",
+        "phone",
+        "civil_id",
+        "address",
+        "nationality",
+        "license_number",
+        "notes",
+        "active",
+        "created_at",
+      ],
+      (d.parties ?? []).map((p) => [
+        str(p.id),
+        str(p.name),
+        str(p.kind) || "مقاول",
+        str(p.specialty),
+        str(p.phone),
+        str(p.civilId),
+        str(p.address),
+        str(p.nationality),
+        str(p.licenseNumber),
+        str(p.notes),
+        p.active !== false,
+        stamp(p.createdAt) ?? new Date().toISOString(),
+      ])
+    )
+  );
+
   /* ---------------- التقرير ---------------- */
 
   console.log("ما نُقل:");
@@ -706,6 +743,7 @@ async function main() {
   await fillData(db, "payroll_runs", d.payrollRuns ?? []);
   await fillData(db, "audit_log", d.audit ?? []);
   await fillData(db, "messages", d.messages ?? []);
+  await fillData(db, "parties", d.parties ?? []);
   for (const a of d.attendance ?? []) {
     if (!a?.employeeId || !date(a.date)) continue;
     await db.query(

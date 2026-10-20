@@ -62,6 +62,7 @@ export const ROW_COLLECTIONS: RowCollection[] = [
     كلُّه. وموضعُ الترشيح الخادم (permits.ts) لا الشاشة.
   */
   { field: "messages", keyOf: (m) => str(m.id) },
+  { field: "parties", keyOf: (p) => str(p.id) },
 ];
 
 /**

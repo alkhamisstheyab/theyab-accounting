@@ -164,6 +164,22 @@ const TABLES: Record<
       last_seen_at: when(u.lastSeenAt),
     }),
   },
+  parties: {
+    table: "parties",
+    columns: (p) => ({
+      name: str(p.name),
+      kind: str(p.kind),
+      specialty: str(p.specialty),
+      phone: str(p.phone),
+      civil_id: str(p.civilId),
+      address: str(p.address),
+      nationality: str(p.nationality),
+      license_number: str(p.licenseNumber),
+      notes: str(p.notes),
+      active: p.active !== false,
+      created_at: when(p.createdAt),
+    }),
+  },
   messages: {
     table: "messages",
     columns: (m) => ({

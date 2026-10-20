@@ -58,6 +58,7 @@ import {
   ScopeKey,
   WorkItem,
 } from "./quotations";
+import type { Party } from "./parties";
 import { SEED_WORK_ITEMS } from "./work-items-seed";
 import { Invoice } from "./invoices";
 
@@ -681,6 +682,8 @@ export type AppState = {
   audit: AuditEntry[];
   /** طلباتُ العمل — تُرشَّح صفّاً صفّاً على الخادم */
   messages: Message[];
+  /** سجلُّ الأطراف: المقاولون والموردون والعملاء ببياناتهم وتخصّصاتهم */
+  parties: Party[];
   yearLocks: YearLocks;
   /** البيانات الأساسية القابلة للتحرير — تبدأ من المولّدة من الإكسل */
   chart: Account[];
@@ -749,6 +752,7 @@ export const emptyState = (): AppState => ({
   users: [],
   audit: [],
   messages: [],
+  parties: [],
   yearLocks: {},
   chart: GENERATED_CHART,
   items: GENERATED_ITEMS,
@@ -1378,6 +1382,28 @@ function migrateMovement(raw: unknown): Movement {
   };
 }
 
+function migrateParty(raw: unknown): Party {
+  const p = (raw ?? {}) as Record<string, unknown>;
+  const kind = str(p.kind);
+  return {
+    id: str(p.id) || newId(),
+    name: str(p.name),
+    /* والأصلُ «مقاول»: فهو أكثرُ من يُسجَّل، ونوعٌ مجهولٌ لا يُسقط الصفّ */
+    kind: (COUNTERPARTY_TYPES as readonly string[]).includes(kind)
+      ? (kind as CounterpartyType)
+      : "مقاول",
+    specialty: str(p.specialty),
+    phone: str(p.phone),
+    civilId: str(p.civilId),
+    address: str(p.address),
+    nationality: str(p.nationality),
+    licenseNumber: str(p.licenseNumber),
+    notes: str(p.notes),
+    active: p.active !== false,
+    createdAt: str(p.createdAt) || new Date().toISOString(),
+  };
+}
+
 function migrateMessage(raw: unknown): Message {
   const m = (raw ?? {}) as Record<string, unknown>;
   const state = str(m.state);
@@ -1917,6 +1943,8 @@ export function normalizeState(raw: unknown): AppState {
     state.movements = data.movements.map(migrateMovement);
   if (Array.isArray(data.messages))
     state.messages = data.messages.map(migrateMessage);
+  if (Array.isArray(data.parties))
+    state.parties = data.parties.map(migrateParty);
   if (Array.isArray(data.projects))
     state.projects = data.projects.map(migrateProject);
   if (Array.isArray(data.contractors))

@@ -370,6 +370,7 @@ export const PAGE_PERMISSION: Record<string, Permission> = {
   "التقرير الربعي": "reports.view",
   المشاريع: "projects.view",
   المقاولون: "contractors.view",
+  "الموردون والمقاولون": "contractors.view",
   "المطلوب من العملاء": "contractors.view",
   المدعوم: "projects.view",
   "ربط الحركات": "contractors.manage",

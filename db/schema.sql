@@ -563,3 +563,39 @@ CREATE TABLE messages (
 CREATE INDEX messages_rev_idx ON messages (rev);
 
 CREATE INDEX messages_to_idx ON messages (to_user, state);
+
+-- ---------- سجلّ الأطراف ----------
+
+/*
+  المقاولون والموردون والعملاء ببياناتهم وتخصّصاتهم.
+
+  وكان الطرفُ لا وجودَ له إلا في عقده: جدولُ العقود يحمل اسمَه وهاتفَه
+  ومدنيَّه في كلِّ عقدٍ من عقوده. فمن له ثلاثةُ عقودٍ مكتوبٌ ثلاثَ
+  مرّات، ولو تغيّر هاتفُه صُحّح في ثلاثةِ مواضعَ أو بقي قديماً في
+  اثنين. و«الأشخاص» أسماءٌ مجرّدةٌ تصلح للاختيار ولا تصلح سجلّاً.
+
+  وبـkind يُعزل سجلٌّ عن سجلّ، وبـspecialty يُجمع أهلُ الصنعة الواحدة.
+  ولا يُحذف من تُعومل معه: يُوقَف فلا يُقترح، ويبقى أثرُه في عقوده.
+*/
+CREATE TABLE parties (
+  id             text PRIMARY KEY,
+  name           text NOT NULL DEFAULT '',
+  kind           text NOT NULL DEFAULT 'مقاول',
+  specialty      text NOT NULL DEFAULT '',
+  phone          text NOT NULL DEFAULT '',
+  civil_id       text NOT NULL DEFAULT '',
+  address        text NOT NULL DEFAULT '',
+  nationality    text NOT NULL DEFAULT '',
+  license_number text NOT NULL DEFAULT '',
+  notes          text NOT NULL DEFAULT '',
+  active         boolean NOT NULL DEFAULT true,
+  created_at     timestamptz NOT NULL DEFAULT now(),
+  data           jsonb NOT NULL DEFAULT '{}',
+  rev            bigint NOT NULL DEFAULT nextval('change_seq'),
+  updated_at     timestamptz NOT NULL DEFAULT now(),
+  updated_by     text NOT NULL DEFAULT ''
+);
+
+CREATE INDEX parties_rev_idx ON parties (rev);
+
+CREATE INDEX parties_kind_idx ON parties (kind, specialty);

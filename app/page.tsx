@@ -278,6 +278,13 @@ import {
   type ClientStatement,
 } from "@/lib/receivables";
 import {
+  SPECIALTIES,
+  partiesBySpecialty,
+  partyContracts,
+  unregistered,
+  type Party,
+} from "@/lib/parties";
+import {
   REVIEW_RANGES,
   reviewMovements,
   reviewSummary,
@@ -394,6 +401,7 @@ const PAGES = [
   "بنود الأعمال",
   "الفواتير",
   "المقاولون",
+  "الموردون والمقاولون",
   "المطلوب من العملاء",
   "ربط الحركات",
   "اعتماد الحركات",
@@ -451,6 +459,7 @@ const PAGE_GROUPS: { group: string; pages: string[] }[] = [
       "المشاريع",
       "المدعوم",
       "المقاولون",
+      "الموردون والمقاولون",
       "المطلوب من العملاء",
       "ربط الحركات",
       "استلام المواد",
@@ -578,6 +587,8 @@ export default function HomeV2() {
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   /* طلباتُ العمل — وما يصل هذا الجهازَ منها مُرشَّحٌ على الخادم */
   const [messages, setMessages] = useState<Message[]>([]);
+  /* سجلُّ الأطراف — بياناتُهم مرّةً واحدةً لا في كلّ عقد */
+  const [parties, setParties] = useState<Party[]>([]);
   const [yearLocks, setYearLocks] = useState<YearLocks>({});
   const [chart, setChart] = useState<Account[]>(GENERATED_CHART);
   const [items, setItems] = useState<ItemDefinition[]>(GENERATED_ITEMS);
@@ -718,6 +729,7 @@ export default function HomeV2() {
       users,
       audit,
       messages,
+      parties,
       yearLocks,
       chart,
       items,
@@ -922,6 +934,7 @@ export default function HomeV2() {
     users,
     audit,
     messages,
+    parties,
     yearLocks,
     chart,
     items,
@@ -2326,6 +2339,85 @@ export default function HomeV2() {
             />
           )}
 
+          {page === "الموردون والمقاولون" && (
+            <PartiesPage
+              parties={parties}
+              contractors={contractors}
+              canManage={allow("contractors.manage")}
+              onSave={(party) => {
+                setParties((prev) => {
+                  const had = prev.some((p) => p.id === party.id);
+                  return had
+                    ? prev.map((p) => (p.id === party.id ? party : p))
+                    : [...prev, party];
+                });
+                log("تعديل", "عقد", `سجلُّ الأطراف — ${party.name}`);
+              }}
+              onAddMany={(rows) => {
+                const now = new Date().toISOString();
+                const added = rows.map((row) => ({
+                  ...row,
+                  id: newId(),
+                  createdAt: now,
+                }));
+                setParties((prev) => [...prev, ...added]);
+                log(
+                  "إنشاء",
+                  "عقد",
+                  `أُضيف ${added.length} إلى سجلّ الأطراف من عقودهم`
+                );
+              }}
+              onInstantContract={(party) => {
+                /*
+                  عقدٌ فوريّ: يُفتح برقمٍ جديدٍ وبيانات صاحبه، وتُكمل
+                  قيمتُه ودفعاتُه في شاشة المقاولين. ولا يُفتح بقيمةٍ
+                  مخترعة — فعقدٌ بقيمةٍ لم تُتّفق أسوأُ من لا عقد.
+                */
+                const year = new Date().getFullYear();
+                const used = new Set(contractors.map((c) => c.contractNumber));
+                let next = 9001;
+                while (used.has(String(next))) next += 1;
+                const number = String(next);
+
+                /*
+                  ويُبنى بالمسوِّي نفسِه لا بكائنٍ مكتوبٍ هنا: فحقلٌ
+                  يُضاف إلى العقد غداً يناله العقدُ الفوريُّ من تلقائه،
+                  ولو كُتبت الحقولُ هنا نقص منها ما استُجدّ.
+                */
+                const fresh = normalizeState({
+                  contractors: [
+                    {
+                      id: newId(),
+                    contractNumber: number,
+                    name: party.name,
+                    phone: party.phone,
+                    civilId: party.civilId,
+                    nationality: party.nationality,
+                    address: party.address,
+                    specialty: party.specialty,
+                    workType: party.specialty,
+                    counterpartyType: party.kind,
+                    contractType: "جاري التنفيذ",
+                    documentType: "عقد",
+                    contractDate: todayISO(),
+                      installments: [],
+                    },
+                  ],
+                }).contractors[0];
+                setContractors((prev) => [...prev, fresh]);
+                log(
+                  "إنشاء",
+                  "عقد",
+                  `عقدٌ فوريٌّ ${number} مع ${party.name} (${party.specialty || party.kind}) — سنة ${year}`
+                );
+                window.alert(
+                  `فُتح العقد ${number} مع ${party.name}.\n\nأكمِل قيمتَه وجدولَ دفعاته في شاشة المقاولين.`
+                );
+                setPage("المقاولون");
+              }}
+            />
+          )}
+
           {page === "الأعمال" && currentUser && (
             <TasksPage
               messages={messages}
@@ -2986,6 +3078,7 @@ export default function HomeV2() {
                 users,
                 audit,
                 messages,
+                parties,
                 yearLocks,
                 chart,
                 items,
@@ -6968,6 +7061,383 @@ function ClientStatementSheet({
  * ولا يُحذف طلبٌ عند إنجازه: يُختم بحالته ويبقى أثرُه. فمن أنجز يُعرف
  * أنه أنجز ومتى، ومن تُرك طلبُه شهراً يُعرف ذلك أيضاً.
  */
+/**
+ * سجلُّ الأطراف: الموردون والمقاولون، كلٌّ في بابه وبتخصّصه.
+ *
+ * وكان الطرفُ لا وجودَ له إلا في عقده: بياناتُه مكتوبةٌ في كلِّ عقدٍ
+ * من عقوده، فمن له ثلاثةُ عقودٍ مكتوبٌ ثلاثَ مرّات — ولو تغيّر هاتفُه
+ * صُحّح في ثلاثةٍ أو بقي قديماً في اثنين.
+ *
+ * وعزلُهم عن العملاء مقصود: فالاستعلامُ عن مقاولٍ لا يُخالطه عميل،
+ * والعقدُ معه صادرٌ لا وارد.
+ */
+function PartiesPage({
+  parties,
+  contractors,
+  canManage,
+  onSave,
+  onAddMany,
+  onInstantContract,
+}: {
+  parties: Party[];
+  contractors: Contractor[];
+  canManage: boolean;
+  onSave: (party: Party) => void;
+  onAddMany: (rows: Omit<Party, "id" | "createdAt">[]) => void;
+  onInstantContract: (party: Party) => void;
+}) {
+  const [kind, setKind] = useState<CounterpartyType>("مقاول");
+  const [editing, setEditing] = useState<Party | null>(null);
+  const [search, setSearch] = useState("");
+  const [showInactive, setShowInactive] = useState(false);
+
+  const groups = useMemo(
+    () => partiesBySpecialty(parties, kind),
+    [parties, kind]
+  );
+  const missing = useMemo(
+    () => unregistered(contractors, parties, kind),
+    [contractors, parties, kind]
+  );
+
+  const term = search.trim();
+  const shown = groups
+    .map((g) => ({
+      ...g,
+      parties: g.parties.filter(
+        (p) =>
+          (showInactive || p.active) &&
+          (term === "" ||
+            p.name.includes(term) ||
+            p.phone.includes(term) ||
+            p.specialty.includes(term))
+      ),
+    }))
+    .filter((g) => g.parties.length > 0);
+
+  const total = shown.reduce((n, g) => n + g.parties.length, 0);
+
+  const blank = (): Party => ({
+    id: newId(),
+    name: "",
+    kind,
+    specialty: "",
+    phone: "",
+    civilId: "",
+    address: "",
+    nationality: "",
+    licenseNumber: "",
+    notes: "",
+    active: true,
+    createdAt: new Date().toISOString(),
+  });
+
+  return (
+    <>
+      <Panel
+        title="الموردون والمقاولون"
+        subtitle="سجلٌّ ببياناتهم وتخصّصاتهم — معزولٌ عن عقود العملاء"
+      >
+        <div className="mb-4 flex flex-wrap items-center gap-3">
+          {(["مقاول", "مورّد", "عميل"] as CounterpartyType[]).map((name) => (
+            <button
+              key={name}
+              onClick={() => {
+                setKind(name);
+                setEditing(null);
+              }}
+              className={`rounded-lg px-5 py-2 font-bold ${
+                kind === name ? "bg-blue-600 text-white" : "bg-slate-100"
+              }`}
+            >
+              {name === "مقاول"
+                ? "المقاولون"
+                : name === "مورّد"
+                ? "الموردون"
+                : "العملاء"}
+            </button>
+          ))}
+
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="ابحث بالاسم أو الهاتف أو التخصّص"
+            className="min-w-56 flex-1 rounded border border-slate-300 px-3 py-2"
+          />
+
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={showInactive}
+              onChange={(e) => setShowInactive(e.target.checked)}
+              className="h-4 w-4"
+            />
+            أظهِر الموقوفين
+          </label>
+
+          {canManage && (
+            <button
+              onClick={() => setEditing(blank())}
+              className="rounded-lg bg-slate-900 px-5 py-2 font-bold text-white"
+            >
+              + جديد
+            </button>
+          )}
+        </div>
+
+        {/* ---- ما في العقود وليس في السجلّ ---- */}
+        {canManage && missing.length > 0 && (
+          <Banner tone="warn">
+            <b>{missing.length}</b>{" "}
+            {kind === "مورّد" ? "مورّداً" : kind === "مقاول" ? "مقاولاً" : "عميلاً"}{" "}
+            في عقود الشركة وليس في السجلّ. فالسجلُّ جاء بعد العقود، ولو تُرك
+            فارغاً بقي بلا فائدة.
+            <button
+              onClick={() => {
+                if (
+                  window.confirm(
+                    `يُضاف ${missing.length} إلى السجلّ بأسمائهم وهواتفهم ومدنيّاتهم كما في عقودهم.\n\nوما نقص من بيانٍ يُكمَل بعد.`
+                  )
+                ) {
+                  onAddMany(missing);
+                }
+              }}
+              className="mr-3 rounded-lg bg-amber-200 px-4 py-1 text-sm font-bold text-amber-900"
+            >
+              أضِفهم من عقودهم
+            </button>
+          </Banner>
+        )}
+
+        {shown.length === 0 ? (
+          <Banner tone="ok">
+            {parties.filter((p) => p.kind === kind).length === 0
+              ? "لا سجلَّ بعد — أضِف واحداً، أو أضِفهم من عقودهم أعلاه."
+              : "لا أحدَ يطابق البحث."}
+          </Banner>
+        ) : (
+          <>
+            <p className="mb-3 text-sm text-slate-600">
+              {total} في {shown.length}{" "}
+              {shown.length === 1 ? "تخصّص" : "تخصّصات"}
+            </p>
+
+            {shown.map((group) => (
+              <div key={group.specialty} className="mb-5">
+                <p className="mb-2 border-b-2 border-slate-300 pb-1 text-lg font-bold">
+                  {group.specialty}{" "}
+                  <span className="text-sm font-normal text-slate-500">
+                    ({group.parties.length})
+                  </span>
+                </p>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-200 text-right">
+                        <Th>الاسم</Th>
+                        <Th>الهاتف</Th>
+                        <Th>المدني / السجل</Th>
+                        <Th>الجنسية</Th>
+                        <Th>عقوده</Th>
+                        <Th>{""}</Th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {group.parties.map((party) => {
+                        const mine = partyContracts(contractors, party);
+                        return (
+                          <tr
+                            key={party.id}
+                            className={`border-b border-slate-100 ${
+                              party.active ? "" : "bg-slate-50 text-slate-400"
+                            }`}
+                          >
+                            <Td>
+                              <b>{party.name}</b>
+                              {!party.active && (
+                                <span className="mr-2 rounded bg-slate-200 px-2 py-0.5 text-xs">
+                                  موقوف
+                                </span>
+                              )}
+                              {party.notes && (
+                                <span className="block text-xs text-slate-500">
+                                  {party.notes}
+                                </span>
+                              )}
+                            </Td>
+                            <Td>{party.phone || "—"}</Td>
+                            <Td>{party.civilId || party.licenseNumber || "—"}</Td>
+                            <Td>{party.nationality || "—"}</Td>
+                            <Td className="tabular-nums">
+                              {mine.length > 0 ? (
+                                <span title={mine.map((c) => c.contractNumber).join("، ")}>
+                                  {mine.length}
+                                </span>
+                              ) : (
+                                "—"
+                              )}
+                            </Td>
+                            <Td>
+                              {canManage && (
+                                <span className="flex flex-wrap gap-2">
+                                  <button
+                                    onClick={() => setEditing(party)}
+                                    className="rounded bg-slate-100 px-3 py-1 text-xs font-bold"
+                                  >
+                                    عدّل
+                                  </button>
+                                  {party.active && party.kind !== "عميل" && (
+                                    <button
+                                      onClick={() => onInstantContract(party)}
+                                      className="rounded bg-green-600 px-3 py-1 text-xs font-bold text-white"
+                                      title="عقدٌ فوريٌّ ببياناته — تُكمل قيمتَه ودفعاتَه في شاشة المقاولين"
+                                    >
+                                      عقد فوريّ
+                                    </button>
+                                  )}
+                                </span>
+                              )}
+                            </Td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ))}
+          </>
+        )}
+      </Panel>
+
+      {/* ---- التحرير ---- */}
+      {editing && canManage && (
+        <Panel
+          title={editing.name ? `تعديل ${editing.name}` : "طرفٌ جديد"}
+          subtitle="بياناتُه مرّةً واحدةً — والعقودُ تُشير إليه ولا تُعيد كتابته"
+        >
+          <div className="mb-4 grid gap-3 md:grid-cols-3">
+            {(
+              [
+                ["name", "الاسم كما في المستند"],
+                ["phone", "الهاتف"],
+                ["civilId", "الرقم المدني"],
+                ["licenseNumber", "السجل التجاري / الترخيص"],
+                ["nationality", "الجنسية"],
+                ["address", "العنوان"],
+              ] as [keyof Party, string][]
+            ).map(([key, label]) => (
+              <div key={String(key)}>
+                <p className="mb-1 text-sm font-medium">{label}</p>
+                <input
+                  value={String(editing[key] ?? "")}
+                  onChange={(e) =>
+                    setEditing({ ...editing, [key]: e.target.value })
+                  }
+                  className="w-full rounded border border-slate-300 px-3 py-2"
+                />
+              </div>
+            ))}
+
+            <div>
+              <p className="mb-1 text-sm font-medium">النوع</p>
+              <select
+                value={editing.kind}
+                onChange={(e) =>
+                  setEditing({
+                    ...editing,
+                    kind: e.target.value as CounterpartyType,
+                  })
+                }
+                className="w-full rounded border border-slate-300 px-3 py-2"
+              >
+                {(["مقاول", "مورّد", "عميل"] as CounterpartyType[]).map((k) => (
+                  <option key={k} value={k}>
+                    {k}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <p className="mb-1 text-sm font-medium">التخصّص</p>
+              <input
+                list="party-specialties"
+                value={editing.specialty}
+                onChange={(e) =>
+                  setEditing({ ...editing, specialty: e.target.value })
+                }
+                placeholder="نجّار · حدّاد · صحّي"
+                className="w-full rounded border border-slate-300 px-3 py-2"
+              />
+            </div>
+
+            <div>
+              <p className="mb-1 text-sm font-medium">الحال</p>
+              <select
+                value={editing.active ? "عامل" : "موقوف"}
+                onChange={(e) =>
+                  setEditing({ ...editing, active: e.target.value === "عامل" })
+                }
+                className="w-full rounded border border-slate-300 px-3 py-2"
+              >
+                <option value="عامل">عامل</option>
+                <option value="موقوف">موقوف — لا يُقترح</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="mb-4">
+            <p className="mb-1 text-sm font-medium">ملاحظات</p>
+            <textarea
+              value={editing.notes}
+              onChange={(e) => setEditing({ ...editing, notes: e.target.value })}
+              rows={2}
+              className="w-full rounded border border-slate-300 px-3 py-2"
+            />
+          </div>
+
+          <div className="flex gap-3">
+            <button
+              onClick={() => {
+                if (editing.name.trim().length < 3) {
+                  window.alert("اكتب الاسم — واسمٌ بحرفين لا يُعرف به صاحبُه");
+                  return;
+                }
+                onSave({ ...editing, name: editing.name.trim() });
+                setEditing(null);
+              }}
+              className="rounded-lg bg-slate-900 px-6 py-3 font-bold text-white"
+            >
+              احفظ
+            </button>
+            <button
+              onClick={() => setEditing(null)}
+              className="rounded-lg bg-slate-200 px-6 py-3 font-bold"
+            >
+              إلغاء
+            </button>
+          </div>
+
+          <Banner tone="ok">
+            <b>ولا يُحذف من تعامَلتَ معه</b> — يُوقَف فلا يُقترح في عقدٍ جديد،
+            ويبقى أثرُه في عقوده. ومن حُذف سجلُّه بقيت عقودُه بلا صاحبٍ يُعرف.
+          </Banner>
+        </Panel>
+      )}
+
+      <datalist id="party-specialties">
+        {[...new Set([...SPECIALTIES, ...parties.map((p) => p.specialty)])]
+          .filter(Boolean)
+          .map((name) => (
+            <option key={name} value={name} />
+          ))}
+      </datalist>
+    </>
+  );
+}
+
 function TasksPage({
   messages,
   users,

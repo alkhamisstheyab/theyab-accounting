@@ -105,6 +105,7 @@ export async function readState(db: Queryable): Promise<AppState> {
   state.quotations = await objects(db, "quotations", "number");
   state.invoices = await objects(db, "invoices", "number");
   state.messages = await objects(db, "messages", "created_at DESC");
+  state.parties = await objects(db, "parties", "name");
   state.audit = await objects(db, "audit_log", "at DESC");
 
   /* ---- البيانات الأساسية: أعمدتها هي النوع نفسه ---- */

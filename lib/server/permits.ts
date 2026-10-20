@@ -45,6 +45,14 @@ const RULES: Record<string, Rule> = {
     شهراً يُعرف ذلك. فلا صلاحيةَ حذفٍ لها أصلاً.
   */
   messages: { write: [], remove: ["__لا أحد__" as Permission] },
+  /*
+    ولا يُحذف طرفٌ تُعامل معه: يُوقَف فلا يُقترح، ويبقى أثرُه في
+    عقوده. ومن حُذف سجلُّه بقيت عقودُه بلا صاحبٍ يُعرف.
+  */
+  parties: {
+    write: ["contractors.manage"],
+    remove: ["contractors.manage"],
+  },
   employees: { write: ["employees.manage"], remove: ["employees.manage"] },
   attendance: { write: ["attendance.manage"], remove: ["attendance.manage"] },
   payrollRuns: { write: ["payroll.run"], remove: ["payroll.run"] },
@@ -268,6 +276,8 @@ const READ_RULES: Record<string, Permission[]> = {
     أرسله هو.
   */
   messages: [],
+  /* والأطرافُ يقرؤها من يقرأ العقود: فهم أصحابُها */
+  parties: ["contractors.view", "contractors.manage"],
 
   chart: [],
   items: [],
