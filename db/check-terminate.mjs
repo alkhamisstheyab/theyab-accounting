@@ -43,9 +43,14 @@ check(
 );
 check("ويكتب الخصم وسببه وحدهما", /deduction:/.test(fn) && /deductionReason:/.test(fn));
   /* الصفحة بنهايات CRLF، فالمطابقة بتعبيرٍ يتسامح في فواصل الأسطر */
+/*
+  وزِيد شرطٌ ثالث: ولا تُعرض على عقدٍ أُنهي بوجهٍ مثبَت. فالإنهاءُ صار
+  له بابُه — إنجازاً أو تراضياً أو فسخاً — وهذه لوحةُ إسقاطِ الباقي
+  وحدَه. فلو عُرضت على عقدٍ أُنهي لظهر لصاحبه بابان لعملٍ واحد.
+*/
 check(
-  "ولمن يملك إقرار الدفعات — ولا تُعرض على عقدٍ انتهى",
-  /\{canConfirm && !settle\.settled && \(\s+<div className="mb-4 rounded-xl border border-slate-300/.test(
+  "ولمن يملك إقرار الدفعات — ولا تُعرض على عقدٍ انتهى أو أُنهي",
+  /\{canConfirm && !settle\.settled && !contract\.closure && \(\s+<div className="mb-4 rounded-xl border border-slate-300/.test(
     page
   )
 );

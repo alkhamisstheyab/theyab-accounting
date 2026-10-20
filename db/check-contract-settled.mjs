@@ -162,7 +162,7 @@ check(
 );
 check(
   "ولا تُعرض لوحةُ الإقفال على عقدٍ انتهى — فلا تفعل شيئاً",
-  page.includes("{canConfirm && !settle.settled && (")
+  page.includes("{canConfirm && !settle.settled && !contract.closure && (")
 );
 check(
   "والمعروض افتراضاً الجارية",

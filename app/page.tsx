@@ -278,6 +278,14 @@ import {
   type ClientStatement,
 } from "@/lib/receivables";
 import {
+  CLOSURE_KINDS,
+  canClose,
+  canIssueQuittance,
+  closureLabel,
+  type ClosureKind,
+  type ContractClosure,
+} from "@/lib/closure";
+import {
   REVIEW_CRITERIA,
   REVIEW_PERIODS,
   REVIEW_TOTAL,
@@ -583,6 +591,8 @@ export default function HomeV2() {
   const [clientStatement, setClientStatement] = useState<ClientStatement | null>(
     null
   );
+  /* عقدٌ تُطبع براءةُ ذمّته */
+  const [quittanceFor, setQuittanceFor] = useState<Contractor | null>(null);
   const [users, setUsers] = useState<User[]>([]);
   /* من دخل الخادم: هويّته وصلاحيته معاً، ولا شيء منهما من الجهاز */
   const [session, setSession] = useState<ServerUser | null>(null);
@@ -2834,6 +2844,81 @@ export default function HomeV2() {
               canApprove={allow("contracts.approve")}
               canConfirm={allow("contracts.confirm")}
               setContractors={setContractors}
+              /*
+                إنهاءُ العقد: وجهٌ مثبَتٌ باسم من أنهاه ويومِه وسببه.
+
+                والمالُ يُسوّى بما هو مبنيّ: في التراضي والفسخ يُسقَط ما
+                بقي من كلِّ دفعةٍ لم تُنفَّذ — بلا اعتماد إنجازٍ لم يقع —
+                والمدفوعُ لا يُمسّ. وفي الإنجاز لا يُسقَط شيءٌ، فلا باقيَ.
+              */
+              /*
+                إنهاءُ العقد: الشاشةُ تجمع البيانَ وتُسقط الباقيَ بما
+                هو مبنيٌّ فيها، والأمُّ تُثبت وتُسجّل. فلا يُنقل عملُ
+                المال إلى هنا، ولا يُنقل جمعُ البيان إلى هناك.
+              */
+              onClose={(contract, closure) => {
+                setContractors((prev) =>
+                  prev.map((c) => (c.id === contract.id ? { ...c, closure } : c))
+                );
+                log(
+                  "اعتماد",
+                  "عقد",
+                  `أُنهي العقد ${contract.contractNumber} — ${closure.kind}` +
+                    (closure.settledAmount
+                      ? ` على ${fmt(closure.settledAmount)} د.ك`
+                      : ""),
+                  { after: closure.reason }
+                );
+              }}
+              onIssueQuittance={(contract) => {
+                /*
+                  وبراءةُ الذمّة إقرارٌ بأن لا حقَّ لأحدٍ على الآخر. فلا
+                  تُصدَر وفي الذمّة مال — والحارسُ في canIssueQuittance —
+                  ولا تُصدَر مرّتين بلا علمِ صاحبها.
+                */
+                if (
+                  !window.confirm(
+                    "تُصدَر براءةُ الذمّة: إقرارٌ بأن لا حقَّ لأحد الطرفين على الآخر في هذا العقد.\n\nوهي حُجّةٌ عليك كما هي حُجّةٌ لك. أتُصدرها؟"
+                  )
+                ) {
+                  return;
+                }
+                const stamp = {
+                  quittanceAt: new Date().toISOString(),
+                  quittanceBy: currentUser?.name ?? "",
+                };
+                setContractors((prev) =>
+                  prev.map((c) =>
+                    c.id === contract.id && c.closure
+                      ? { ...c, closure: { ...c.closure, ...stamp } }
+                      : c
+                  )
+                );
+                log(
+                  "اعتماد",
+                  "عقد",
+                  `براءةُ ذمّةٍ للعقد ${contract.contractNumber}`
+                );
+                setQuittanceFor({
+                  ...contract,
+                  closure: contract.closure
+                    ? { ...contract.closure, ...stamp }
+                    : undefined,
+                });
+              }}
+              onQuittance={(contract) => setQuittanceFor(contract)}
+              onReopen={(contract) => {
+                setContractors((prev) =>
+                  prev.map((c) =>
+                    c.id === contract.id ? { ...c, closure: undefined } : c
+                  )
+                );
+                log(
+                  "تعديل",
+                  "عقد",
+                  `رُفع إنهاءُ العقد ${contract.contractNumber} — عاد جارياً`
+                );
+              }}
               onLog={log}
             />
           )}
@@ -3588,6 +3673,14 @@ export default function HomeV2() {
         />
       )}
 
+      {quittanceFor && quittanceFor.closure && (
+        <QuittanceSheet
+          contract={quittanceFor}
+          company={company}
+          settlement={contractSettlement(approvedMovements, quittanceFor)}
+          onClose={() => setQuittanceFor(null)}
+        />
+      )}
       {clientStatement && (
         <ClientStatementSheet
           statement={clientStatement}
@@ -6985,6 +7078,172 @@ const BLANK_CONTRACT = {
  * ويُذكر ما أُنفق على قسيمته في مدّة التأخير: فهو من دفاتر الشركة،
  * وهو الذي يُفهم منه أثرُ التأخير بلا دعوى ولا غرامة.
  */
+/**
+ * براءةُ الذمّة — تُطبع بعد إنهاء العقد.
+ *
+ * **ونصُّها القانونيُّ ينتظر ورقةَ الشركة.** فما كُتب هنا هيكلٌ
+ * وبياناتٌ تُقرأ من العقد نفسه: الطرفان ورقمُ العقد وقيمتُه وما
+ * سُوّيت عليه الحقوق ووجهُ الإنهاء. وأمّا الصيغةُ المُلزِمة فلا
+ * تُكتب من عندنا: بندٌ يُوقَّع ويُحتجّ به لا يُخترع، ومن كتب صيغةً
+ * من رأسه أوقع صاحبَها في إقرارٍ لم يُرده.
+ *
+ * فالموضعُ معلَّمٌ ظاهرٌ في المطبوعة نفسها، يُقرأ فيُستبدل.
+ */
+function QuittanceSheet({
+  contract,
+  company,
+  settlement,
+  onClose,
+}: {
+  contract: Contractor;
+  company: CompanyProfile;
+  settlement: { paid: number; remaining: number; net: number };
+  onClose: () => void;
+}) {
+  const closure = contract.closure;
+  const today = new Date().toLocaleDateString("ar-KW");
+  const second = contract.counterpartyType === "عميل" ? "المالك" : "المقاول";
+
+  return (
+    <div
+      className="voucher-sheet fixed inset-0 z-50 overflow-auto bg-slate-800/60 p-6"
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="voucher-body designed-sheet mx-auto flex max-w-3xl flex-col bg-white shadow-xl"
+        style={{ minHeight: "27cm" }}
+      >
+        <div className="flex justify-end gap-3 p-6 pb-0 no-print">
+          <button
+            onClick={() => window.print()}
+            className="rounded-lg bg-slate-900 px-6 py-3 font-bold text-white"
+          >
+            🖨 طباعة
+          </button>
+          <button
+            onClick={onClose}
+            className="rounded-lg bg-slate-200 px-6 py-3 font-bold"
+          >
+            إغلاق
+          </button>
+        </div>
+
+        <div style={{ height: 14, background: DOC_GOLD_SOFT }} />
+
+        <div className="flex-1 px-10 pt-8">
+          <div className="mb-6 flex items-start justify-between border-b-2 border-slate-800 pb-4">
+            <div>
+              <div className="text-2xl font-bold">{company.name}</div>
+              {company.nameEn && (
+                <div style={{ fontSize: "9pt" }}>{company.nameEn}</div>
+              )}
+              {company.crNumber && (
+                <div className="text-sm text-slate-600">
+                  س.ت {company.crNumber}
+                </div>
+              )}
+            </div>
+            <div className="text-left text-sm">
+              <div className="font-bold">براءة ذمّة</div>
+              <div>{today}</div>
+            </div>
+          </div>
+
+          <h2 className="mb-6 text-center text-xl font-bold">
+            إقرار براءة ذمّة
+          </h2>
+
+          <table className="mb-6 w-full border-collapse text-sm">
+            <tbody>
+              {(
+                [
+                  ["رقم العقد", contract.contractNumber],
+                  ["نوع العقد", contract.workType || contract.specialty || "—"],
+                  [`الطرف الثاني (${second})`, contract.name],
+                  ["الرقم المدني", contract.civilId || "—"],
+                  ["المشروع", contract.project || "—"],
+                  ["تاريخ العقد", contract.contractDate || "—"],
+                  ["قيمة العقد", `${fmt(contract.contractValue)} د.ك`],
+                  ["المستحقّ بعد الخصوم", `${fmt(settlement.net)} د.ك`],
+                  ["المدفوع", `${fmt(settlement.paid)} د.ك`],
+                  [
+                    "وجه الإنهاء",
+                    closure
+                      ? `${closureLabel(closure)} — ${closure.date}`
+                      : "—",
+                  ],
+                  [
+                    "سبب الإنهاء",
+                    closure?.reason || "—",
+                  ],
+                  ...(closure?.settledAmount
+                    ? ([
+                        [
+                          "سُوّيت الحقوق على",
+                          `${fmt(closure.settledAmount)} د.ك`,
+                        ],
+                      ] as [string, string][])
+                    : []),
+                ] as [string, string][]
+              ).map(([label, value]) => (
+                <tr key={label}>
+                  <td className="w-56 border border-slate-300 bg-slate-50 px-3 py-2 font-bold">
+                    {label}
+                  </td>
+                  <td className="border border-slate-300 px-3 py-2">{value}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          {/* ================================================== */}
+          {/* موضعُ النصّ القانونيّ — ينتظر ورقةَ الشركة          */}
+          {/* ================================================== */}
+          <div className="mb-6 rounded border-2 border-dashed border-amber-500 bg-amber-50 p-4 text-sm leading-7">
+            <p className="mb-2 font-bold text-amber-900">
+              [ موضعُ صيغة براءة الذمّة — تُستبدل بنصّ الشركة ]
+            </p>
+            <p className="text-amber-900">
+              نصُّ البراءة لم يُكتب بعد. وبندٌ يُوقَّع ويُحتجّ به لا
+              يُخترع — فأرسل صيغةَ براءةِ ذمّةٍ سابقةً من ورق الشركة،
+              تُوضع هنا ويُملأ ما فيها من بياناتٍ من العقد نفسه
+              تلقائيّاً: الطرفان ورقمُ العقد وقيمتُه وما سُوّيت عليه
+              الحقوق.
+            </p>
+          </div>
+
+          <p className="mb-8 text-sm leading-7">
+            وقد تمَّ التوقيع على هذا الإقرار بتاريخ <b>{today}</b>
+            {closure?.quittanceAt && (
+              <>
+                {" "}
+                بموجب إنهاء العقد المؤرَّخ <b>{closure.date}</b>
+              </>
+            )}
+            .
+          </p>
+
+          <div className="mt-12 flex justify-between text-sm">
+            <div>
+              <div className="mb-2 font-bold">الطرف الأول</div>
+              <div className="mb-10">{company.name}</div>
+              <div className="border-t border-slate-400 pt-1">التوقيع</div>
+            </div>
+            <div>
+              <div className="mb-2 font-bold">الطرف الثاني</div>
+              <div className="mb-10">{contract.name}</div>
+              <div className="border-t border-slate-400 pt-1">التوقيع</div>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ height: 14, background: DOC_GOLD_SOFT }} />
+      </div>
+    </div>
+  );
+}
+
 function ClientStatementSheet({
   statement,
   company,
@@ -20508,6 +20767,10 @@ function ApprovalsPage({
   canConfirm,
   setContractors,
   onLog,
+  onQuittance,
+  onClose,
+  onIssueQuittance,
+  onReopen,
 }: {
   contractors: Contractor[];
   projects: Project[];
@@ -20524,6 +20787,10 @@ function ApprovalsPage({
     summary: string,
     change?: { before?: string; after?: string }
   ) => void;
+  onQuittance: (contract: Contractor) => void;
+  onClose: (contract: Contractor, closure: ContractClosure) => void;
+  onIssueQuittance: (contract: Contractor) => void;
+  onReopen: (contract: Contractor) => void;
 }) {
   const [projectFilter, setProjectFilter] = useState("الكل");
   const [note, setNote] = useState("");
@@ -20569,6 +20836,54 @@ function ApprovalsPage({
    * لم يُنجَز فيُشهد به — ويكتب سبباً واحداً في الجميع. ولا يمسّ المدفوع:
    * كلُّ دفعةٍ تُقفل على ما صُرف عليها، فيصير المستحقّ مساوياً للمصروف.
    */
+  /**
+   * إنهاءُ العقد بوجهه: يُجمع البيانُ، ويُسقَط الباقي إن لزم، ثم يُثبت.
+   *
+   * وفي التراضي والفسخ يُسقَط ما بقي من كلِّ دفعةٍ لم تُنفَّذ — بلا
+   * اعتماد إنجازٍ لم يقع — والمدفوعُ لا يُمسّ. وفي الإنجاز لا يُسقَط
+   * شيء، فلا باقيَ فيه.
+   */
+  const closeContract = (contract: Contractor, kind: ClosureKind) => {
+    const reason = window.prompt(
+      kind === "إنجاز"
+        ? "سببُ الإنهاء بالإنجاز — ولو كلمةً: «تمَّ العملُ وسُلّم»"
+        : kind === "تراضٍ"
+        ? "سببُ الإنهاء بالتراضي — ولا يُنهى عقدٌ بغيره"
+        : "سببُ الفسخ — وهو حُجّتُك يوم تُسأل"
+    );
+    if (reason == null) return;
+    if (reason.trim().length < 4) {
+      window.alert("اكتب السبب — ولا يُنهى عقدٌ بغيره");
+      return;
+    }
+
+    let settledAmount: number | undefined;
+    if (kind !== "إنجاز") {
+      const answer = window.prompt(
+        "المبلغُ الذي سُوّيت عليه الحقوقُ نهائيّاً (د.ك) — اتركه فارغاً إن لم يُتَّفق على رقم:",
+        ""
+      );
+      if (answer == null) return;
+      const value = round3(Number(answer) || 0);
+      settledAmount = value > 0 ? value : undefined;
+      /* والإسقاطُ بما هو مبنيٌّ في هذه الشاشة */
+      /* والإسقاطُ يأخذ العقدَ وحده — ويسأل عن سببه بنفسه */
+      terminateContract(contract);
+    }
+
+    const note = window.prompt("ملاحظةٌ تُحفظ مع الإنهاء (اختيارية):", "") ?? "";
+
+    onClose(contract, {
+      kind,
+      date: todayISO(),
+      reason: reason.trim(),
+      settledAmount,
+      note: note.trim(),
+      by: approverName,
+      at: new Date().toISOString(),
+    });
+  };
+
   const terminateContract = (contract: Contractor) => {
     const paidOn = contractPayments(movements, contract.contractNumber);
     const shortfalls = contract.installments.map((i) => {
@@ -21189,9 +21504,170 @@ function ApprovalsPage({
                 فيُضغط الزرّ فيردّ «لا باقيَ في هذا العقد» — فلا تُعرض
                 لوحةٌ لا تفعل شيئاً.
               */}
-              {canConfirm && !settle.settled && (
+              {/*
+                إنهاءُ العقد — وجهٌ مثبَتٌ لا مشتقّ.
+
+                وحالُه كان يُحسب من دفعاته، وذاك يصلح للقراءة ولا يصلح
+                للإنهاء: فعقدٌ فُسخ بعد نصفه ليس «منتهياً» ولا
+                «جارياً»، وعقدٌ أُنهي بالتراضي على أقلَّ من قيمته لا
+                يُعرف من حسابه أنه أُنهي.
+              */}
+              {contract.closure ? (
+                <div
+                  className={`mb-4 rounded-xl border p-3 ${
+                    contract.closure.kind === "فسخ"
+                      ? "border-red-300 bg-red-50"
+                      : "border-green-300 bg-green-50"
+                  }`}
+                >
+                  <p className="mb-1 font-bold">
+                    {closureLabel(contract.closure)} —{" "}
+                    {contract.closure.date}
+                  </p>
+                  <p className="mb-1 text-sm">
+                    <b>السبب:</b> {contract.closure.reason || "—"}
+                  </p>
+                  {contract.closure.settledAmount ? (
+                    <p className="mb-1 text-sm">
+                      <b>سُوّيت الحقوق على:</b>{" "}
+                      {fmt(contract.closure.settledAmount)} د.ك
+                    </p>
+                  ) : null}
+                  {contract.closure.note && (
+                    <p className="mb-1 text-sm">{contract.closure.note}</p>
+                  )}
+                  <p className="text-xs text-slate-600">
+                    أنهاه {contract.closure.by} ·{" "}
+                    {new Date(contract.closure.at).toLocaleString("ar-KW")}
+                  </p>
+
+                  {/* ---- براءةُ الذمّة ---- */}
+                  {(() => {
+                    const verdict = canIssueQuittance(contract.closure, settle);
+                    if (contract.closure.quittanceAt) {
+                      return (
+                        <p className="mt-2 rounded-lg bg-white px-3 py-2 text-sm">
+                          <b>صدرت براءةُ الذمّة</b> في{" "}
+                          {contract.closure.quittanceAt.slice(0, 10)} بيد{" "}
+                          {contract.closure.quittanceBy}.
+                          <button
+                            onClick={() => onQuittance(contract)}
+                            className="mr-3 rounded bg-slate-900 px-3 py-1 text-xs font-bold text-white"
+                          >
+                            اطبعها
+                          </button>
+                        </p>
+                      );
+                    }
+                    return (
+                      <div className="mt-2 rounded-lg bg-white px-3 py-2">
+                        {verdict.blocking.map((why: string) => (
+                          <p key={why} className="text-sm text-red-800">
+                            ✗ {why}
+                          </p>
+                        ))}
+                        {verdict.warnings.map((why: string) => (
+                          <p key={why} className="text-sm text-amber-800">
+                            ⚠ {why}
+                          </p>
+                        ))}
+                        {verdict.allowed && canConfirm && (
+                          <button
+                            onClick={() => onIssueQuittance(contract)}
+                            className="mt-1 rounded-lg bg-slate-900 px-4 py-2 text-sm font-bold text-white"
+                          >
+                            أصدِر براءةَ الذمّة
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })()}
+
+                  {canConfirm && (
+                    <button
+                      onClick={() => {
+                        if (
+                          window.confirm(
+                            "يُرفع الإنهاءُ فيعود العقدُ جارياً.\n\nوما أُسقط من دفعاتٍ لا يعود بهذا — يُراجع كلُّ دفعةٍ بنفسها."
+                          )
+                        ) {
+                          onReopen(contract);
+                        }
+                      }}
+                      className="mt-2 rounded-lg bg-slate-200 px-4 py-1 text-xs font-bold"
+                    >
+                      ارفع الإنهاء
+                    </button>
+                  )}
+                </div>
+              ) : (
+                canConfirm && (
+                  <div className="mb-4 rounded-xl border border-slate-300 bg-slate-50 p-3">
+                    <p className="mb-2 text-sm font-bold">إنهاءُ هذا العقد</p>
+                    <div className="mb-2 flex flex-wrap gap-2">
+                      {CLOSURE_KINDS.map((kind) => {
+                        const verdict = canClose(
+                          kind,
+                          settle,
+                          contract.contractValue
+                        );
+                        return (
+                          <button
+                            key={kind}
+                            onClick={() => closeContract(contract, kind)}
+                            disabled={!verdict.allowed}
+                            title={
+                              verdict.allowed
+                                ? verdict.warnings.join(" · ")
+                                : verdict.blocking.join(" · ")
+                            }
+                            className={`rounded-lg px-5 py-2 text-sm font-bold ${
+                              !verdict.allowed
+                                ? "cursor-not-allowed bg-slate-200 text-slate-400"
+                                : kind === "فسخ"
+                                ? "bg-red-700 text-white"
+                                : kind === "إنجاز"
+                                ? "bg-green-700 text-white"
+                                : "bg-slate-800 text-white"
+                            }`}
+                          >
+                            {kind === "إنجاز"
+                              ? "أُنهي بالإنجاز"
+                              : kind === "تراضٍ"
+                              ? "أُنهي بالتراضي"
+                              : "فسخٌ"}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {(() => {
+                      const done = canClose(
+                        "إنجاز",
+                        settle,
+                        contract.contractValue
+                      );
+                      if (done.allowed) return null;
+                      return done.blocking.map((why: string) => (
+                        <p key={why} className="text-xs text-slate-600">
+                          <b>«الإنجاز» لا يصلح الآن:</b> {why}
+                        </p>
+                      ));
+                    })()}
+                    <p className="mt-2 text-xs text-slate-600">
+                      <b>الإنجاز</b> تمَّ العملُ ووُفّي المال ·{" "}
+                      <b>التراضي</b> اتُّفق على إنهائه قبل تمامه وسُوّيت
+                      الحقوق برقمٍ يُكتب · <b>الفسخ</b> أُنهي بإرادةِ طرفٍ
+                      لتقصيرٍ أو امتناع. وفي الوجهين الأخيرين يُسقَط ما بقي
+                      من كلِّ دفعةٍ لم تُنفَّذ، <b>بلا اعتماد إنجازٍ لم
+                      يقع</b>، والمدفوعُ لا يُمسّ.
+                    </p>
+                  </div>
+                )
+              )}
+
+              {canConfirm && !settle.settled && !contract.closure && (
                 <div className="mb-4 rounded-xl border border-slate-300 bg-slate-50 p-3">
-                  <p className="mb-1 text-sm font-bold">أُنهي هذا العقد؟</p>
+                  <p className="mb-1 text-sm font-bold">إسقاطُ ما بقي وحده (بلا إنهاء)</p>
                   <p className="mb-2 text-xs text-slate-600">
                     يُسقط ما بقي من كل دفعةٍ لم تُنفَّذ بسببٍ واحدٍ يُحفظ معها،
                     <b> بلا اعتماد إنجازٍ لم يقع</b>. والمدفوع لا يُمسّ: تُقفل

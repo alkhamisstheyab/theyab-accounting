@@ -58,6 +58,11 @@ import {
   ScopeKey,
   WorkItem,
 } from "./quotations";
+import {
+  CLOSURE_KINDS,
+  type ClosureKind,
+  type ContractClosure,
+} from "./closure";
 import type { Party } from "./parties";
 import {
   REVIEW_MAX,
@@ -374,6 +379,18 @@ export type Contractor = {
   project: string;
   contractNumber: string;
   contractType: string;
+
+  /**
+   * إنهاءُ العقد — إنجازاً أو تراضياً أو فسخاً.
+   *
+   * وحالُ العقد كان مشتقّاً من دفعاته: «مُنتهٍ مالياً» إن لم يبقَ
+   * مستحقّ. وذاك يصلح للقراءة ولا يصلح للإنهاء — فعقدٌ فُسخ بعد نصفه
+   * ليس «مُنتهياً» ولا «جارياً»، وعقدٌ أُنهي بالتراضي على أقلَّ من
+   * قيمته لا يُعرف من حسابه أنه أُنهي.
+   *
+   * فالمثبَتُ يَسبق المشتقّ: إن كُتب هنا إنهاءٌ فهو الحال.
+   */
+  closure?: ContractClosure;
   workType: string;
   contractValue: number;
   installmentsCount: number;
@@ -931,6 +948,33 @@ function migrateWorkItems(raw: unknown): WorkItem[] {
       };
     })
     .filter((w) => w.stage);
+}
+
+/**
+ * إنهاءُ العقد كما حُفظ.
+ *
+ * وبلا سببٍ لا إنهاء: فالصفُّ الذي فيه وجهٌ ولا سببَ ناقصٌ لا يُحتجّ
+ * به — وإنهاءٌ بلا سببٍ مكتوبٍ خلافٌ مؤجَّل. ولا يُسقط الصفُّ كلُّه
+ * لذلك، فإسقاطُه يُعيد العقدَ «جارياً» وهو منتهٍ.
+ */
+function closureOf(raw: unknown): ContractClosure | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const c = raw as Record<string, unknown>;
+  const kind = str(c.kind);
+  if (!(CLOSURE_KINDS as readonly string[]).includes(kind)) return undefined;
+  if (!str(c.date)) return undefined;
+  return {
+    kind: kind as ClosureKind,
+    date: str(c.date),
+    reason: str(c.reason),
+    settledAmount:
+      Number(c.settledAmount) > 0 ? round3(Number(c.settledAmount)) : undefined,
+    note: str(c.note),
+    by: str(c.by),
+    at: str(c.at) || new Date().toISOString(),
+    quittanceAt: str(c.quittanceAt) || undefined,
+    quittanceBy: str(c.quittanceBy) || undefined,
+  };
 }
 
 function migrateQuotationLine(raw: unknown): QuotationLine {
@@ -1528,6 +1572,7 @@ function migrateContractor(raw: unknown): Contractor {
     project: str(c.project),
     contractNumber: str(c.contractNumber),
     contractType: str(c.contractType),
+    closure: closureOf(c.closure),
     workType: str(c.workType),
     contractValue: round3(Number(c.contractValue) || 0),
     installmentsCount: Number(c.installmentsCount) || installments.length,

@@ -82,6 +82,7 @@
     "check:tasks": "node db/check-tasks.mjs",
     "check:parties": "node db/check-parties.mjs",
     "check:reviews": "node db/check-reviews.mjs",
+    "check:closure": "node db/check-closure.mjs",
     "restore:confirmations": "node db/restore-confirmations.mjs"
   },
   "dependencies": {
