@@ -380,6 +380,7 @@ export const PAGE_PERMISSION: Record<string, Permission> = {
   الفواتير: "invoices.view",
   "اعتماد الحركات": "movements.approve",
   "اعتماد المراحل": "contracts.approve",
+  "متابعة المراحل": "contractors.view",
   "متابعة السلف": "advances.view",
   المستحقات: "dues.view",
   "استلام المواد": "materials.view",

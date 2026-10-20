@@ -12,6 +12,7 @@
  */
 
 import { Movement, isApproved, isNonProject, round3 } from "./accounting";
+import { milestoneSummary, milestones } from "./milestones";
 import { AuditEntry } from "./audit";
 import type { Employee } from "./payroll";
 import { Permission } from "./permissions";
@@ -324,11 +325,86 @@ function taskNotices(input: NoticeInput): Notice[] {
   ];
 }
 
+/**
+ * تنبيهاتُ المراحل: ما يقرب موعدُه، وما تأخّر، وما توقّف.
+ *
+ * وكانت التنبيهاتُ كلُّها على ما **وقع**. وهذه على ما **سيقع** — وبها
+ * تُدرك المرحلةُ قبل أن تتعثّر.
+ *
+ * ويُجمع كلُّ بابٍ في تنبيهٍ واحدٍ لا تنبيهٍ لكلِّ مرحلة: فعشرون
+ * تنبيهاً في شاشةٍ واحدةٍ تُقرأ كأنها لا شيء، ثم يُهمل معها الصادق.
+ */
+function milestoneNotices(input: NoticeInput): Notice[] {
+  const rows = milestones(input.contractors, new Date(`${input.today}T00:00:00Z`));
+  const sum = milestoneSummary(rows);
+  const out: Notice[] = [];
+
+  const name = (m: (typeof rows)[number]) =>
+    `العقد ${m.contractNumber} د${m.number}${m.stage ? " · " + m.stage : ""}`;
+
+  if (sum.late.length > 0) {
+    out.push({
+      id: "milestones-late",
+      /* و«action» أشدُّ ما عندنا — فالمتأخّرُ يُعمَل فيه لا يُقرأ */
+      tone: "action",
+      title:
+        sum.late.length === 1
+          ? "مرحلةٌ تأخّرت عن موعدها المتوقَّع"
+          : `${sum.late.length} مراحلَ تأخّرت عن مواعيدها`,
+      detail:
+        `أقدمُها ${name(sum.late[0])} — ${Math.abs(sum.late[0].days)} يوماً. ` +
+        "ومن توقّف عملُه بعذرٍ فوسِّمه «موقوفاً» بسببه، فلا يُعدّ متأخّراً.",
+      page: "متابعة المراحل",
+      count: sum.late.length,
+    });
+  }
+
+  if (sum.soon.length > 0) {
+    out.push({
+      id: "milestones-soon",
+      tone: "warn",
+      title:
+        sum.soon.length === 1
+          ? "مرحلةٌ يقرب موعدُها"
+          : `${sum.soon.length} مراحلَ تقرب مواعيدُها`,
+      detail:
+        `أقربُها ${name(sum.soon[0])} — ` +
+        (sum.soon[0].days === 0 ? "اليوم" : `بعد ${sum.soon[0].days} يوماً`) +
+        ". فيُعاينها المهندسُ ليعتمدها في موعدها.",
+      page: "متابعة المراحل",
+      count: sum.soon.length,
+    });
+  }
+
+  if (sum.longStalled.length > 0) {
+    out.push({
+      id: "milestones-stalled",
+      tone: "warn",
+      title:
+        sum.longStalled.length === 1
+          ? "عملٌ موقوفٌ منذ أسبوعين فأكثر"
+          : `${sum.longStalled.length} أعمالٍ موقوفةٌ منذ أسبوعين فأكثر`,
+      detail:
+        `أطولُها ${name(sum.longStalled[0])} — ${sum.longStalled[0].stalledDays} يوماً` +
+        (sum.longStalled[0].stalledReason
+          ? `: ${sum.longStalled[0].stalledReason}`
+          : " بلا سببٍ مكتوب") +
+        ". ويُسأل عنه.",
+      page: "متابعة المراحل",
+      count: sum.longStalled.length,
+    });
+  }
+
+  return out;
+}
+
 export function buildNotices(input: NoticeInput): Notice[] {
   const notices: Notice[] = [];
 
   /* ونداءُ إنسانٍ باسمه يُقدَّم على كلّ ما اشتُقّ من الدفاتر */
   notices.push(...taskNotices(input));
+  /* وما سيقع قبل أن يقع — فالإدراكُ قبل التعثّر */
+  notices.push(...milestoneNotices(input));
 
   /* ---- ما ينتظر قراراً ---- */
 

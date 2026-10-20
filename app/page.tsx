@@ -278,6 +278,11 @@ import {
   type ClientStatement,
 } from "@/lib/receivables";
 import {
+  milestoneLabel,
+  milestoneSummary,
+  milestones,
+} from "@/lib/milestones";
+import {
   CLOSURE_KINDS,
   canClose,
   canIssueQuittance,
@@ -424,6 +429,7 @@ const PAGES = [
   "ربط الحركات",
   "اعتماد الحركات",
   "اعتماد المراحل",
+  "متابعة المراحل",
   "متابعة السلف",
   "المستحقات",
   "استلام المواد",
@@ -492,6 +498,7 @@ const PAGE_GROUPS: { group: string; pages: string[] }[] = [
     pages: [
       "اعتماد الحركات",
       "اعتماد المراحل",
+      "متابعة المراحل",
       "متابعة السلف",
       "المستحقات",
       "سجل التدقيق",
@@ -2362,6 +2369,63 @@ export default function HomeV2() {
               canManage={allow("quotations.manage")}
               currentUserName={currentUser.name}
               onLog={log}
+            />
+          )}
+
+          {page === "متابعة المراحل" && (
+            <MilestonesPage
+              contractors={contractors}
+              canManage={allow("contracts.approve")}
+              onSetExpected={(contractNumber, installmentNumber, date) => {
+                setContractors((prev) =>
+                  prev.map((c) =>
+                    c.contractNumber !== contractNumber
+                      ? c
+                      : {
+                          ...c,
+                          installments: c.installments.map((i) =>
+                            i.number !== installmentNumber
+                              ? i
+                              : { ...i, expectedDate: date || undefined }
+                          ),
+                        }
+                  )
+                );
+              }}
+              onSetStalled={(contractNumber, installmentNumber, stalled, reason) => {
+                setContractors((prev) =>
+                  prev.map((c) =>
+                    c.contractNumber !== contractNumber
+                      ? c
+                      : {
+                          ...c,
+                          installments: c.installments.map((i) =>
+                            i.number !== installmentNumber
+                              ? i
+                              : {
+                                  ...i,
+                                  stalled: stalled ? true : undefined,
+                                  stalledReason: stalled ? reason : undefined,
+                                  /*
+                                    ويومُ التوقّف يُثبت مرّةً: فلو
+                                    كُتب في كلِّ تعديلٍ لعاد العدّادُ
+                                    إلى الصفر، ولم يُعرف طولُ التوقّف.
+                                  */
+                                  stalledAt: stalled
+                                    ? i.stalledAt || todayISO()
+                                    : undefined,
+                                }
+                          ),
+                        }
+                  )
+                );
+                log(
+                  "تعديل",
+                  "عقد",
+                  `العقد ${contractNumber} د${installmentNumber} — ` +
+                    (stalled ? `أُوقفت: ${reason}` : "عاد العمل")
+                );
+              }}
             />
           )}
 
@@ -7459,6 +7523,285 @@ function ClientStatementSheet({
  * **ولا تتحوّل إلى مكافأةٍ إلا بأمره.** فالتقييمُ يقترح، والأمرُ وحدَه
  * يُحوّل الاقتراحَ مالاً — ومن قيَّم لم يَصرِف، ومن صرف لم يُقيّم.
  */
+/**
+ * متابعةُ المراحل: ما يقرب موعدُه، وما تأخّر، وما توقّف.
+ *
+ * وكانت التنبيهاتُ كلُّها على ما **وقع** — دفعةٌ استُحقّت ولم تُسدَّد،
+ * حركةٌ تنتظر اعتماداً. وهذه على ما **سيقع**، وبها تُدرك المرحلةُ قبل
+ * أن تتعثّر.
+ *
+ * والموعدُ يُكتب ولا يُولَّد: مدّةُ العقد للعقد كلِّه، وتوزيعُها على
+ * مراحله تخمينٌ يُنبّه على غير علم.
+ */
+function MilestonesPage({
+  contractors,
+  canManage,
+  onSetExpected,
+  onSetStalled,
+}: {
+  contractors: Contractor[];
+  canManage: boolean;
+  onSetExpected: (
+    contractNumber: string,
+    installmentNumber: number,
+    date: string
+  ) => void;
+  onSetStalled: (
+    contractNumber: string,
+    installmentNumber: number,
+    stalled: boolean,
+    reason: string
+  ) => void;
+}) {
+  const [showOnTime, setShowOnTime] = useState(false);
+
+  const rows = useMemo(() => milestones(contractors, new Date()), [contractors]);
+  const sum = useMemo(() => milestoneSummary(rows), [rows]);
+  const shown = showOnTime ? rows : rows.filter((m) => m.state !== "في موعدها");
+
+  /* ومراحلُ بلا موعدٍ: تُعرض ليُكتب لها، فبغيره لا متابعة */
+  const undated = useMemo(() => {
+    const out: {
+      contract: Contractor;
+      installment: Installment;
+    }[] = [];
+    for (const contract of contractors) {
+      if (contract.closure) continue;
+      for (const installment of contract.installments ?? []) {
+        if (installment.approved) continue;
+        if (installment.expectedDate) continue;
+        out.push({ contract, installment });
+      }
+    }
+    return out;
+  }, [contractors]);
+
+  const tone = (state: string) =>
+    state === "متأخّرة"
+      ? "bg-red-50 border-red-200"
+      : state === "موقوفة"
+      ? "bg-amber-50 border-amber-200"
+      : state === "يقرب"
+      ? "bg-blue-50 border-blue-200"
+      : "bg-white border-slate-200";
+
+  return (
+    <>
+      <Panel
+        title="متابعة المراحل"
+        subtitle="بمواعيدها المتوقَّعة — ما يقرب، وما تأخّر، وما توقّف"
+      >
+        <div className="mb-4 flex flex-wrap gap-4">
+          {(
+            [
+              ["متأخّرة", sum.late.length, "border-red-300 bg-red-50 text-red-900"],
+              ["يقرب موعدُها", sum.soon.length, "border-blue-300 bg-blue-50 text-blue-900"],
+              ["موقوفة", sum.stalled.length, "border-amber-300 bg-amber-50 text-amber-900"],
+              ["في موعدها", sum.onTime.length, "border-slate-300 bg-white"],
+            ] as [string, number, string][]
+          ).map(([label, count, cls]) => (
+            <div key={label} className={`rounded-xl border px-5 py-3 ${cls}`}>
+              <p className="text-sm">{label}</p>
+              <p className="text-2xl font-bold tabular-nums">{count}</p>
+            </div>
+          ))}
+          <button
+            onClick={() => setShowOnTime((v) => !v)}
+            className="self-center rounded-lg bg-slate-100 px-4 py-2 text-sm font-bold"
+          >
+            {showOnTime ? "أخفِ ما في موعده" : "أظهِر ما في موعده"}
+          </button>
+        </div>
+
+        {rows.length === 0 ? (
+          <Banner tone="warn">
+            لا مرحلةَ لها موعدٌ متوقَّع. والموعدُ يُكتب ولا يُولَّد — فمدّةُ
+            العقد للعقد كلِّه، وتوزيعُها على مراحله تخمينٌ يُنبّه على غير
+            علم. اكتب المواعيدَ من الجدول أسفلُ، فتبدأ المتابعة.
+          </Banner>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b-2 border-slate-300 text-right">
+                  <Th>العقد</Th>
+                  <Th>الطرف</Th>
+                  <Th>المشروع</Th>
+                  <Th>الدفعة</Th>
+                  <Th>المرحلة</Th>
+                  <Th>قيمتها</Th>
+                  <Th>المتوقَّع</Th>
+                  <Th>الحال</Th>
+                  <Th>{""}</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {shown.map((row) => (
+                  <tr
+                    key={`${row.contractNumber}-${row.number}`}
+                    className={`border-b ${tone(row.state)}`}
+                  >
+                    <Td className="font-bold">{row.contractNumber}</Td>
+                    <Td>{row.contractName}</Td>
+                    <Td>{row.project || "—"}</Td>
+                    <Td className="tabular-nums">{row.number}</Td>
+                    <Td>{row.stage || "—"}</Td>
+                    <Td className="tabular-nums">{fmt(row.value)}</Td>
+                    <Td>
+                      {canManage ? (
+                        <input
+                          type="date"
+                          value={row.expectedDate}
+                          onChange={(e) =>
+                            onSetExpected(
+                              row.contractNumber,
+                              row.number,
+                              e.target.value
+                            )
+                          }
+                          className="rounded border border-slate-300 px-2 py-1"
+                        />
+                      ) : (
+                        row.expectedDate
+                      )}
+                    </Td>
+                    <Td>
+                      <span
+                        className={
+                          row.state === "متأخّرة"
+                            ? "font-bold text-red-700"
+                            : row.state === "موقوفة"
+                            ? "font-bold text-amber-800"
+                            : ""
+                        }
+                      >
+                        {milestoneLabel(row)}
+                      </span>
+                      {row.stalledReason && (
+                        <span className="block text-xs text-slate-600">
+                          {row.stalledReason}
+                        </span>
+                      )}
+                    </Td>
+                    <Td>
+                      {canManage && (
+                        <>
+                          {row.state === "موقوفة" ? (
+                            <button
+                              onClick={() =>
+                                onSetStalled(
+                                  row.contractNumber,
+                                  row.number,
+                                  false,
+                                  ""
+                                )
+                              }
+                              className="rounded bg-slate-100 px-3 py-1 text-xs font-bold"
+                            >
+                              عاد العمل
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => {
+                                const reason = window.prompt(
+                                  "سببُ التوقّف — ولو كلمةً: «انتظار المدعوم» · «انتظار دفعة العميل»:"
+                                );
+                                if (reason == null) return;
+                                if (reason.trim().length < 3) {
+                                  window.alert(
+                                    "اكتب السبب — فموقوفٌ بلا سببٍ لا يُسأل عنه أحد"
+                                  );
+                                  return;
+                                }
+                                onSetStalled(
+                                  row.contractNumber,
+                                  row.number,
+                                  true,
+                                  reason.trim()
+                                );
+                              }}
+                              className="rounded bg-amber-100 px-3 py-1 text-xs font-bold text-amber-900"
+                            >
+                              أوقِفها
+                            </button>
+                          )}
+                        </>
+                      )}
+                    </Td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <Banner tone="ok">
+          <b>والموقوفُ لا يُعدّ متأخّراً</b> — فالمرحلةُ تتوقّف لا بتقصير:
+          انتظارُ مدعومٍ أو ترخيصٍ أو دفعةٍ من العميل. ولو عُدّ متأخّراً
+          لنُبّه عليه كلَّ يومٍ بلا فائدة، وتنبيهٌ يُكرَّر بلا عملٍ يُهمَل
+          ثم يُهمل معه الصادق. <b>وما اعتُمد إنجازُه خرج من المتابعة</b> —
+          ولو بقي فيها لظنّ المهندسُ أنّ عليه عملاً وقد فعله.
+        </Banner>
+      </Panel>
+
+      {/* ---- مراحلُ بلا موعد ---- */}
+      {canManage && undated.length > 0 && (
+        <Panel
+          title={`مراحلُ بلا موعدٍ متوقَّع — ${undated.length}`}
+          subtitle="لا تُتابَع حتى يُكتب لها موعد"
+        >
+          <div className="max-h-96 overflow-y-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-300 text-right">
+                  <Th>العقد</Th>
+                  <Th>الطرف</Th>
+                  <Th>الدفعة</Th>
+                  <Th>المرحلة</Th>
+                  <Th>قيمتها</Th>
+                  <Th>اكتب الموعد</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {undated.slice(0, 60).map(({ contract, installment }) => (
+                  <tr
+                    key={`${contract.contractNumber}-${installment.number}`}
+                    className="border-b border-slate-100"
+                  >
+                    <Td className="font-bold">{contract.contractNumber}</Td>
+                    <Td>{contract.name}</Td>
+                    <Td className="tabular-nums">{installment.number}</Td>
+                    <Td>{installment.stage || "—"}</Td>
+                    <Td className="tabular-nums">{fmt(Number(installment.value) || 0)}</Td>
+                    <Td>
+                      <input
+                        type="date"
+                        onChange={(e) =>
+                          onSetExpected(
+                            contract.contractNumber,
+                            installment.number,
+                            e.target.value
+                          )
+                        }
+                        className="rounded border border-slate-300 px-2 py-1"
+                      />
+                    </Td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {undated.length > 60 && (
+            <p className="mt-2 text-sm text-slate-600">
+              وتُعرض ستّون منها — اكتب لهذه مواعيدَها فتظهر البقيّة.
+            </p>
+          )}
+        </Panel>
+      )}
+    </>
+  );
+}
+
 function ReviewsPage({
   employees,
   today,

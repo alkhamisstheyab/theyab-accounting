@@ -212,6 +212,34 @@ export type Installment = {
    */
   dueDate?: string;
 
+  /**
+   * التاريخُ المتوقَّعُ لإنجاز المرحلة — yyyy-mm-dd، واختياريّ.
+   *
+   * وهو **غير تاريخ الاستحقاق**: ذاك يومٌ وقع فيه الاستحقاقُ فعلاً
+   * وبه يُقاس تأخّرُ السداد، وهذا يومٌ يُتوقَّع ولم يأتِ بعد. وبه
+   * تُتابَع الأعمالُ قبل أن تتعثّر لا بعد أن تعثّرت:
+   *
+   *   • قَرُب الموعدُ ولم تُعتمد المرحلة — فيُنبَّه المهندسُ ليعاين.
+   *   • مضى الموعدُ ولم تُعتمد — فالعملُ متأخّرٌ عن المتوقَّع.
+   *   • ولا شيءَ يُقال عمّا لم يُكتب له موعد — فالسكوتُ لا يُقاس به.
+   *
+   * ولا يُولَّد من مدّة العقد: مدّةُ العقد للعقد كلِّه، وتوزيعُها على
+   * مراحله تخمينٌ يُنبّه على غير علم. فمن أراد التنبيه كتب الموعد.
+   */
+  expectedDate?: string;
+
+  /**
+   * أوقِف العملُ في هذه المرحلة.
+   *
+   * ويُكتب سببُه. فالمرحلةُ قد تتوقّف لا بتقصير: انتظارُ مدعومٍ، أو
+   * ترخيصٍ، أو دفعةٍ من العميل. وما لم يُكتب أنه موقوفٌ عُدّ متأخّراً
+   * ونُبّه عليه كلَّ يومٍ بلا فائدة — وتنبيهٌ يُكرَّر بلا عملٍ يُهمَل
+   * ثم يُهمل معه الصادق.
+   */
+  stalled?: boolean;
+  stalledReason?: string;
+  stalledAt?: string;
+
   /* --------------------------------------------------------------
    * تمثيل جدول «الأعمال والبنود المتفق عليها» كما في العقد المبرم.
    *
@@ -1661,6 +1689,10 @@ function migrateContractor(raw: unknown): Contractor {
         confirmNote: str(item.confirmNote),
         /* ولا يُستنبط من تاريخ الاعتماد: ذاك تاريخُ إدخالٍ قد يسبقه عمرٌ */
         dueDate: str(item.dueDate) || undefined,
+        expectedDate: str(item.expectedDate) || undefined,
+        stalled: item.stalled === true ? true : undefined,
+        stalledReason: str(item.stalledReason) || undefined,
+        stalledAt: str(item.stalledAt) || undefined,
         externalPaid: str(item.externalPaid) || undefined,
         externalNote: str(item.externalNote) || undefined,
         deduction: str(item.deduction) || undefined,
