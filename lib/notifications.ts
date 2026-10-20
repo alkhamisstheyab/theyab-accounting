@@ -14,7 +14,13 @@
 import { Movement, isApproved, isNonProject, round3 } from "./accounting";
 import { milestoneSummary, milestones } from "./milestones";
 import { AuditEntry } from "./audit";
-import type { Employee } from "./payroll";
+import type { AttendanceDay, Employee } from "./payroll";
+import {
+  PROBATION_DAYS,
+  PROBATION_SOON,
+  underProbation,
+  type OpenProbation,
+} from "./probation";
 import { Permission } from "./permissions";
 import { Quotation, WorkItem, isCostStale, quotationAgeDays } from "./quotations";
 import {
@@ -45,8 +51,10 @@ export type NoticeInput = {
   contractors: Contractor[];
   /** المشاريع — لتأمين المواقع ومدده */
   projects: Project[];
-  /** الموظفون — لإقاماتهم وأذون عملهم */
+  /** الموظفون — لإقاماتهم وأذون عملهم وفترات تجربتهم */
   employees: Employee[];
+  /** الدوامُ — ومنه تُحسب أيّامُ العمل في التجربة، فالحدُّ بأيّام العمل */
+  attendance: AttendanceDay[];
   quotations: Quotation[];
   workItems: WorkItem[];
   audit: AuditEntry[];
@@ -604,6 +612,66 @@ export function buildNotices(input: NoticeInput): Notice[] {
       page: "المقاولون",
       count: unclear.length,
       needs: "contractors.view",
+    });
+  }
+
+  /* ---- فتراتُ التجربة ---- */
+
+  /*
+    والتجربةُ لها موعدٌ يفوت: من مضت مئةُ يومِ عملٍ ولم يُقرَّر فيه
+    ثُبّت بحكم الواقع، فإنهاؤه بعدها فصلٌ لا إنهاءُ تجربة ويختلف ما
+    يستحقّه. فالسكوتُ عنه يُسقط حقَّ القرار، ولا يُدرى أنّه سقط.
+  */
+  const probations = underProbation(
+    input.employees,
+    input.attendance,
+    input.today
+  );
+  const over = probations.filter((p) => p.overdue);
+  const near = probations.filter((p) => !p.overdue && p.remaining <= PROBATION_SOON);
+
+  const named = (rows: OpenProbation[]) =>
+    rows
+      .map((p) =>
+        p.hasAttendance
+          ? `${p.name} (${p.worked} يومَ عمل)`
+          : `${p.name} (لا دوامَ مسجَّل)`
+      )
+      .join(" · ");
+
+  if (over.length > 0) {
+    notices.push({
+      id: "probation-over",
+      tone: "action",
+      title:
+        over.length === 1
+          ? "فترةُ تجربةٍ مضت ولم يُقرَّر فيها"
+          : `${over.length} فتراتِ تجربةٍ مضت ولم يُقرَّر فيها`,
+      detail:
+        named(over) +
+        " — ومن مضت تجربتُه ثُبّت بحكم الواقع، فإنهاؤه بعدها فصلٌ لا" +
+        " إنهاءُ تجربة. فثبِّته أو راجع ما يستحقّه قبل الإنهاء.",
+      page: "الموظفون",
+      count: over.length,
+      needs: "employees.manage",
+    });
+  }
+
+  if (near.length > 0) {
+    notices.push({
+      id: "probation-soon",
+      tone: "warn",
+      title:
+        near.length === 1
+          ? "فترةُ تجربةٍ تقترب من نهايتها"
+          : `${near.length} فتراتِ تجربةٍ تقترب من نهايتها`,
+      detail:
+        named(near) +
+        ` — والحدُّ ${PROBATION_DAYS} يومَ عملٍ (قانون العمل ٦/٢٠١٠ م٣٠).` +
+        " فالقرارُ تثبيتٌ أو إنهاء، ويحتاج مهلةً.",
+      page: "الموظفون",
+      count: near.length,
+      needs: "employees.manage",
     });
   }
 

@@ -94,6 +94,16 @@ export type Employee = {
   notes: string;
   /** تقييماتُ عمله — تُكتب في ملفّه ولا تُحذف، فتاريخُه يُقرأ */
   reviews?: WorkReviewRow[];
+  /**
+   * فترةُ التجربة — مئةُ يومِ عملٍ ثمّ تثبيتٌ أو إنهاء.
+   *
+   * وغيابُها يعني أنّه ليس تحت تجربة: فمن سُجّل قبل هذا الحقل لا
+   * تُفتح له تجربةٌ من تلقائها، وهو على رأس العمل منذ سنين.
+   *
+   * ولا تمسّ `hireDate`: مدّةُ التجربة جزءٌ من الخدمة، ومكافأةُ نهاية
+   * الخدمة تُحسب من التعيين كما كانت. وتفصيلُها في lib/probation.ts.
+   */
+  probation?: ProbationRow;
 };
 
 /**
@@ -243,6 +253,8 @@ export type AttendanceStatus = (typeof ATTENDANCE_STATUSES)[number];
  */
 import type { WorkReview as WorkReviewRow } from "./reviews";
 export type { WorkReview } from "./reviews";
+import type { Probation as ProbationRow } from "./probation";
+export type { Probation } from "./probation";
 
 export type AttendanceDay = {
   id: string;

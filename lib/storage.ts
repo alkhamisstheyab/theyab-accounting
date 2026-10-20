@@ -76,6 +76,11 @@ import {
   REVIEW_PERIODS,
   type WorkReview,
 } from "./reviews";
+import {
+  PROBATION_DAYS,
+  PROBATION_OUTCOMES,
+  type ProbationOutcome,
+} from "./probation";
 import { SEED_WORK_ITEMS } from "./work-items-seed";
 import { Invoice } from "./invoices";
 
@@ -867,6 +872,35 @@ function migrateEmployee(raw: unknown): Employee {
     reviews: Array.isArray(e.reviews)
       ? (e.reviews as unknown[]).map(migrateReview)
       : undefined,
+    probation: migrateProbation(e.probation),
+  };
+}
+
+/**
+ * فترةُ التجربة كما تُقرأ من الملفّ.
+ *
+ * وبلا بدايةٍ لا تجربة: فسطرٌ فارغٌ يُفتح تجربةً لمن هو على رأس العمل
+ * منذ سنين، فيُنبَّه على قرارٍ لا محلَّ له. وحدُّها مئةٌ إن لم يُكتب،
+ * ونتيجةٌ لا يعرفها النظامُ تُسقَط فتعود التجربةُ جاريةً — ولا يُطوى
+ * قرارٌ خلفَ كلمةٍ لا تُفهم.
+ */
+function migrateProbation(raw: unknown): Employee["probation"] {
+  if (!raw || typeof raw !== "object") return undefined;
+  const p = raw as Record<string, unknown>;
+  const start = str(p.start);
+  if (!start) return undefined;
+  const outcome = str(p.outcome);
+  const days = Number(p.days);
+  return {
+    start,
+    days: days > 0 ? Math.floor(days) : PROBATION_DAYS,
+    outcome: (PROBATION_OUTCOMES as readonly string[]).includes(outcome)
+      ? (outcome as ProbationOutcome)
+      : undefined,
+    decidedOn: str(p.decidedOn) || undefined,
+    decidedBy: str(p.decidedBy) || undefined,
+    decidedAt: str(p.decidedAt) || undefined,
+    reason: str(p.reason) || undefined,
   };
 }
 

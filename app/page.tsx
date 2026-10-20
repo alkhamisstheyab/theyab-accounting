@@ -315,6 +315,14 @@ import {
   type WorkReview,
 } from "@/lib/reviews";
 import {
+  PROBATION_DAYS,
+  endWarning,
+  outcomeLabel,
+  probationState,
+  underProbation,
+  type ProbationOutcome,
+} from "@/lib/probation";
+import {
   SPECIALTIES,
   partiesBySpecialty,
   partyContracts,
@@ -1291,6 +1299,7 @@ export default function HomeV2() {
         contractors,
         projects,
         employees,
+        attendance,
         quotations,
         workItems,
         audit,
@@ -3340,6 +3349,10 @@ export default function HomeV2() {
                 projects={projects}
                 settings={payrollSettings}
                 setEmployees={setEmployees}
+                attendance={attendance}
+                today={todayISO()}
+                decider={currentUser?.name ?? ""}
+                canDecide={allow("employees.manage")}
                 onLog={log}
               />
               {allow("employees.manage") && (
@@ -24808,6 +24821,7 @@ const BLANK_EMPLOYEE = {
   workPermitStart: "",
   workPermitExpiry: "",
   notes: "",
+  onProbation: false,
 };
 
 /** كم يوماً بقي على انتهاء وثيقة — سالب يعني منتهية */
@@ -24818,17 +24832,197 @@ function daysUntil(date: string): number | null {
   return Math.ceil((target - Date.now()) / 86_400_000);
 }
 
+/**
+ * لوحُ فترة التجربة — حالُها والقرارُ فيها.
+ *
+ * ولا يُعرض لمن لا تجربةَ له: فأكثرُ الملفّ على رأس العمل منذ سنين،
+ * ولوحٌ يقول «لا تجربة» في كلِّ ملفٍّ ضجيجٌ لا خبر.
+ */
+function ProbationPanel({
+  employee,
+  attendance,
+  today,
+  decider,
+  canDecide,
+  onDecide,
+}: {
+  employee: Employee;
+  attendance: AttendanceDay[];
+  today: string;
+  decider: string;
+  canDecide: boolean;
+  onDecide: (outcome: ProbationOutcome, reason: string) => void;
+}) {
+  const state = probationState(employee, attendance, today);
+  if (!state) return null;
+
+  const warn = endWarning(state);
+  const tone: "ok" | "warn" | "error" =
+    state.status === "ثُبّت"
+      ? "ok"
+      : state.status === "أُنهي في التجربة" || state.status === "تجاوزت الحدّ"
+        ? "error"
+        : state.status === "يقرب انتهاؤها"
+          ? "warn"
+          : "ok";
+
+  const ask = (outcome: ProbationOutcome) => {
+    if (!decider) {
+      window.alert("لا يُنسب القرارُ إلى أحد — أعد الدخول");
+      return;
+    }
+    const reason = window.prompt(
+      outcome === "تثبيت"
+        ? "سببُ التثبيت — يُقرأ بعد سنين:"
+        : "سببُ إنهاء التوظيف في التجربة — ولا إنهاءَ بلا سبب:",
+      ""
+    );
+    if (reason == null) return;
+    if (reason.trim().length < 4) {
+      window.alert("اكتب السبب — وكلمةٌ لا تُفهم بعد سنة");
+      return;
+    }
+    const tail =
+      outcome === "تثبيت"
+        ? `\n\nوالتعيينُ لا يُمسّ: ${employee.hireDate} — فمدّةُ التجربة من خبرته الفعلية.`
+        : `\n\nوتنتهي خدمتُه اليومَ ${today}.` + (warn ? `\n\n${warn}.` : "");
+    if (
+      !window.confirm(
+        `${outcome === "تثبيت" ? "تثبيتُ" : "إنهاءُ توظيف"} ${employee.name}` +
+          ` بعد ${state.worked} يومَ عملٍ من ${state.probation.days}؟${tail}`
+      )
+    ) {
+      return;
+    }
+    onDecide(outcome, reason.trim());
+  };
+
+  return (
+    <Panel
+      title={`فترة التجربة — ${employee.name}`}
+      subtitle="مئةُ يومِ عملٍ حدُّ قانون العمل (٦/٢٠١٠ — المادة ٣٠)، ثمّ تثبيتٌ أو إنهاء"
+    >
+      <Banner tone={tone}>
+        <b>{state.status}</b> — {outcomeLabel(state.probation)}
+        {state.probation.outcome && state.probation.decidedOn ? (
+          <>
+            {" "}
+            في {state.probation.decidedOn} بيد {state.probation.decidedBy}
+            {state.probation.reason ? ` · ${state.probation.reason}` : ""}
+          </>
+        ) : null}
+      </Banner>
+
+      <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-4">
+        {[
+          ["بدايتُها", state.probation.start],
+          [
+            "أيّامُ العمل المسجَّلة",
+            state.hasAttendance
+              ? `${state.worked} من ${state.probation.days}`
+              : "لا دوامَ مسجَّل",
+          ],
+          ["الباقي", state.hasAttendance ? `${state.remaining} يوم` : "—"],
+          ["الموعدُ المتوقَّع", state.expectedEnd || "—"],
+        ].map(([label, value]) => (
+          <div key={label} className="rounded-xl bg-slate-50 p-3">
+            <p className="text-xs text-slate-500">{label}</p>
+            <p className="font-bold">{value}</p>
+          </div>
+        ))}
+      </div>
+
+      {/*
+        والمعتبرُ ما سُجّل لا ما قُدِّر: فالحدُّ بأيّام العمل، ومن لا
+        دوامَ له لا يُعرف عددُه — ولا يُخمَّن عددٌ يُنهى به عقد.
+      */}
+      {!state.hasAttendance && state.open && (
+        <Banner tone="warn">
+          لا دوامَ مسجَّلاً له في مدّة التجربة، فلا تُعرف أيّامُ عمله.
+          و«الموعدُ المتوقَّع» تقديرٌ على ستّة أيّامٍ في الأسبوع — سجّل
+          حضورَه ليُحسب الحدُّ كما ينصّ القانون: <b>مئةُ يومِ عمل</b> لا
+          مئةُ يومٍ من التقويم.
+        </Banner>
+      )}
+
+      {warn && <Banner tone="error">{warn}</Banner>}
+
+      {state.open && canDecide && (
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => ask("تثبيت")}
+            className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-bold text-white"
+          >
+            ثبِّته على رأس العمل
+          </button>
+          <button
+            onClick={() => ask("إنهاء")}
+            className="rounded-lg bg-red-700 px-4 py-2 text-sm font-bold text-white"
+          >
+            أنهِ التوظيف في التجربة
+          </button>
+        </div>
+      )}
+
+      {state.open && !canDecide && (
+        <Banner tone="warn">
+          القرارُ لمن يملك إدارةَ الموظفين — راجع المدير
+        </Banner>
+      )}
+
+      {state.probation.outcome === "تثبيت" && (
+        <Banner tone="ok">
+          والتعيينُ <b>{employee.hireDate}</b> كما هو — فمدّةُ التجربة جزءٌ من
+          الخدمة، ومكافأةُ نهاية الخدمة والإجازاتُ تُحسب منه لا من يوم
+          التثبيت.
+        </Banner>
+      )}
+    </Panel>
+  );
+}
+
+/**
+ * فترةُ التجربة كما تُكتب من النموذج.
+ *
+ * ومن قُرِّر فيه — ثُبّت أو أُنهي — لا يُستأنف قرارُه بتعديل ملفّه:
+ * فمن فتح الملفَّ ليصحّح آيباناً لا يُراد به أن يُعيد رجلاً ثبّته
+ * أمسِ إلى التجربة. ومن رُفعت علامتُه وتجربتُه جاريةٌ أُسقطت.
+ */
+function probationFor(
+  on: boolean,
+  hireDate: string,
+  before: Employee | undefined
+): Employee["probation"] {
+  const decided = before?.probation?.outcome ? before.probation : undefined;
+  if (decided) return decided;
+  if (!on || !hireDate) return undefined;
+  return {
+    start: hireDate,
+    days: PROBATION_DAYS,
+  };
+}
+
 function EmployeesPage({
   employees,
   projects,
   settings,
   setEmployees,
+  attendance,
+  today,
+  decider,
+  canDecide,
   onLog,
 }: {
   employees: Employee[];
   projects: Project[];
   settings: PayrollSettings;
   setEmployees: Dispatch<SetStateAction<Employee[]>>;
+  /** الدوامُ — ومنه تُحسب أيّامُ العمل في التجربة، فالحدُّ بأيّام العمل */
+  attendance: AttendanceDay[];
+  today: string;
+  /** من يُثبت أو يُنهي — فالقرارُ يُنسب إلى صاحبه */
+  decider: string;
+  canDecide: boolean;
   onLog: (
     action: AuditAction,
     entity: AuditEntity,
@@ -24887,6 +25081,8 @@ function EmployeesPage({
       workPermitExpiry: e.workPermitExpiry,
       residencyExpiry: e.residencyExpiry,
       notes: e.notes,
+      /* والعلامةُ تُقرأ من حاله: الجاريةُ وحدها تُعرض مرفوعة */
+      onProbation: Boolean(e.probation && !e.probation.outcome),
     });
     setAllowances(
       e.allowances.map((a) => ({ name: a.name, amount: String(a.amount) }))
@@ -24942,6 +25138,16 @@ function EmployeesPage({
       workPermitExpiry: form.workPermitExpiry,
       residencyExpiry: form.residencyExpiry,
       notes: form.notes.trim(),
+      /*
+        والتجربةُ لا تُستأنف بتعديل الملفّ: من قُرِّر فيه يبقى قرارُه،
+        ومن رُفعت علامتُه أُسقطت تجربتُه الجارية. وبدايتُها التعيينُ
+        فإن غُيّر التعيينُ تبعته — وإلا حُسبت المئةُ من يومٍ لم يعمل فيه.
+      */
+      probation: probationFor(
+        form.onProbation,
+        form.hireDate,
+        employees.find((e) => e.id === editingId)
+      ),
     };
 
     setEmployees((prev) =>
@@ -25183,6 +25389,25 @@ function EmployeesPage({
                     onChange={(e) => set("endDate", e.target.value)}
                     className={inputClass}
                   />
+                </Field>
+                {/*
+                  وتُفتح التجربةُ من يوم التعيين لا من يوم الإدخال:
+                  فمن سُجّل متأخّراً أسبوعاً حُسبت تجربتُه من مباشرته.
+                  وهي اختياريّةٌ — فمن نُقل من شركةٍ أخرى أو عاد بعد
+                  انقطاعٍ قد يُستغنى عن تجربته.
+                */}
+                <Field
+                  label="فترة التجربة"
+                  hint="مئةُ يومِ عملٍ — قانون العمل ٦/٢٠١٠ م٣٠"
+                >
+                  <label className="flex items-center gap-2 py-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={form.onProbation}
+                      onChange={(e) => set("onProbation", e.target.checked)}
+                    />
+                    تحت التجربة من تاريخ التعيين
+                  </label>
                 </Field>
                 <Field label="بداية الإقامة">
                   <input
@@ -25515,6 +25740,57 @@ function EmployeesPage({
           </div>
         )}
       </Panel>
+
+      {/*
+        فترةُ التجربة — ولوحُها قبل مكافأة نهاية الخدمة لا بعدها:
+        فالقرارُ فيها يُتّخذ في مئة يومٍ، والمكافأةُ تُقرأ بعد سنين.
+      */}
+      {selected && (
+        <ProbationPanel
+          employee={selected}
+          attendance={attendance}
+          today={today}
+          decider={decider}
+          canDecide={canDecide}
+          onDecide={(outcome, reason) => {
+            const state = probationState(selected, attendance, today);
+            if (!state) return;
+            const probation: NonNullable<Employee["probation"]> = {
+              ...state.probation,
+              outcome,
+              decidedOn: today,
+              decidedBy: decider,
+              decidedAt: new Date().toISOString(),
+              reason,
+            };
+            setEmployees((prev) =>
+              prev.map((e) =>
+                e.id !== selected.id
+                  ? e
+                  : {
+                      ...e,
+                      probation,
+                      /*
+                        والإنهاءُ يُنهي الخدمة بيومه، والتثبيتُ لا يمسّ
+                        التعيينَ — فمدّةُ التجربة من خبرته الفعلية.
+                      */
+                      ...(outcome === "إنهاء"
+                        ? { endDate: today, active: false }
+                        : {}),
+                    }
+              )
+            );
+            onLog(
+              "تعديل",
+              "مستخدم",
+              outcome === "تثبيت"
+                ? `تثبيتُ ${selected.name} بعد ${state.worked} يومَ عمل — التعيينُ كما هو ${selected.hireDate}`
+                : `إنهاءُ توظيف ${selected.name} في التجربة بعد ${state.worked} يومَ عمل: ${reason}`,
+              { before: `تجربةٌ جارية`, after: outcome }
+            );
+          }}
+        />
+      )}
 
       {selected && (
         <Panel

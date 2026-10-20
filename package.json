@@ -66,6 +66,7 @@
     "check:month": "node db/check-open-month.mjs",
     "check:qdelete": "node db/check-quotation-delete.mjs",
     "check:waiting": "node db/check-waiting-panel.mjs",
+    "check:probation": "node db/check-probation.mjs",
     "check:guides": "node db/check-guides.mjs",
     "check:stale": "node db/check-stale-push.mjs",
     "check:backup": "node db/check-server-backup.mjs",

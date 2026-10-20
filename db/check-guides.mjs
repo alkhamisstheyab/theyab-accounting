@@ -278,6 +278,7 @@ for (const [label, id] of [
   ["حرّيّات عرض السعر", "quotation-freedom"],
   ["عاجل في المستحقات", "urgent-due"],
   ["ما وصلك من الخادم", "arrivals"],
+  ["فترة التجربة", "probation"],
 ])
   check(label, ids.includes(id));
 
