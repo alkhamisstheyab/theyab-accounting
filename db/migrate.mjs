@@ -716,6 +716,43 @@ async function main() {
     )
   );
 
+  /* تقاريرُ الاجتماعات */
+  add(
+    "تقارير الاجتماعات",
+    await insertMany(
+      db,
+      "minutes",
+      [
+        "id",
+        "date",
+        "period",
+        "project",
+        "kind",
+        "title",
+        "attendees",
+        "body",
+        "decisions",
+        "photos",
+        "created_by",
+        "created_at",
+      ],
+      (d.minutes ?? []).map((m) => [
+        str(m.id),
+        str(m.date),
+        str(m.period) || "طارئ",
+        str(m.project),
+        str(m.kind) || "اجتماع",
+        str(m.title),
+        str(m.attendees),
+        str(m.body),
+        JSON.stringify(m.decisions ?? []),
+        JSON.stringify(m.photos ?? []),
+        str(m.createdBy),
+        stamp(m.createdAt) ?? new Date().toISOString(),
+      ])
+    )
+  );
+
   /* ---------------- التقرير ---------------- */
 
   console.log("ما نُقل:");
@@ -744,6 +781,7 @@ async function main() {
   await fillData(db, "audit_log", d.audit ?? []);
   await fillData(db, "messages", d.messages ?? []);
   await fillData(db, "parties", d.parties ?? []);
+  await fillData(db, "minutes", d.minutes ?? []);
   for (const a of d.attendance ?? []) {
     if (!a?.employeeId || !date(a.date)) continue;
     await db.query(

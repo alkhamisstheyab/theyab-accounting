@@ -164,6 +164,22 @@ const TABLES: Record<
       last_seen_at: when(u.lastSeenAt),
     }),
   },
+  minutes: {
+    table: "minutes",
+    columns: (m) => ({
+      date: str(m.date),
+      period: str(m.period),
+      project: str(m.project),
+      kind: str(m.kind),
+      title: str(m.title),
+      attendees: str(m.attendees),
+      body: str(m.body),
+      decisions: JSON.stringify(m.decisions ?? []),
+      photos: JSON.stringify(m.photos ?? []),
+      created_by: str(m.createdBy),
+      created_at: when(m.createdAt),
+    }),
+  },
   parties: {
     table: "parties",
     columns: (p) => ({

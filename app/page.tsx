@@ -278,6 +278,19 @@ import {
   type ClientStatement,
 } from "@/lib/receivables";
 import {
+  MINUTE_KINDS,
+  MINUTE_PERIODS,
+  minuteState,
+  minutesOf,
+  minutesSummary,
+  decisionToMessage,
+  type Minute,
+  type MinuteDecision,
+  type MinuteKind,
+  type MinutePeriod,
+  type MinutePhoto,
+} from "@/lib/minutes";
+import {
   milestoneLabel,
   milestoneSummary,
   milestones,
@@ -420,6 +433,7 @@ const PAGES = [
   "التقرير الربعي",
   "المشاريع",
   "المدعوم",
+  "تقارير الاجتماعات",
   "عروض الأسعار",
   "بنود الأعمال",
   "الفواتير",
@@ -483,6 +497,7 @@ const PAGE_GROUPS: { group: string; pages: string[] }[] = [
     pages: [
       "المشاريع",
       "المدعوم",
+      "تقارير الاجتماعات",
       "المقاولون",
       "الموردون والمقاولون",
       "المطلوب من العملاء",
@@ -622,6 +637,8 @@ export default function HomeV2() {
   const [messages, setMessages] = useState<Message[]>([]);
   /* سجلُّ الأطراف — بياناتُهم مرّةً واحدةً لا في كلّ عقد */
   const [parties, setParties] = useState<Party[]>([]);
+  /* تقاريرُ الاجتماعات — وصورُها في المخزن لا في الصفّ */
+  const [minutes, setMinutes] = useState<Minute[]>([]);
   const [yearLocks, setYearLocks] = useState<YearLocks>({});
   const [chart, setChart] = useState<Account[]>(GENERATED_CHART);
   const [items, setItems] = useState<ItemDefinition[]>(GENERATED_ITEMS);
@@ -763,6 +780,7 @@ export default function HomeV2() {
       audit,
       messages,
       parties,
+      minutes,
       yearLocks,
       chart,
       items,
@@ -968,6 +986,7 @@ export default function HomeV2() {
     audit,
     messages,
     parties,
+    minutes,
     yearLocks,
     chart,
     items,
@@ -2372,6 +2391,60 @@ export default function HomeV2() {
             />
           )}
 
+          {page === "تقارير الاجتماعات" && (
+            <MinutesPage
+              minutes={minutes}
+              projects={projects}
+              users={activeUsers}
+              today={todayISO()}
+              canManage={allow("projects.manage")}
+              authorName={currentUser?.name ?? ""}
+              onSave={(minute) => {
+                setMinutes((prev) => {
+                  const had = prev.some((m) => m.id === minute.id);
+                  return had
+                    ? prev.map((m) => (m.id === minute.id ? minute : m))
+                    : [minute, ...prev];
+                });
+                log(
+                  "تعديل",
+                  "مشروع",
+                  `تقرير ${minute.kind} ${minute.date}` +
+                    (minute.project ? ` — ${minute.project}` : "")
+                );
+              }}
+              onDelete={(minute) => {
+                setMinutes((prev) => prev.filter((m) => m.id !== minute.id));
+                log(
+                  "حذف",
+                  "مشروع",
+                  `تقرير ${minute.kind} ${minute.date}`,
+                  { before: minute.title || minute.body.slice(0, 80) }
+                );
+              }}
+              onSendDecision={(minute, decision, to) => {
+                /*
+                  والقرارُ على موظّفٍ لا يُنفَّذ بكتابته في تقرير:
+                  يُنفَّذ إذا بلغه. فيُحوَّل إلى بريده، ويبقى في
+                  التقرير سنداً — فيُعرف أصلُه ويومُ الاتفاق عليه.
+                */
+                const message = decisionToMessage(
+                  minute,
+                  decision,
+                  { id: to.id, name: to.name },
+                  currentUser?.name ?? ""
+                );
+                setMessages((prev) => [message, ...prev]);
+                log(
+                  "إنشاء",
+                  "جلسة",
+                  `التزامُ تقريرٍ أُرسل إلى ${to.name}: ${decision.text.slice(0, 60)}`
+                );
+                window.alert(`أُرسل إلى ${to.name} — يراه عند ولوجه.`);
+              }}
+            />
+          )}
+
           {page === "متابعة المراحل" && (
             <MilestonesPage
               contractors={contractors}
@@ -3348,6 +3421,7 @@ export default function HomeV2() {
                 audit,
                 messages,
                 parties,
+                minutes,
                 yearLocks,
                 chart,
                 items,
@@ -7533,6 +7607,639 @@ function ClientStatementSheet({
  * والموعدُ يُكتب ولا يُولَّد: مدّةُ العقد للعقد كلِّه، وتوزيعُها على
  * مراحله تخمينٌ يُنبّه على غير علم.
  */
+/**
+ * تقاريرُ الاجتماعات: ما قيل بين الشركة وعميلها، موثَّقاً.
+ *
+ * وكان ما يُتَّفق عليه في اجتماعٍ أو مكالمةٍ يبقى في الذاكرة: فيُنسى،
+ * أو يُختلف فيه بعد شهرين — «قلتَ كذا» و«لم أقل».
+ *
+ * والقرارُ غيرُ الكلام: ما قيل يُكتب نصّاً، وما التُزم به يُكتب سطراً
+ * له صاحبٌ وموعد — فيُتابَع، ويُحوَّل طلبَ عملٍ يبلغ صاحبَه.
+ */
+function MinutesPage({
+  minutes,
+  projects,
+  users,
+  today,
+  canManage,
+  authorName,
+  onSave,
+  onDelete,
+  onSendDecision,
+}: {
+  minutes: Minute[];
+  projects: Project[];
+  users: User[];
+  today: string;
+  canManage: boolean;
+  authorName: string;
+  onSave: (minute: Minute) => void;
+  onDelete: (minute: Minute) => void;
+  onSendDecision: (minute: Minute, decision: MinuteDecision, to: User) => void;
+}) {
+  const [project, setProject] = useState("");
+  const [editing, setEditing] = useState<Minute | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [notice, setNotice] = useState("");
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const rows = useMemo(() => minutesOf(minutes, project), [minutes, project]);
+  const sum = useMemo(() => minutesSummary(minutes, today), [minutes, today]);
+
+  const blank = (): Minute => ({
+    id: newId(),
+    date: today,
+    period: "طارئ",
+    project: project || projects[0]?.name || "",
+    kind: "اجتماع",
+    title: "",
+    attendees: "",
+    body: "",
+    decisions: [],
+    photos: [],
+    createdBy: authorName,
+    createdAt: new Date().toISOString(),
+  });
+
+  /** يرفع الصورةَ إلى المخزن ويُعيد مسارَها — ولا تُحفظ في الصفّ */
+  const upload = async (file: File): Promise<MinutePhoto | null> => {
+    const body = new FormData();
+    body.append("file", file);
+    try {
+      const response = await fetch("/api/photos", { method: "POST", body });
+      const data = (await response.json()) as {
+        path?: string;
+        size?: number;
+        error?: string;
+      };
+      if (!response.ok || !data.path) {
+        setNotice(data.error ?? "تعذّر رفع الصورة");
+        return null;
+      }
+      return { id: newId(), path: data.path, caption: "", size: data.size ?? 0 };
+    } catch {
+      setNotice("تعذّر الاتصال بالخادم — الصورةُ لم تُرفع");
+      return null;
+    }
+  };
+
+  const addPhotos = async (files: FileList) => {
+    if (!editing) return;
+    setUploading(true);
+    setNotice("");
+    const added: MinutePhoto[] = [];
+    for (const file of Array.from(files)) {
+      const photo = await upload(file);
+      if (photo) added.push(photo);
+    }
+    if (added.length > 0) {
+      setEditing({ ...editing, photos: [...editing.photos, ...added] });
+      setNotice(`رُفعت ${added.length} صورة`);
+    }
+    setUploading(false);
+    if (fileRef.current) fileRef.current.value = "";
+  };
+
+  return (
+    <>
+      <Panel
+        title="تقارير الاجتماعات"
+        subtitle="ما قيل بين الشركة وعميلها، وما التُزم به — موثَّقاً بتاريخه وحاضريه"
+      >
+        <div className="mb-4 flex flex-wrap items-center gap-3">
+          <select
+            value={project}
+            onChange={(e) => setProject(e.target.value)}
+            className="rounded border border-slate-300 px-3 py-2"
+          >
+            <option value="">— كلُّ المشاريع —</option>
+            {sum.projects.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+
+          {canManage && (
+            <button
+              onClick={() => setEditing(blank())}
+              className="rounded-lg bg-slate-900 px-5 py-2 font-bold text-white"
+            >
+              + تقرير جديد
+            </button>
+          )}
+
+          <div className="flex flex-wrap gap-3">
+            <span className="rounded-lg bg-slate-100 px-3 py-2 text-sm">
+              <b>{sum.total}</b> تقريراً
+            </span>
+            {sum.open > 0 && (
+              <span className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                <b>{sum.open}</b> التزاماً لم يُنجَز
+              </span>
+            )}
+            {sum.overdue > 0 && (
+              <span className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">
+                <b>{sum.overdue}</b> مضى موعدُه
+              </span>
+            )}
+          </div>
+        </div>
+
+        {rows.length === 0 ? (
+          <Banner tone="warn">
+            لا تقريرَ بعد. وما يُتَّفق عليه في اجتماعٍ أو مكالمةٍ يبقى في
+            الذاكرة فيُنسى، أو يُختلف فيه بعد شهرين — «قلتَ كذا» و«لم أقل».
+          </Banner>
+        ) : (
+          <div className="space-y-4">
+            {rows.map((minute) => {
+              const state = minuteState(minute, today);
+              return (
+                <div
+                  key={minute.id}
+                  className="rounded-xl border border-slate-300 bg-white p-4"
+                >
+                  <div className="mb-2 flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="font-bold">
+                        {minute.title || `${minute.kind} ${minute.date}`}
+                      </p>
+                      <p className="text-sm text-slate-600">
+                        {minute.kind} · {minute.period} · {minute.date}
+                        {minute.project && ` · ${minute.project}`}
+                      </p>
+                      {minute.attendees && (
+                        <p className="text-sm">
+                          <b>الحاضرون:</b> {minute.attendees}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {state.overdue.length > 0 && (
+                        <span className="rounded bg-red-100 px-2 py-1 text-xs font-bold text-red-800">
+                          {state.overdue.length} مضى موعدُه
+                        </span>
+                      )}
+                      {canManage && (
+                        <>
+                          <button
+                            onClick={() => setEditing(minute)}
+                            className="rounded bg-slate-100 px-3 py-1 text-xs font-bold"
+                          >
+                            عدّل
+                          </button>
+                          <button
+                            onClick={() => {
+                              if (
+                                window.confirm(
+                                  "يُحذف التقرير. وهو سندٌ على ما قيل — قد يكون لك لا عليك.\n\nأتحذفه؟"
+                                )
+                              ) {
+                                onDelete(minute);
+                              }
+                            }}
+                            className="rounded bg-red-50 px-3 py-1 text-xs font-bold text-red-700"
+                          >
+                            حذف
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  {minute.body && (
+                    <p className="mb-3 whitespace-pre-wrap text-sm">{minute.body}</p>
+                  )}
+
+                  {minute.decisions.length > 0 && (
+                    <table className="mb-3 w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-slate-300 text-right">
+                          <Th>ما التُزم به</Th>
+                          <Th>على من</Th>
+                          <Th>الموعد</Th>
+                          <Th>الحال</Th>
+                          <Th>{""}</Th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {minute.decisions.map((decision) => {
+                          const late =
+                            !decision.done && decision.due && decision.due < today;
+                          return (
+                            <tr
+                              key={decision.id}
+                              className={`border-b border-slate-100 ${
+                                late ? "bg-red-50" : ""
+                              }`}
+                            >
+                              <Td>{decision.text}</Td>
+                              <Td>{decision.owner || "—"}</Td>
+                              <Td>{decision.due || "—"}</Td>
+                              <Td>
+                                {decision.done ? (
+                                  <span className="text-green-700">
+                                    أُنجز
+                                    {decision.doneAt &&
+                                      ` ${decision.doneAt.slice(0, 10)}`}
+                                  </span>
+                                ) : late ? (
+                                  <span className="font-bold text-red-700">
+                                    مضى موعدُه
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-600">قائم</span>
+                                )}
+                              </Td>
+                              <Td>
+                                {canManage && !decision.done && (
+                                  <span className="flex flex-wrap gap-2">
+                                    <button
+                                      onClick={() =>
+                                        onSave({
+                                          ...minute,
+                                          decisions: minute.decisions.map((d) =>
+                                            d.id === decision.id
+                                              ? {
+                                                  ...d,
+                                                  done: true,
+                                                  doneAt: new Date().toISOString(),
+                                                }
+                                              : d
+                                          ),
+                                        })
+                                      }
+                                      className="rounded bg-green-600 px-3 py-1 text-xs font-bold text-white"
+                                    >
+                                      أُنجز
+                                    </button>
+                                    {/*
+                                      والقرارُ على موظّفٍ لا يُنفَّذ
+                                      بكتابته: يُنفَّذ إذا بلغه. فيُحوَّل
+                                      إلى بريده ويبقى في التقرير سنداً.
+                                    */}
+                                    <select
+                                      value=""
+                                      onChange={(e) => {
+                                        const to = users.find(
+                                          (u) => u.id === e.target.value
+                                        );
+                                        if (to) onSendDecision(minute, decision, to);
+                                      }}
+                                      className="rounded border border-slate-300 px-2 py-1 text-xs"
+                                    >
+                                      <option value="">أرسِله إلى…</option>
+                                      {users
+                                        .filter((u) => u.active)
+                                        .map((u) => (
+                                          <option key={u.id} value={u.id}>
+                                            {u.name}
+                                          </option>
+                                        ))}
+                                    </select>
+                                  </span>
+                                )}
+                              </Td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )}
+
+                  {minute.photos.length > 0 && (
+                    <div className="flex flex-wrap gap-3">
+                      {minute.photos.map((photo) => (
+                        <a
+                          key={photo.id}
+                          href={`/api/photos?path=${encodeURIComponent(photo.path)}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="block"
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={`/api/photos?path=${encodeURIComponent(photo.path)}`}
+                            alt={photo.caption || "صورة"}
+                            className="h-28 w-28 rounded-lg border border-slate-300 object-cover"
+                          />
+                          {photo.caption && (
+                            <span className="mt-1 block max-w-28 text-xs text-slate-600">
+                              {photo.caption}
+                            </span>
+                          )}
+                        </a>
+                      ))}
+                    </div>
+                  )}
+
+                  <p className="mt-2 text-xs text-slate-500">
+                    كتبه {minute.createdBy} ·{" "}
+                    {new Date(minute.createdAt).toLocaleString("ar-KW")}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Panel>
+
+      {/* ---- التحرير ---- */}
+      {editing && canManage && (
+        <Panel
+          title={editing.title ? `تعديل: ${editing.title}` : "تقريرٌ جديد"}
+          subtitle="والقرارُ غيرُ الكلام: ما قيل يُكتب نصّاً، وما التُزم به سطراً له صاحبٌ وموعد"
+        >
+          <div className="mb-4 grid gap-3 md:grid-cols-4">
+            <div>
+              <p className="mb-1 text-sm font-medium">التاريخ</p>
+              <input
+                type="date"
+                value={editing.date}
+                onChange={(e) => setEditing({ ...editing, date: e.target.value })}
+                className="w-full rounded border border-slate-300 px-3 py-2"
+              />
+            </div>
+            <div>
+              <p className="mb-1 text-sm font-medium">النوع</p>
+              <select
+                value={editing.kind}
+                onChange={(e) =>
+                  setEditing({ ...editing, kind: e.target.value as MinuteKind })
+                }
+                className="w-full rounded border border-slate-300 px-3 py-2"
+              >
+                {MINUTE_KINDS.map((k) => (
+                  <option key={k} value={k}>
+                    {k}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <p className="mb-1 text-sm font-medium">الدوريّة</p>
+              <select
+                value={editing.period}
+                onChange={(e) =>
+                  setEditing({
+                    ...editing,
+                    period: e.target.value as MinutePeriod,
+                  })
+                }
+                className="w-full rounded border border-slate-300 px-3 py-2"
+              >
+                {MINUTE_PERIODS.map((k) => (
+                  <option key={k} value={k}>
+                    {k}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <p className="mb-1 text-sm font-medium">المشروع</p>
+              <select
+                value={editing.project}
+                onChange={(e) =>
+                  setEditing({ ...editing, project: e.target.value })
+                }
+                className="w-full rounded border border-slate-300 px-3 py-2"
+              >
+                <option value="">— بلا مشروع —</option>
+                {projects.map((p) => (
+                  <option key={p.id} value={p.name}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="mb-3 grid gap-3 md:grid-cols-2">
+            <div>
+              <p className="mb-1 text-sm font-medium">العنوان</p>
+              <input
+                value={editing.title}
+                onChange={(e) => setEditing({ ...editing, title: e.target.value })}
+                placeholder="اجتماع مراجعة أعمال التشطيب"
+                className="w-full rounded border border-slate-300 px-3 py-2"
+              />
+            </div>
+            <div>
+              <p className="mb-1 text-sm font-medium">الحاضرون</p>
+              <input
+                value={editing.attendees}
+                onChange={(e) =>
+                  setEditing({ ...editing, attendees: e.target.value })
+                }
+                placeholder="ذياب الخميس · م. نوح · العميل حسن العجمي"
+                className="w-full rounded border border-slate-300 px-3 py-2"
+              />
+            </div>
+          </div>
+
+          <div className="mb-4">
+            <p className="mb-1 text-sm font-medium">ما قيل</p>
+            <textarea
+              value={editing.body}
+              onChange={(e) => setEditing({ ...editing, body: e.target.value })}
+              rows={5}
+              className="w-full rounded border border-slate-300 px-3 py-2"
+            />
+          </div>
+
+          {/* ---- الالتزامات ---- */}
+          <p className="mb-2 font-bold">ما التُزم به</p>
+          <table className="mb-2 w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-300 text-right">
+                <Th>النصّ</Th>
+                <Th>على من</Th>
+                <Th>الموعد</Th>
+                <Th>{""}</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {editing.decisions.map((decision, index) => {
+                const set = (change: Partial<MinuteDecision>) =>
+                  setEditing({
+                    ...editing,
+                    decisions: editing.decisions.map((d, i) =>
+                      i === index ? { ...d, ...change } : d
+                    ),
+                  });
+                return (
+                  <tr key={decision.id} className="border-b border-slate-100">
+                    <Td>
+                      <input
+                        value={decision.text}
+                        onChange={(e) => set({ text: e.target.value })}
+                        placeholder="يُصلح العيبَ في واجهة الدور الأول"
+                        className="w-full rounded border border-slate-300 px-2 py-1"
+                      />
+                    </Td>
+                    <Td>
+                      <input
+                        value={decision.owner}
+                        onChange={(e) => set({ owner: e.target.value })}
+                        placeholder="م. نوح · العميل"
+                        className="w-32 rounded border border-slate-300 px-2 py-1"
+                      />
+                    </Td>
+                    <Td>
+                      <input
+                        type="date"
+                        value={decision.due}
+                        onChange={(e) => set({ due: e.target.value })}
+                        className="rounded border border-slate-300 px-2 py-1"
+                      />
+                    </Td>
+                    <Td>
+                      <button
+                        onClick={() =>
+                          setEditing({
+                            ...editing,
+                            decisions: editing.decisions.filter(
+                              (_, i) => i !== index
+                            ),
+                          })
+                        }
+                        className="rounded bg-red-50 px-2 py-1 text-xs text-red-700"
+                      >
+                        حذف
+                      </button>
+                    </Td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          <button
+            onClick={() =>
+              setEditing({
+                ...editing,
+                decisions: [
+                  ...editing.decisions,
+                  { id: newId(), text: "", owner: "", due: "", done: false, doneAt: "" },
+                ],
+              })
+            }
+            className="mb-4 rounded-lg bg-slate-100 px-4 py-1 text-sm font-bold"
+          >
+            + التزام
+          </button>
+
+          {/* ---- الصور ---- */}
+          <p className="mb-2 font-bold">الصور</p>
+          <p className="mb-2 text-sm text-slate-600">
+            تُرفع إلى مخزنٍ خاصٍّ، <b>ولا تُحفظ في الدفاتر</b> — فصورةٌ من
+            هاتفٍ ثلاثةُ ميغا، وصورتان تُخفقان النسخةَ الاحتياطيّة صامتةً.
+          </p>
+
+          {editing.photos.length > 0 && (
+            <div className="mb-3 flex flex-wrap gap-3">
+              {editing.photos.map((photo, index) => (
+                <div key={photo.id} className="w-32">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={`/api/photos?path=${encodeURIComponent(photo.path)}`}
+                    alt={photo.caption || "صورة"}
+                    className="h-32 w-32 rounded-lg border border-slate-300 object-cover"
+                  />
+                  <input
+                    value={photo.caption}
+                    onChange={(e) =>
+                      setEditing({
+                        ...editing,
+                        photos: editing.photos.map((x, i) =>
+                          i === index ? { ...x, caption: e.target.value } : x
+                        ),
+                      })
+                    }
+                    placeholder="وصفُها"
+                    className="mt-1 w-32 rounded border border-slate-300 px-2 py-1 text-xs"
+                  />
+                  <button
+                    onClick={() =>
+                      setEditing({
+                        ...editing,
+                        photos: editing.photos.filter((_, i) => i !== index),
+                      })
+                    }
+                    className="mt-1 w-32 rounded bg-red-50 px-2 py-1 text-xs text-red-700"
+                  >
+                    انزعها من التقرير
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={(e) => {
+              if (e.target.files && e.target.files.length > 0) {
+                void addPhotos(e.target.files);
+              }
+            }}
+            className="mb-2 block"
+          />
+          {uploading && <p className="mb-2 text-sm">… يرفع الصور</p>}
+          {notice && (
+            <p
+              className={`mb-2 text-sm font-bold ${
+                notice.startsWith("تعذّر") ? "text-red-700" : "text-green-700"
+              }`}
+            >
+              {notice}
+            </p>
+          )}
+
+          <div className="mt-4 flex gap-3">
+            <button
+              onClick={() => {
+                if (!editing.date) {
+                  window.alert("اكتب تاريخ الاجتماع");
+                  return;
+                }
+                if (editing.body.trim().length < 10 && editing.decisions.length === 0) {
+                  window.alert(
+                    "اكتب ما قيل أو ما التُزم به — وتقريرٌ فارغٌ لا يُحتجّ به"
+                  );
+                  return;
+                }
+                onSave({
+                  ...editing,
+                  decisions: editing.decisions.filter(
+                    (d) => d.text.trim() !== ""
+                  ),
+                });
+                setEditing(null);
+                setNotice("");
+              }}
+              className="rounded-lg bg-slate-900 px-6 py-3 font-bold text-white"
+            >
+              احفظ التقرير
+            </button>
+            <button
+              onClick={() => {
+                setEditing(null);
+                setNotice("");
+              }}
+              className="rounded-lg bg-slate-200 px-6 py-3 font-bold"
+            >
+              إلغاء
+            </button>
+          </div>
+        </Panel>
+      )}
+    </>
+  );
+}
+
 function MilestonesPage({
   contractors,
   canManage,

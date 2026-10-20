@@ -53,6 +53,11 @@ const RULES: Record<string, Rule> = {
     write: ["contractors.manage"],
     remove: ["contractors.manage"],
   },
+  /*
+    ولا يُحذف تقريرُ اجتماعٍ إلا بصلاحية المشاريع: فهو سندٌ على ما
+    قيل، ومن حذفه محا حُجّةً قد تكون له لا عليه.
+  */
+  minutes: { write: ["projects.manage"], remove: ["projects.manage"] },
   employees: { write: ["employees.manage"], remove: ["employees.manage"] },
   attendance: { write: ["attendance.manage"], remove: ["attendance.manage"] },
   payrollRuns: { write: ["payroll.run"], remove: ["payroll.run"] },
@@ -278,6 +283,8 @@ const READ_RULES: Record<string, Permission[]> = {
   messages: [],
   /* والأطرافُ يقرؤها من يقرأ العقود: فهم أصحابُها */
   parties: ["contractors.view", "contractors.manage"],
+  /* وتقاريرُ الاجتماعات يقرؤها من يقرأ المشاريع — فهي عنها */
+  minutes: ["projects.view", "projects.manage"],
 
   chart: [],
   items: [],

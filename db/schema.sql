@@ -599,3 +599,39 @@ CREATE TABLE parties (
 CREATE INDEX parties_rev_idx ON parties (rev);
 
 CREATE INDEX parties_kind_idx ON parties (kind, specialty);
+
+-- ---------- تقارير الاجتماعات ----------
+
+/*
+  ما قيل بين الشركة وعميلها، موثَّقاً بتاريخه وحاضريه.
+
+  وكان ما يُتَّفق عليه في اجتماعٍ أو مكالمةٍ يبقى في الذاكرة: فيُنسى،
+  أو يُختلف فيه بعد شهرين — «قلتَ كذا» و«لم أقل».
+
+  والصورُ لا تُحفظ هنا: مواضعُها مخزن Blob، ويُحفظ في الصفّ مسارُها
+  وحدَه. ولو حُفظت في القاعدة لتضخّمت النسخةُ الاحتياطية — وهي اليومَ
+  ٣٫٨٥ ميغا وحدُّ الردّ عند الناشر ٤٫٥ — فتُخفق صامتةً يومَ تُحتاج،
+  وتلك خسارةُ الدفاتر كلِّها لأجل صورة.
+*/
+CREATE TABLE minutes (
+  id          text PRIMARY KEY,
+  date        text NOT NULL DEFAULT '',
+  period      text NOT NULL DEFAULT 'طارئ',
+  project     text NOT NULL DEFAULT '',
+  kind        text NOT NULL DEFAULT 'اجتماع',
+  title       text NOT NULL DEFAULT '',
+  attendees   text NOT NULL DEFAULT '',
+  body        text NOT NULL DEFAULT '',
+  decisions   jsonb NOT NULL DEFAULT '[]',
+  photos      jsonb NOT NULL DEFAULT '[]',
+  created_by  text NOT NULL DEFAULT '',
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  data        jsonb NOT NULL DEFAULT '{}',
+  rev         bigint NOT NULL DEFAULT nextval('change_seq'),
+  updated_at  timestamptz NOT NULL DEFAULT now(),
+  updated_by  text NOT NULL DEFAULT ''
+);
+
+CREATE INDEX minutes_rev_idx ON minutes (rev);
+
+CREATE INDEX minutes_project_idx ON minutes (project, date DESC);

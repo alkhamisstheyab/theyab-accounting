@@ -63,6 +63,13 @@ import {
   type ClosureKind,
   type ContractClosure,
 } from "./closure";
+import {
+  MINUTE_KINDS,
+  MINUTE_PERIODS,
+  type Minute,
+  type MinuteKind,
+  type MinutePeriod,
+} from "./minutes";
 import type { Party } from "./parties";
 import {
   REVIEW_MAX,
@@ -734,6 +741,8 @@ export type AppState = {
   messages: Message[];
   /** سجلُّ الأطراف: المقاولون والموردون والعملاء ببياناتهم وتخصّصاتهم */
   parties: Party[];
+  /** تقاريرُ الاجتماعات — وصورُها في المخزن لا هنا */
+  minutes: Minute[];
   yearLocks: YearLocks;
   /** البيانات الأساسية القابلة للتحرير — تبدأ من المولّدة من الإكسل */
   chart: Account[];
@@ -803,6 +812,7 @@ export const emptyState = (): AppState => ({
   audit: [],
   messages: [],
   parties: [],
+  minutes: [],
   yearLocks: {},
   chart: GENERATED_CHART,
   items: GENERATED_ITEMS,
@@ -1497,6 +1507,59 @@ function migrateReview(raw: unknown): WorkReview {
   };
 }
 
+function migrateMinute(raw: unknown): Minute {
+  const m = (raw ?? {}) as Record<string, unknown>;
+  const period = str(m.period);
+  const kind = str(m.kind);
+  return {
+    id: str(m.id) || newId(),
+    date: str(m.date),
+    period: (MINUTE_PERIODS as readonly string[]).includes(period)
+      ? (period as MinutePeriod)
+      : "طارئ",
+    project: str(m.project),
+    kind: (MINUTE_KINDS as readonly string[]).includes(kind)
+      ? (kind as MinuteKind)
+      : "اجتماع",
+    title: str(m.title),
+    attendees: str(m.attendees),
+    body: str(m.body),
+    decisions: Array.isArray(m.decisions)
+      ? (m.decisions as unknown[]).map((entry) => {
+          const d = (entry ?? {}) as Record<string, unknown>;
+          return {
+            id: str(d.id) || newId(),
+            text: str(d.text),
+            owner: str(d.owner),
+            due: str(d.due),
+            done: d.done === true,
+            doneAt: str(d.doneAt),
+          };
+        })
+      : [],
+    /*
+      والصورةُ مسارٌ لا بيانات: فمن حفظ الصورةَ في الصفّ ضخّم النسخةَ
+      الاحتياطية حتى تُخفق، فخسر الدفاترَ كلَّها لأجل صورة. فيُسقَط
+      كلُّ ما جاء بصيغة data: — ولا يُحفظ.
+    */
+    photos: Array.isArray(m.photos)
+      ? (m.photos as unknown[])
+          .map((entry) => {
+            const p = (entry ?? {}) as Record<string, unknown>;
+            return {
+              id: str(p.id) || newId(),
+              path: str(p.path),
+              caption: str(p.caption),
+              size: Number(p.size) > 0 ? Number(p.size) : 0,
+            };
+          })
+          .filter((p) => p.path !== "" && !p.path.startsWith("data:"))
+      : [],
+    createdBy: str(m.createdBy),
+    createdAt: str(m.createdAt) || new Date().toISOString(),
+  };
+}
+
 function migrateParty(raw: unknown): Party {
   const p = (raw ?? {}) as Record<string, unknown>;
   const kind = str(p.kind);
@@ -2065,6 +2128,8 @@ export function normalizeState(raw: unknown): AppState {
     state.messages = data.messages.map(migrateMessage);
   if (Array.isArray(data.parties))
     state.parties = data.parties.map(migrateParty);
+  if (Array.isArray(data.minutes))
+    state.minutes = data.minutes.map(migrateMinute);
   if (Array.isArray(data.projects))
     state.projects = data.projects.map(migrateProject);
   if (Array.isArray(data.contractors))

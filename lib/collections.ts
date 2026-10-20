@@ -63,6 +63,7 @@ export const ROW_COLLECTIONS: RowCollection[] = [
   */
   { field: "messages", keyOf: (m) => str(m.id) },
   { field: "parties", keyOf: (p) => str(p.id) },
+  { field: "minutes", keyOf: (m) => str(m.id) },
 ];
 
 /**
