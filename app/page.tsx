@@ -20060,6 +20060,18 @@ function DuesPage({
   const [payingPerson, setPayingPerson] = useState<DuePerson | null>(null);
   const [bulk, setBulk] = useState({ amount: "", method: "", date: today });
 
+  /*
+    ولوحُ السداد يُفتح أسفلَ الصفحة، تحت جدولٍ قد يطول — فمن ضغط
+    «سدّد» وهو في وسط الجدول لم يرَ شيئاً، وحسب أنّ الزرّ لا يعمل.
+    وقع ذلك: «ضغطتُ على زرّ سدّد ولم يحدث شيء ولم ينقلني إلى أي مكان».
+    فيُنقل بصرُه إليه.
+  */
+  const payRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!paying && !payingPerson) return;
+    payRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [paying, payingPerson]);
+
   /* الأسماء المعروفة: أهل النظام ومن سبق أن استحقّ */
   const known = [
     ...new Set([...people, ...report.people.map((r) => r.person)]),
@@ -20346,7 +20358,12 @@ function DuesPage({
                             }}
                             className="rounded-lg bg-slate-900 px-4 py-2 font-bold text-white"
                           >
-                            سدّد
+                            {/*
+                              والنقاطُ تقول إنّه يفتح لوحاً ولا يصرف
+                              بنفسه — فمن ظنّه يصرف ضغطه وانتظر قيداً
+                              لا يأتي.
+                            */}
+                            سدّد…
                           </button>
                         )}
                       </Td>
@@ -20359,6 +20376,7 @@ function DuesPage({
         </Panel>
       )}
 
+      <div ref={payRef}>
       {payingPerson && plan && (
         <Panel
           title={`سداد لـ ${payingPerson.person}`}
@@ -20527,6 +20545,7 @@ function DuesPage({
           </p>
         </Panel>
       )}
+      </div>
 
       {canCreate && (
         <Panel
