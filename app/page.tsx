@@ -700,6 +700,9 @@ export default function HomeV2() {
     setWorkItems(state.workItems);
     setQuotations(state.quotations);
     setInvoices(state.invoices);
+    setMessages(state.messages);
+    setParties(state.parties);
+    setMinutes(state.minutes);
   };
 
   /**
@@ -762,6 +765,18 @@ export default function HomeV2() {
       );
     }
     setInvoices(state.invoices);
+    /*
+      والثلاثُ المستجدّةُ تُحلّ كغيرها.
+
+      وسقطت أوّلَ مرّة فظهرت العلّةُ كما حُذّر منها في applyWholeState
+      حرفاً: «نسيان مجموعةٍ منها لا يظهر إلا حين يفتح صاحبها شاشتها
+      فيجدها خاوية». فالحفظُ يكتبها والتحميلُ لا يقرؤها — فأرسل صاحبُ
+      الشركة خمسةَ طلباتٍ ووصلت الخادمَ، ثمّ حدّث الصفحة فقالت له «لم
+      تطلب من أحدٍ شيئاً بعد».
+    */
+    setMessages(state.messages);
+    setParties(state.parties);
+    setMinutes(state.minutes);
     setLoadErrors(errors);
     setYear(availableYears(state.movements, state.openingBalances)[0]);
     setBackupMeta(readBackupMeta());
