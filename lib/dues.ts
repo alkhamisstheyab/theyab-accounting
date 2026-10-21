@@ -155,6 +155,8 @@ export function buildDues(movements: Movement[], today: string) {
   for (const m of movements) {
     if (!validate(m).valid) continue;
     if (!isDueSettlement(m)) continue;
+    /* والسدادُ المرفوضُ لم يقع، فلا يُعرض ولا يُعدّ «بلا ربط» */
+    if (m.approval === "مرفوضة") continue;
 
     /*
       السداد الواحد قد يُقفل أعمالاً عدّة: يُدفع للرجل مبلغٌ جملةً لا
@@ -191,6 +193,16 @@ export function buildDues(movements: Movement[], today: string) {
   for (const m of movements) {
     if (!validate(m).valid) continue;
     if (!isDue(m)) continue;
+    /*
+      والمرفوضُ ليس التزاماً فلا يُعرض.
+
+      وكان يُعدّ «بانتظار الإقرار» — لأنّ الحكمَ كان «ما لم يُعتمد»،
+      والمرفوضُ لم يُعتمد. فيبقى في الشاشة أبداً يطلب إقراراً، ولا
+      موضعَ يُقرّ فيه: شاشةُ الاعتماد قضت فيه وفرغت منه. وقع ذلك في
+      قيد ١٩٧٨: أُثبت سهواً ثمّ رُفض، فظلّ يقول «بانتظار الإقرار»
+      وصاحبُ الشركة يبحث عن بابٍ لا وجودَ له.
+    */
+    if (m.approval === "مرفوضة") continue;
 
     const settlements = settlementsByDue.get(m.id) ?? [];
     /* السداد غير المعتمد لا يُنقص الذمّة: لم يخرج المال بعد */

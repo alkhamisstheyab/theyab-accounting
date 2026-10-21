@@ -311,6 +311,91 @@ check(
   !permissions.includes('"movements.create",\n      "dues')
 );
 
+/* ---- والمرفوضُ ليس التزاماً ---- */
+/*
+  وقع هذا: أُثبت استحقاقٌ سهواً (قيد ١٩٧٨) ثمّ رُفض من شاشة الاعتماد،
+  فظلّ في المستحقّات يقول «بانتظار الإقرار» — لأنّ الحكمَ كان «ما لم
+  يُعتمد»، والمرفوضُ لم يُعتمد. فبحث صاحبُ الشركة عن بابٍ يُقرّه فيه
+  ولا بابَ: شاشةُ الاعتماد قضت فيه وفرغت منه.
+*/
+console.log("\nوالمرفوضُ ليس التزاماً:\n");
+{
+  const due = (over = {}) => ({
+    id: "d1",
+    entryNo: 1,
+    fiscalYear: "2026",
+    date: "2026-10-12",
+    movementType: "مصروف",
+    description: "ثلاثُ يوميات",
+    itemCode: "",
+    itemName: "أجر يومية",
+    debitCode: "5120",
+    creditCode: "2140",
+    amount: 60,
+    project: "مشروع",
+    person: "أبو شمس",
+    paymentMethod: "آجل",
+    party: "أبو شمس",
+    source: "app",
+    approval: "معتمدة",
+    approvedBy: "ذياب",
+    approvedAt: "2026-10-12T00:00:00.000Z",
+    approvalNote: "",
+    ...over,
+  });
+
+  const kept = buildDues([due()], "2026-10-21");
+  check("المعتمدُ يُعرض", kept.people.length === 1 && kept.people[0].owed === 60);
+
+  const waiting = buildDues(
+    [due({ approval: "بانتظار الاعتماد", approvedBy: "", approvedAt: "" })],
+    "2026-10-21"
+  );
+  check(
+    "وغيرُ المعتمدِ يُعرض منتظراً",
+    waiting.people.length === 1 && waiting.people[0].waiting === 60,
+    "فالمهندسُ أثبته والإدارةُ لم تُقرّه"
+  );
+
+  const rejected = buildDues(
+    [due({ approval: "مرفوضة", approvedBy: "", approvedAt: "" })],
+    "2026-10-21"
+  );
+  check(
+    "والمرفوضُ لا يُعرض أصلاً",
+    rejected.people.length === 0,
+    "فلا يبقى يطلب إقراراً لا موضعَ له"
+  );
+
+  /* وسدادٌ مرفوضٌ لا يُعدّ «بلا ربط» فيُكشف بلا سبب */
+  const looseRejected = buildDues(
+    [
+      due(),
+      due({
+        id: "s1",
+        entryNo: 2,
+        debitCode: "2140",
+        creditCode: "1112",
+        paymentMethod: "كي نت",
+        approval: "مرفوضة",
+        approvedBy: "",
+        approvedAt: "",
+        description: "سداد مستحق",
+      }),
+    ],
+    "2026-10-21"
+  );
+  check(
+    "والسدادُ المرفوضُ لا يُكشف «بلا ربط»",
+    looseRejected.loose.length === 0,
+    `${looseRejected.loose.length} — فهو لم يقع`
+  );
+  check(
+    "ولا يُنقص الذمّة",
+    looseRejected.people[0].owed === 60
+  );
+}
+
 /* ---- ولا يُدَلُّ على بابٍ لا يفتح ---- */
 /*
   سأل صاحبُ الشركة: أيُدخل السدادَ حركةً بالمبلغ الكامل ثمّ يربطه في

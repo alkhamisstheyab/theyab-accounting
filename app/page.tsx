@@ -20290,8 +20290,19 @@ function DuesPage({
                       </Td>
                       <Td>{row.ageDays} يوماً</Td>
                       <Td>
+                        {/*
+                          ويُقال أين يُقرّ: «الإقرار» هنا هو «الاعتماد»
+                          في شاشة اعتماد الحركات — لفظان لشيءٍ واحد،
+                          ومن قرأ «بانتظار الإقرار» بحث عن زرٍّ يُقرّ
+                          به هنا فلم يجد.
+                        */}
                         {row.pending ? (
-                          <span className="text-amber-700">بانتظار الإقرار</span>
+                          <span className="text-amber-700">
+                            بانتظار الإقرار
+                            <span className="block text-xs text-slate-500">
+                              من «اعتماد الحركات»
+                            </span>
+                          </span>
                         ) : row.remaining <= 0.0005 ? (
                           <span className="text-green-700">سُدّد</span>
                         ) : row.paid > 0 ? (
