@@ -1282,12 +1282,24 @@ export default function HomeV2() {
           quotations: setQuotations as never,
           invoices: setInvoices as never,
           audit: setAudit as never,
+          messages: setMessages as never,
+          parties: setParties as never,
+          minutes: setMinutes as never,
         };
 
         for (const collection of ROW_COLLECTIONS) {
           const field = collection.field as string;
           const set = setters[field];
-          if (!set) continue;
+          /*
+            ومجموعةٌ بلا مُسنِدٍ تُسقَط صامتةً — وهذه علّةٌ وقعت:
+            أُضيفت الرسائلُ والأطرافُ والتقاريرُ إلى ROW_COLLECTIONS
+            ونُسيت هنا، فكان الخادمُ يُرسلها والشاشةُ تُلقيها. فيُقال
+            في السجلّ ولا يُسكت عنه، ويحرسه check:install.
+          */
+          if (!set) {
+            console.warn(`مجموعةٌ واردةٌ بلا مُسنِدٍ في الشاشة: ${field}`);
+            continue;
+          }
 
           const ups = (normalized[collection.field] ??
             []) as Record<string, unknown>[];

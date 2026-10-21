@@ -107,7 +107,36 @@ for (const field of ["messages", "parties", "minutes"]) {
   );
 }
 
-/* ---- ٥) والموضعان لا يفترقان ---- */
+/* ---- ٥) وما يأتي من الخادم يُحَلّ ---- */
+/*
+  وهذا الموضعُ الثالثُ الذي سقطت فيه الثلاث: مُحِلُّ الصفوف الواردة
+  يحمل جدولَ مُسنِدين، ومجموعةٌ لا مُسنِدَ لها تُسقَط صامتةً — فيُرسل
+  الخادمُ ويُلقي الجهاز. ولا يظهر ذلك في فحصٍ للتسوية ولا للخادم.
+*/
+console.log("\nوما يأتي من الخادم يُحَلّ:\n");
+
+const { ROW_COLLECTIONS } = await jiti.import("../lib/collections.ts");
+const settersAt = page.indexOf("const setters: Partial<");
+const settersEnd = page.indexOf("};", settersAt);
+check("جدولُ المُسنِدين موجود", settersAt > 0 && settersEnd > settersAt);
+const setters = page.slice(settersAt, settersEnd);
+
+const rowFields = ROW_COLLECTIONS.map((c) => String(c.field));
+const noSetter = rowFields.filter((f) => !new RegExp(`\\b${f}: set`).test(setters));
+check(
+  "ولكلِّ مجموعةٍ تُكتب صفّاً صفّاً مُسنِدٌ فيه",
+  noSetter.length === 0,
+  noSetter.length
+    ? `بلا مُسنِد: ${noSetter.join(" · ")}`
+    : `${rowFields.length} مجموعة`
+);
+check(
+  "ولا يُسكت عمّا لا مُسنِدَ له",
+  /console\.warn\(`مجموعةٌ واردةٌ بلا مُسنِدٍ في الشاشة/.test(page),
+  "فالسقوطُ الصامتُ هو العلّة"
+);
+
+/* ---- ٦) والموضعان لا يفترقان ---- */
 /*
   فمن أضاف مجموعةً في أحدهما ونسي الآخر وقع في العلّة نفسِها من بابٍ
   آخر: يراها عند الاستعادة ولا يراها عند الفتح، أو بالعكس.
