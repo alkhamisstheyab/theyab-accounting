@@ -9373,7 +9373,23 @@ function TasksPage({
   onUpdate: (id: string, change: Partial<Message>) => void;
   onNavigate: (page: string) => void;
 }) {
-  const [tab, setTab] = useState<"إليّ" | "منّي">("إليّ");
+  /*
+    والبابُ يُفتح على ما فيه عمل.
+
+    وكان يُفتح على «إليّ» دائماً، فمن يُرسل أكثرَ ممّا يُطلب منه —
+    وصاحبُ الشركة كذلك — يرى الفراغَ في كلِّ مرّة ويحسب أنّ طلبَه لم
+    يصل. وقع ذلك: أرسل خمسةَ طلباتٍ للجميع ثمّ قال «لم يظهر لي شيء».
+  */
+  const openOn = useMemo(() => {
+    const mineNow = messages.filter(
+      (m) => m.toUser === me.id || m.toName === me.name
+    );
+    if (mineNow.some((m) => m.state !== "أُنجزت")) return "إليّ" as const;
+    if (messages.some((m) => m.fromName === me.name)) return "منّي" as const;
+    return "إليّ" as const;
+  }, [messages, me.id, me.name]);
+
+  const [tab, setTab] = useState<"إليّ" | "منّي">(openOn);
   const [showDone, setShowDone] = useState(false);
   const [draft, setDraft] = useState({
     toUser: "",
@@ -9392,6 +9408,23 @@ function TasksPage({
 
   const waiting = toMe.filter((m) => m.state !== "أُنجزت").length;
   const sentWaiting = fromMe.filter((m) => m.state !== "أُنجزت").length;
+
+  /*
+    وملخّصُ ما أرسلتَه يُجيب بنظرة: «هل ردّ أحد؟».
+
+    وكان الجوابُ يُجمع بالعين من بطاقاتٍ متفرّقة — ومن أرسل طلباً
+    للجميع رأى خمسَ بطاقاتٍ بنصٍّ واحدٍ ولم يعرف منها كم قُرئ.
+  */
+  const sentSummary = {
+    unread: fromMe.filter((m) => m.state === "جديدة").length,
+    read: fromMe.filter((m) => m.state === "قُرئت").length,
+    done: fromMe.filter((m) => m.state === "أُنجزت").length,
+  };
+
+  /* ومن لم يلج بعد لم يرَ شيئاً — وهذا أصدقُ من «لم يردّ» */
+  const neverOpened = [
+    ...new Set(fromMe.filter((m) => m.state === "جديدة").map((m) => m.toName)),
+  ];
 
   /*
     والعملُ قد يكون على الجميع: «أنعشوا أجهزتكم» و«سلّموا كشوفَ الأسبوع»
@@ -9472,11 +9505,43 @@ function TasksPage({
           </button>
         </div>
 
+        {/*
+          وملخّصُ المرسَل قبل البطاقات: فالسؤالُ «هل ردّ أحد؟» يُجاب
+          برقمٍ لا بقراءة خمس بطاقات.
+        */}
+        {tab === "منّي" && fromMe.length > 0 && (
+          <Banner
+            tone={
+              sentSummary.unread > 0
+                ? "warn"
+                : sentSummary.read > 0
+                  ? "warn"
+                  : "ok"
+            }
+          >
+            <b>{fromMe.length} طلباً أرسلتَه</b> — لم يُقرأ{" "}
+            <b>{sentSummary.unread}</b> · قُرئ ولم يُنجز{" "}
+            <b>{sentSummary.read}</b> · أُنجز <b>{sentSummary.done}</b>.
+            {neverOpened.length > 0 && (
+              <>
+                {" "}
+                ومن لم يفتح النظامَ بعد فلم يرَ طلبَه:{" "}
+                <b>{neverOpened.join(" · ")}</b> — فالرسالةُ تُرى عند الولوج،
+                ولا تُرسل إلى هاتفٍ ولا بريد.
+              </>
+            )}
+          </Banner>
+        )}
+
         {shown.length === 0 ? (
           <Banner tone="ok">
             {tab === "إليّ"
-              ? "لا عملَ مطلوبٌ منك الآن."
-              : "لم تطلب من أحدٍ شيئاً بعد."}
+              ? toMe.length > 0
+                ? "أنجزتَ كلَّ ما طُلب منك — واضغط «أظهِر المنجَز» لتراه."
+                : "لا عملَ مطلوبٌ منك الآن. وما طلبتَه من غيرك في بابِ «منّي»."
+              : fromMe.length > 0
+                ? "أُنجز كلُّ ما طلبتَه — واضغط «أظهِر المنجَز» لتراه."
+                : "لم تطلب من أحدٍ شيئاً بعد."}
           </Banner>
         ) : (
           <div className="space-y-3">
@@ -9500,10 +9565,19 @@ function TasksPage({
                       </span>
                     )}
                   </p>
+                  {/*
+                    والحالُ يُقال بوجه قارئه: «جديدة» تعني للمُرسَل
+                    إليه أنّ عليه عملاً، وتعني للمُرسِل أنّ صاحبَه لم
+                    يفتحها بعد — وهما خبران لا خبر.
+                  */}
                   <span className="text-xs text-slate-500">
                     {new Date(m.createdAt).toLocaleString("ar-KW")}
                     {" · "}
-                    {m.state}
+                    {tab === "منّي" && m.state === "جديدة"
+                      ? "لم يفتحها بعد"
+                      : tab === "منّي" && m.state === "قُرئت"
+                        ? "قرأها ولم يُنجزها"
+                        : m.state}
                     {m.doneAt &&
                       ` ${new Date(m.doneAt).toLocaleDateString("ar-KW")}`}
                   </span>
