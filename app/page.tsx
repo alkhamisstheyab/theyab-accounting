@@ -323,6 +323,11 @@ import {
   type ProbationOutcome,
 } from "@/lib/probation";
 import {
+  canApproveMovement,
+  enteredByMap,
+  type EnteredBy,
+} from "@/lib/approval";
+import {
   SPECIALTIES,
   partiesBySpecialty,
   partyContracts,
@@ -1318,6 +1323,13 @@ export default function HomeV2() {
       }),
     []
   );
+
+  /*
+    من أدخل كلَّ قيد — يُحسب مرّةً من سجلّ التدقيق لا لكلِّ صفٍّ على
+    حدة: فالسجلُّ ألفٌ ومئتا سطرٍ، والبحثُ فيه لكلِّ حركةٍ في الجدول
+    يُثقل الشاشة بلا فائدة.
+  */
+  const entrants = useMemo(() => enteredByMap(audit), [audit]);
 
   const notices = useMemo(
     () =>
@@ -2981,6 +2993,8 @@ export default function HomeV2() {
               pending={pendingMovements}
               rejected={movements.filter((m) => m.approval === "مرفوضة")}
               approverName={currentUser.name}
+              approverRole={currentUser.role}
+              entrants={entrants}
               canApprove={allow("movements.approve")}
               canDelete={allow("movements.delete")}
               threshold={company.approvalThreshold}
@@ -20667,6 +20681,8 @@ function MovementApprovalsPage({
   pending,
   rejected,
   approverName,
+  approverRole,
+  entrants,
   canApprove,
   canDelete,
   threshold,
@@ -20677,6 +20693,10 @@ function MovementApprovalsPage({
   pending: Movement[];
   rejected: Movement[];
   approverName: string;
+  /* ودورُه: صاحبُ الشركة والمديرُ العام يعتمدان ما أدخلاه */
+  approverRole: string;
+  /* من أدخل كلَّ قيد — من سجلّ التدقيق */
+  entrants: Map<string, EnteredBy>;
   canApprove: boolean;
   canDelete: boolean;
   threshold: number;
@@ -20687,8 +20707,23 @@ function MovementApprovalsPage({
   const [note, setNote] = useState<Record<string, string>>({});
   const total = round3(pending.reduce((s, m) => s + m.amount, 0));
 
+  /*
+    ومن أدخل حركةً لا يعتمدها: يُقال له قبل أن يضغط، والخادمُ
+    يمنعها على كلّ حال. فحارسُ الشاشة للبيان، وحارسُ الخادم للمنع.
+  */
+  const blockOf = (movement: Movement) =>
+    canApproveMovement(movement, approverName, approverRole, entrants);
+
   const decide = (movement: Movement, state: ApprovalState) => {
     const reason = (note[movement.id] ?? "").trim();
+    /* والرفضُ ليس اعتماداً: من أدخلها يرفض ما أدخله ويصحّحه */
+    if (state === "معتمدة") {
+      const why = blockOf(movement);
+      if (why) {
+        window.alert(why + " — فلا يمرّ على الدينار عينٌ واحدة.");
+        return;
+      }
+    }
     if (state === "مرفوضة" && !reason) {
       window.alert("اكتب سبب الرفض قبل الرفض — السبب جزء من السجل.");
       return;
@@ -20781,12 +20816,18 @@ function MovementApprovalsPage({
                       placeholder="ملاحظة أو سبب الرفض…"
                       className="min-w-[200px] flex-1 rounded-lg border border-slate-300 px-4 py-2"
                     />
-                    <button
-                      onClick={() => decide(m, "معتمدة")}
-                      className="rounded-lg bg-green-600 px-6 py-2 font-bold text-white"
-                    >
-                      اعتماد
-                    </button>
+                    {blockOf(m) ? (
+                      <span className="rounded-lg bg-amber-50 px-4 py-2 text-sm font-bold text-amber-800">
+                        {blockOf(m)}
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => decide(m, "معتمدة")}
+                        className="rounded-lg bg-green-600 px-6 py-2 font-bold text-white"
+                      >
+                        اعتماد
+                      </button>
+                    )}
                     <button
                       onClick={() => decide(m, "مرفوضة")}
                       className="rounded-lg bg-red-50 px-5 py-2 font-bold text-red-700"

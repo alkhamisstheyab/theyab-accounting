@@ -19,6 +19,7 @@ import {
   type ChangeShape,
 } from "@/lib/server/permits";
 import { certifyOnly } from "@/lib/server/certify";
+import { approveOnly } from "@/lib/server/approve";
 import { readState } from "@/lib/server/state";
 import { applyChangesIn, currentRev, type ChangeSet } from "@/lib/server/writes";
 
@@ -103,10 +104,26 @@ const { allowed, refused } = allowedChanges(changes, user.permissions);
       (user.permissions.includes("contracts.approve") ||
         user.permissions.includes("contracts.confirm"));
 
+    /*
+      واعتمادُ الحركات يمرّ وإن رُدّت كتابتُها — وهي العلّةُ نفسُها.
+
+      فالكتابةُ في الحركات تطلب «إدخال» أو «تعديل»، و«اعتماد الحركات»
+      ليست منهما. فمن أُعطي الاعتمادَ وحدَه اعتمد في جهازه ورُدَّ صفُّه،
+      فلا تدخل الدفاترَ ولا يعلم أحد. فيُؤخذ من الوارد اعتمادُه وحدَه.
+
+      ومعه الحارس: من أدخل حركةً لا يعتمدها — إلا صاحبَ الشركة
+      والمديرَ العام.
+    */
+    const approving =
+      refused.some((r) => r.field === "movements") &&
+      user.permissions.includes("movements.approve");
+
     /* الكاتب اسمه لا معرّفه: السجل يُقرأ بعد سنوات وقد زال الحساب */
     const result = await inTransaction(async (db) => {
       const toWrite = { ...(allowed as ChangeSet) };
       let certified = 0;
+      let approved = 0;
+      let blocked: { entryNo: string; reason: string }[] = [];
 
       if (certifying) {
         const sent = (changes.upserts?.contractors ?? []) as unknown[];
@@ -117,10 +134,26 @@ const { allowed, refused } = allowedChanges(changes, user.permissions);
         }
       }
 
+      if (approving) {
+        const sent = (changes.upserts?.movements ?? []) as unknown[];
+        const outcome = await approveOnly(db, sent, user.permissions, {
+          name: user.name,
+          role: user.role,
+        });
+        if (outcome.merged.length > 0) {
+          toWrite.upserts = {
+            ...(toWrite.upserts ?? {}),
+            movements: outcome.merged,
+          };
+          approved = outcome.merged.length;
+        }
+        blocked = outcome.blocked;
+      }
+
       if (nothingToWrite(toWrite)) return null;
       /* الفرز يختار مجموعاتٍ من الطلب ولا يمسّ صفوفها، فهي كما وصلت */
       const counts = await applyChangesIn(db, toWrite, user.name);
-      return { ...counts, certified, rev: await currentRev(db) };
+      return { ...counts, certified, approved, blocked, rev: await currentRev(db) };
     });
 
     if (!result) {
@@ -134,9 +167,23 @@ const { allowed, refused } = allowedChanges(changes, user.permissions);
       ما مرّ بالشهادة لا يُقال لصاحبه إنه رُدّ: كُتب منه ما يملكه، وبقي
       ما لا يملكه عند الخادم كما هو. ولو عُدّ مردوداً لظنّ عملَه ضائعاً.
     */
-    const told = result.certified > 0
+    let told = result.certified > 0
       ? refused.filter((r) => r.field !== "contractors")
       : refused;
+    /*
+      وكذلك ما مرّ بالاعتماد: كُتب اعتمادُه وبقي ما سواه كما هو.
+      وما مُنع منه — حركةٌ أدخلها هو — يُقال له بسببه لا يُطوى،
+      فيعرف أنّها تنتظر غيرَه ولا يحسبها معتمدةً عنده.
+    */
+    if (result.approved > 0) {
+      told = told.filter((r) => r.field !== "movements");
+    }
+    for (const row of result.blocked ?? []) {
+      told = [
+        ...told,
+        { field: "movements", reason: `قيد ${row.entryNo}: ${row.reason}` },
+      ];
+    }
 
     return NextResponse.json({ ...result, refused: told });
   } catch (error) {
