@@ -200,7 +200,30 @@ check(
   مكوّنٍ اسمه «*Sheet» ويُطبع، يلزمه الوسم — ومن أضاف خامسةً بلا وسمٍ
   أخفق الفحص عليه، وهو المطلوب.
 */
-const SHEETS = ["DocSheet", "QuotationSheet", "TransferSheet", "PayslipSheet"];
+/*
+  الأوراقُ المصمّمة.
+
+  وكانت مكتوبةً بيدٍ: أربعةُ أسماء. ثمّ أُضيفت براءةُ الذمّة وكشفُ
+  العميل فصارت ستّاً، ولم تُحدَّث القائمة — فأخفق شرطُ «ولا وسمَ
+  زائدٌ» على ورقةٍ صحيحةٍ تماماً، وقال «٦ من ٤» كأنّ الزيادةَ عيب.
+  وذاك شرطٌ يبلى بنموّ النظام: يُخفق على الصواب فيُعلَّم تجاهلُه، ثمّ
+  لا يُرى يومَ يُخفق على خطأ.
+
+  فصارت تُستنبط: كلُّ مكوّنٍ ينتهي اسمُه بـ«Sheet» ويحمل الوسم. فما
+  أُضيف غداً يُحسب من نفسه، وما حمل الوسمَ وليس ورقةً يُكشف.
+*/
+const SHEETS = [
+  ...new Set(
+    [...page.matchAll(/\nfunction ([A-Z][A-Za-z0-9_]*Sheet)\(/g)].map(
+      (m) => m[1]
+    )
+  ),
+].filter((name) => {
+  const at = page.indexOf(`function ${name}(`);
+  const nextAt = page.slice(at + 1).search(/\nfunction [A-Z]/);
+  const body = page.slice(at, nextAt < 0 ? undefined : at + 1 + nextAt);
+  return body.includes("voucher-body designed-sheet");
+});
 const marked = (page.match(/voucher-body designed-sheet/g) ?? []).length;
 const unmarked = SHEETS.filter((name) => {
   const at = page.indexOf(`function ${name}(`);
