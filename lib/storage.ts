@@ -81,6 +81,8 @@ import {
   PROBATION_OUTCOMES,
   type ProbationOutcome,
 } from "./probation";
+import type { ThirdParty as ThirdPartyRow } from "./tripartite";
+export type { ThirdParty } from "./tripartite";
 import { SEED_WORK_ITEMS } from "./work-items-seed";
 import { Invoice } from "./invoices";
 
@@ -160,6 +162,14 @@ export type Installment = {
   condition: string;
   /** حالة الدفع المسجّلة يدوياً */
   status: string;
+
+  /**
+   * من يدفع هذه الدفعة — «الشركة» أو «الطرف الثالث».
+   *
+   * وفارغٌ يعني الشركة: فعقودُها كُتبت قبل هذا الباب، ولو كان الفارغُ
+   * مجهولاً لصارت كلُّها تسأل عن دافع. وتفصيلُه في lib/tripartite.ts.
+   */
+  payer?: string;
 
   /**
    * ما سُدِّد من هذه الدفعة من خارج حسابات الشركة.
@@ -454,6 +464,26 @@ export type Contractor = {
   parentContractNumber: string;
   /** تاريخ تحرير العقد */
   contractDate: string;
+
+  /**
+   * الطرفُ الثالث — اختياريٌّ، وأكثرُ العقود طرفان.
+   *
+   * ووُجد من واقعٍ قائم: عقدُ نصفِ تشطيبٍ ينفّذه مقاولٌ، تدفع الشركةُ
+   * منه جزءاً ويدفع المالكُ الباقيَ مباشرةً إلى المقاول. وما يدفعه
+   * المالكُ لا يمرّ بحساب الشركة فلا قيدَ له، فيُفصل عن التزامها.
+   *
+   * وغيابُه هو الأصل: فلا يُلزم عقداً ثنائيّاً بخانةٍ تُملأ.
+   */
+  thirdParty?: ThirdPartyRow;
+
+  /**
+   * ملاحظةٌ على مدّة العقد، تُطبع معها.
+   *
+   * فمدّةٌ قد تكون معلومةً لجزءٍ من العمل ومجهولةً لباقيه: «نصفُ
+   * التشطيب في كذا، والباقي يُستكمل بعد المساح». ولو كُتبت مدّةً
+   * واحدةً لكانت دعوى غرامةٍ على تأخيرٍ لم يُتَّفق على مدّته.
+   */
+  durationNote?: string;
 
   /* بيانات الطرف الثاني كما تُكتب في العقد */
   civilId: string;
@@ -1686,6 +1716,27 @@ function migrateProject(raw: unknown): Project {
   };
 }
 
+/**
+ * الطرفُ الثالثُ كما يُقرأ من الملفّ.
+ *
+ * وبلا اسمٍ لا طرف: فصفةٌ أو هاتفٌ بلا اسمٍ يُنشئ طرفاً ثالثاً
+ * مجهولاً في عقدٍ ثنائيّ، فتُعرض عليه دفعاتٌ وتُطبع له خانةُ
+ * توقيعٍ لا صاحبَ لها.
+ */
+function migrateThirdParty(raw: unknown): Contractor["thirdParty"] {
+  if (!raw || typeof raw !== "object") return undefined;
+  const t = raw as Record<string, unknown>;
+  const name = str(t.name).trim();
+  if (!name) return undefined;
+  return {
+    name,
+    role: str(t.role),
+    civilId: str(t.civilId),
+    phone: str(t.phone),
+    address: str(t.address),
+  };
+}
+
 function migrateContractor(raw: unknown): Contractor {
   const c = (raw ?? {}) as Record<string, unknown>;
   const installments = Array.isArray(c.installments) ? c.installments : [];
@@ -1711,6 +1762,8 @@ function migrateContractor(raw: unknown): Contractor {
     documentType: str(c.documentType, "عقد") || "عقد",
     parentContractNumber: str(c.parentContractNumber),
     contractDate: str(c.contractDate),
+    thirdParty: migrateThirdParty(c.thirdParty),
+    durationNote: str(c.durationNote) || undefined,
 
     civilId: str(c.civilId),
     passportNumber: str(c.passportNumber),
@@ -1790,6 +1843,11 @@ function migrateContractor(raw: unknown): Contractor {
         stalled: item.stalled === true ? true : undefined,
         stalledReason: str(item.stalledReason) || undefined,
         stalledAt: str(item.stalledAt) || undefined,
+        /* ومن يدفعها — وفارغٌ يعني الشركة، فلا يتغيّر عقدٌ قديم */
+        payer:
+          str(item.payer).trim() === "الطرف الثالث"
+            ? "الطرف الثالث"
+            : undefined,
         externalPaid: str(item.externalPaid) || undefined,
         externalNote: str(item.externalNote) || undefined,
         deduction: str(item.deduction) || undefined,

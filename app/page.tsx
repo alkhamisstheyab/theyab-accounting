@@ -328,6 +328,17 @@ import {
   type EnteredBy,
 } from "@/lib/approval";
 import {
+  PAYERS,
+  THIRD_PARTY_ROLES,
+  hasThirdParty,
+  payerOf,
+  payerProblem,
+  splitByPayer,
+  splitWarning,
+  thirdPartyLine,
+  type Payer,
+} from "@/lib/tripartite";
+import {
   SPECIALTIES,
   partiesBySpecialty,
   partyContracts,
@@ -7329,6 +7340,15 @@ const BLANK_CONTRACT = {
   terminationAfterDays: String(CONTRACT_DEFAULTS.terminationAfterDays),
   warrantyYears: String(CONTRACT_DEFAULTS.warrantyYears),
 
+  durationNote: "",
+
+  /* الطرفُ الثالث — فارغٌ في العقود الثنائيّة، وهي الأكثر */
+  thirdName: "",
+  thirdRole: "",
+  thirdCivilId: "",
+  thirdPhone: "",
+  thirdAddress: "",
+
   preamble: "",
   notes: DEFAULT_NOTES,
   contractValue: "",
@@ -11020,6 +11040,22 @@ function ContractorsPage({
   const [clauses, setClauses] = useState<ContractClause[]>([]);
   const [obligations, setObligations] = useState<string[]>([]);
   const [installments, setInstallments] = useState<Installment[]>([]);
+
+  /* أعقدٌ ثلاثيٌّ هذا؟ — والاسمُ هو الحدّ، فصفةٌ بلا اسمٍ لا تُعدّ */
+  const tripartite = form.thirdName.trim() !== "";
+
+  /*
+    قسمةُ الدفعات على دافعيها — تُحسب من الجدول الذي بين يديه الآن لا
+    من العقد المحفوظ، فيرى الأثرَ وهو يكتب.
+  */
+  const payerSplit = useMemo(
+    () =>
+      splitByPayer({
+        contractValue: Number(form.contractValue) || 0,
+        installments,
+      } as Contractor),
+    [form.contractValue, installments]
+  );
   const [error, setError] = useState("");
   const [linkInstallment, setLinkInstallment] = useState("");
 
@@ -11150,6 +11186,12 @@ function ContractorsPage({
       maxPenaltyPercent: String(c.maxPenaltyPercent),
       terminationAfterDays: String(c.terminationAfterDays),
       warrantyYears: String(c.warrantyYears),
+      durationNote: c.durationNote ?? "",
+      thirdName: c.thirdParty?.name ?? "",
+      thirdRole: c.thirdParty?.role ?? "",
+      thirdCivilId: c.thirdParty?.civilId ?? "",
+      thirdPhone: c.thirdParty?.phone ?? "",
+      thirdAddress: c.thirdParty?.address ?? "",
       preamble: c.preamble,
       notes: c.notes,
       contractValue: String(c.contractValue),
@@ -11304,6 +11346,17 @@ function ContractorsPage({
       maxPenaltyPercent: Number(form.maxPenaltyPercent) || 0,
       terminationAfterDays: Number(form.terminationAfterDays) || 0,
       warrantyYears: Number(form.warrantyYears) || 0,
+      durationNote: form.durationNote.trim() || undefined,
+      /* وبلا اسمٍ لا طرف: فلا يُنشأ ثالثٌ مجهولٌ بصفةٍ أو هاتف */
+      thirdParty: form.thirdName.trim()
+        ? {
+            name: form.thirdName.trim(),
+            role: form.thirdRole.trim(),
+            civilId: form.thirdCivilId.trim(),
+            phone: form.thirdPhone.trim(),
+            address: form.thirdAddress.trim(),
+          }
+        : undefined,
       preamble: effectivePreamble,
       clauses: isAddendum ? [] : clauses.map((c) => ({ ...c })),
       obligations: isAddendum ? [] : [...obligations],
@@ -12592,6 +12645,88 @@ function ContractorsPage({
                       </Field>
                     ))}
                   </div>
+
+                  {/*
+                    ومدّةٌ قد تكون معلومةً لجزءٍ من العمل ومجهولةً
+                    لباقيه: «نصفُ التشطيب في كذا، والباقي يُستكمل بعد
+                    المساح». ولو كُتبت مدّةً واحدةً لصارت دعوى غرامةٍ
+                    على تأخيرٍ لم يُتَّفق على مدّته.
+                  */}
+                  <Field
+                    label="ملاحظة على المدّة"
+                    hint="تُطبع مع المدّة — لما كان بعضُه معلوم المدّة وبعضُه لا"
+                  >
+                    <input
+                      type="text"
+                      value={form.durationNote}
+                      onChange={(e) => set("durationNote", e.target.value)}
+                      placeholder="نصف التشطيب خلال المدّة المذكورة، والباقي يُستكمل بعد المساح"
+                      className={inputClass}
+                    />
+                  </Field>
+                </div>
+
+                {/*
+                  الطرفُ الثالث — اختياريٌّ، وأكثرُ العقود طرفان.
+
+                  ووُجد من واقعٍ قائم: عقدُ نصفِ تشطيبٍ ينفّذه مقاول،
+                  تدفع الشركةُ منه ٢٠٠٠ ويدفع المالكُ ٧٠٠ مباشرةً إليه.
+                  وما يدفعه المالكُ لا يمرّ بحساب الشركة فلا قيدَ له.
+                */}
+                <div className="rounded-xl border border-slate-200 p-4">
+                  <p className="mb-1 font-bold">الطرف الثالث — اختياريّ</p>
+                  <p className="mb-3 text-sm text-slate-600">
+                    اتركه فارغاً في العقود الثنائيّة. ومتى كُتب اسمُه صار
+                    لكلِّ دفعةٍ خانةُ «من يدفعها»، وما يدفعه هو لا يمرّ
+                    بحساب الشركة فلا قيدَ له في الدفاتر.
+                  </p>
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
+                    <Field label="الاسم">
+                      <input
+                        type="text"
+                        value={form.thirdName}
+                        onChange={(e) => set("thirdName", e.target.value)}
+                        placeholder="د. عبدالرحمن بوعباس"
+                        className={inputClass}
+                      />
+                    </Field>
+                    <Field label="صفتُه">
+                      <select
+                        value={form.thirdRole}
+                        onChange={(e) => set("thirdRole", e.target.value)}
+                        className={inputClass}
+                      >
+                        <option value="">—</option>
+                        {THIRD_PARTY_ROLES.map((r) => (
+                          <option key={r}>{r}</option>
+                        ))}
+                      </select>
+                    </Field>
+                    <Field label="الرقم المدني">
+                      <input
+                        type="text"
+                        value={form.thirdCivilId}
+                        onChange={(e) => set("thirdCivilId", e.target.value)}
+                        className={inputClass}
+                      />
+                    </Field>
+                    <Field label="الهاتف">
+                      <input
+                        type="text"
+                        value={form.thirdPhone}
+                        onChange={(e) => set("thirdPhone", e.target.value)}
+                        className={inputClass}
+                      />
+                    </Field>
+                    <Field label="العنوان">
+                      <input
+                        type="text"
+                        value={form.thirdAddress}
+                        onChange={(e) => set("thirdAddress", e.target.value)}
+                        className={inputClass}
+                      />
+                    </Field>
+                  </div>
                 </div>
               </>
             )}
@@ -12795,8 +12930,36 @@ function ContractorsPage({
                           updateInstallment(index, "condition", e.target.value)
                         }
                         placeholder="شرط الاستحقاق — بعد صب سقف الدور الأرضي"
-                        className={`${inputClass} col-span-5`}
+                        className={`${inputClass} ${
+                          tripartite ? "col-span-3" : "col-span-5"
+                        }`}
                       />
+                      {/*
+                        ومن يدفع — لا تظهر إلا في العقود الثلاثيّة.
+                        فخانةٌ تسأل عن دافعٍ في عقدٍ طرفاه اثنان
+                        سؤالٌ بلا معنى، وجوابُها معلومٌ سلفاً.
+                      */}
+                      {tripartite && !documentary && (
+                        <select
+                          value={payerOf(installment)}
+                          onChange={(e) =>
+                            updateInstallment(
+                              index,
+                              "payer",
+                              e.target.value
+                            )
+                          }
+                          className={`${inputClass} col-span-2`}
+                          title="من يدفع هذه الدفعة"
+                        >
+                          {PAYERS.map((p) => (
+                            <option key={p}>{p}</option>
+                          ))}
+                        </select>
+                      )}
+                      {tripartite && documentary && (
+                        <div className="col-span-2" />
+                      )}
                       {documentary ? (
                         <div className="col-span-2 px-3 py-3 text-sm text-amber-900">
                           مخصوم
@@ -12827,6 +12990,20 @@ function ContractorsPage({
                   >
                     مجموع الدفعات {fmt(installmentsTotal)} — قيمة العقد{" "}
                     {fmt(contractValue)}
+                    {/*
+                      وقسمةُ الدفعات على دافعيها: فما على الطرف
+                      الثالث لا يمرّ بحساب الشركة، فالتزامُها
+                      حصّتُها وحدَها لا قيمةُ العقد.
+                    */}
+                    {tripartite && (
+                      <span className="block text-sm font-normal">
+                        على الشركة <b>{fmt(payerSplit.company)}</b> في{" "}
+                        {payerSplit.companyCount} دفعة · وعلى{" "}
+                        {form.thirdName.trim() || "الطرف الثالث"}{" "}
+                        <b>{fmt(payerSplit.third)}</b> في {payerSplit.thirdCount}{" "}
+                        دفعة — تُدفع إليه مباشرةً فلا قيدَ لها في دفاترك.
+                      </span>
+                    )}
                     {documented > 0 && (
                       <span className="block text-sm font-normal">
                         ومعها صفّ توثيقي بقيمة {fmt(documented)} مخصومة سلفاً —
@@ -13245,6 +13422,8 @@ function ContractSheet({
   onClose: () => void;
 }) {
   const isAddendum = contract.documentType === "ملحق عقد";
+  /* قسمةُ الدفعات على دافعيها — تُطبع في شرط السداد */
+  const payerSplit = splitByPayer(contract);
   /** عقد العميل: الشركة هي المنفّذة، فالدفعات تأتي إليها لا منها */
   const isClient = contract.counterpartyType === "عميل";
 
@@ -13390,6 +13569,30 @@ function ContractSheet({
             <p>رقم الجواز : {contract.passportNumber}</p>
           )}
           {contract.nationality && <p>الجنسية : {contract.nationality}</p>}
+          {/*
+            والطرفُ الثالثُ يُطبع إن كان: فعقدٌ يدفع فيه ثالثٌ ولا
+            يُذكر في أطرافه لا يُلزمه بشيء — ومن دفع بغير عقدٍ
+            يُسمّيه طرفاً تبرّع لا التزم.
+          */}
+          {contract.thirdParty?.name && (
+            <>
+              <p>
+                الطرف الثالث : السيد / {contract.thirdParty.name}
+                {contract.thirdParty.role
+                  ? ` (${contract.thirdParty.role})`
+                  : ""}
+              </p>
+              {contract.thirdParty.phone && (
+                <p>رقم التواصل : {contract.thirdParty.phone}</p>
+              )}
+              {contract.thirdParty.civilId && (
+                <p>الرقم المدني : {contract.thirdParty.civilId}</p>
+              )}
+              {contract.thirdParty.address && (
+                <p>العنوان : {contract.thirdParty.address}</p>
+              )}
+            </>
+          )}
         </div>
 
 {/*
@@ -13530,8 +13733,29 @@ function ContractSheet({
             <p className="text-sm leading-loose">
               السعر الإجمالي المتفق عليه بين الطرفين مبلغ وقدره (
               <b>{fmt(contract.contractValue)}</b>) دينار كويتي —{" "}
-              {amountInWords(contract.contractValue)} — تسدد من قبل الطرف الأول
-              للطرف الثاني على النحو التالي:
+              {amountInWords(contract.contractValue)} —{" "}
+              {/*
+                ومن يسدّد: الطرفُ الأولُ وحدَه في العقد الثنائيّ،
+                وهو والثالثُ بحصّتيهما في الثلاثيّ. ولو قيل «تسدد
+                من قبل الطرف الأول» وثُلثُها على غيره لصار العقدُ
+                يُلزم الشركةَ بما لم تلتزم به.
+              */}
+              {contract.thirdParty?.name ? (
+                <>
+                  تسدد على النحو التالي: <b>{fmt(payerSplit.company)}</b>{" "}
+                  دينار من قبل الطرف الأول، و<b>{fmt(payerSplit.third)}</b>{" "}
+                  دينار من قبل الطرف الثالث — تُسدَّد للطرف الثاني
+                  مباشرةً — وبيان ذلك في الجدول:
+                </>
+              ) : (
+                <>تسدد من قبل الطرف الأول للطرف الثاني على النحو التالي:</>
+              )}
+            </p>
+          )}
+          {/* وملاحظةُ المدّة تُطبع مع شروطها، فتُقرأ مع الغرامة */}
+          {contract.durationNote && (
+            <p className="mt-3 text-sm font-bold leading-loose">
+              ملاحظة على المدّة: {contract.durationNote}
             </p>
           )}
 
@@ -13558,6 +13782,12 @@ function ContractSheet({
                   <th className="border border-slate-400 px-3 py-2">الدفعة</th>
                   <th className="border border-slate-400 px-3 py-2">البند</th>
                   <th className="border border-slate-400 px-3 py-2">القيمة</th>
+                  {/* ومن يدفع — عمودٌ لا يُطبع إلا في العقد الثلاثيّ */}
+                  {contract.thirdParty?.name && (
+                    <th className="border border-slate-400 px-3 py-2">
+                      يسدّدها
+                    </th>
+                  )}
                 </tr>
               </thead>
               <tbody>
@@ -13575,6 +13805,13 @@ function ContractSheet({
                     <td className="border border-slate-400 px-3 py-2 tabular-nums">
                       {fmt(Number(i.value) || 0)} د.ك
                     </td>
+                    {contract.thirdParty?.name && (
+                      <td className="border border-slate-400 px-3 py-2">
+                        {payerOf(i) === "الطرف الثالث"
+                          ? "الطرف الثالث"
+                          : "الطرف الأول"}
+                      </td>
+                    )}
                   </tr>
                 ))}
                 <tr className="font-bold" style={{ background: CONTRACT_SAND }}>
@@ -13584,6 +13821,12 @@ function ContractSheet({
                   <td className="border border-slate-400 px-3 py-2 tabular-nums">
                     {fmt(contract.contractValue)} د.ك
                   </td>
+                  {contract.thirdParty?.name && (
+                    <td className="border border-slate-400 px-3 py-2 text-sm">
+                      {fmt(payerSplit.company)} أوّل · {fmt(payerSplit.third)}{" "}
+                      ثالث
+                    </td>
+                  )}
                 </tr>
               </tbody>
             </table>
@@ -13659,8 +13902,16 @@ function ContractSheet({
             : "هذا و تفضلوا منا فائق الإحترام و التقدير ،،،،،"}
         </p>
 
-        {/* التواقيع — لا تنقسم بين صفحتين */}
-        <div className="print-block grid grid-cols-2 gap-12 text-sm">
+        {/*
+          التواقيع — لا تنقسم بين صفحتين.
+          وثلاثةُ أعمدةٍ إن كان للعقد ثالث: فورقةٌ يدفع فيها ثالثٌ
+          ولا موضعَ لتوقيعه لا تُلزمه.
+        */}
+        <div
+          className={`print-block grid gap-12 text-sm ${
+            contract.thirdParty?.name ? "grid-cols-3" : "grid-cols-2"
+          }`}
+        >
           <div>
             <p className="mb-1 font-bold underline">
               {isClient ? "توقيع الطرف الأول" : "طرف أول (الشركة)"}
@@ -13680,6 +13931,20 @@ function ContractSheet({
             </p>
             <p className="mt-10">التوقيع / ..............................</p>
           </div>
+          {contract.thirdParty?.name && (
+            <div>
+              <p className="mb-1 font-bold underline">
+                طرف ثالث
+                {contract.thirdParty.role
+                  ? ` (${contract.thirdParty.role})`
+                  : ""}
+              </p>
+              <p>السيد / {contract.thirdParty.name}</p>
+              <p className="mt-10">
+                التوقيع / ..............................
+              </p>
+            </div>
+          )}
         </div>
         </div>
               </td>
