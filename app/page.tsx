@@ -1032,6 +1032,59 @@ export default function HomeV2() {
 
   const activeUsers = users.filter((u) => u.active);
 
+  /*
+    أسماءُ من في الشركة — تُقرأ من مسارها لا من مجموعة المستخدمين.
+
+    فالمجموعةُ محجوبةٌ عن كلِّ من لا يُديرهم بقرارٍ مقصود، فمن لا
+    يُديرهم لا يعرف ما لكلٍّ من صلاحية. وشاشةُ الأعمال تحتاج الأسماءَ
+    لتُوجَّه الرسائل — فعملت عند من يُديرهم وسكتت عند الجميع: فتحت
+    م. ميس الشاشةَ لتُرسل رسالةً فلم تجد إلا «الجميع» وعدَدُه صفر.
+
+    ولا تُخزَّن ولا تُقارَن ولا تُرسَل — فصفُّ مستخدمٍ ناقصُ الصلاحيات
+    لو دخل المزامنةَ دُفع به فمُحيت صلاحياتُ الناس.
+  */
+  const [roster, setRoster] = useState<
+    { id: string; name: string; jobTitle: string }[]
+  >([]);
+
+  useEffect(() => {
+    if (!session) return;
+    let alive = true;
+    fetch("/api/roster", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((body) => {
+        if (alive && Array.isArray(body?.people)) setRoster(body.people);
+      })
+      .catch(() => {
+        /* وسكوتُه لا يُعطّل شاشةً: من يُديرهم يراهم من مجموعتهم */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [session]);
+
+  /*
+    ومن يُوجَّه إليه العمل: الأسماءُ من المسار، وإلا من المجموعة لمن
+    يقرؤها. فلا تبقى القائمةُ فارغةً على حالٍ من الحالين.
+  */
+  const addressable = useMemo(
+    () =>
+      roster.length > 0
+        ? roster.map((p) => ({
+            id: p.id,
+            name: p.name,
+            jobTitle: p.jobTitle,
+            active: true,
+          }))
+        : activeUsers.map((u) => ({
+            id: u.id,
+            name: u.name,
+            jobTitle: u.jobTitle ?? "",
+            active: true,
+          })),
+    [roster, activeUsers]
+  );
+
   /**
    * من أنت وما صلاحيتك — من الخادم لا من الجهاز.
    *
@@ -2476,7 +2529,7 @@ export default function HomeV2() {
             <MinutesPage
               minutes={minutes}
               projects={projects}
-              users={activeUsers}
+              users={addressable}
               today={todayISO()}
               canManage={allow("projects.manage")}
               authorName={currentUser?.name ?? ""}
@@ -2769,7 +2822,7 @@ export default function HomeV2() {
           {page === "الأعمال" && currentUser && (
             <TasksPage
               messages={messages}
-              users={activeUsers}
+              users={addressable}
               me={{ id: currentUserId ?? "", name: currentUser.name }}
               pages={visiblePages}
               onNavigate={setPage}
@@ -7757,13 +7810,18 @@ function MinutesPage({
 }: {
   minutes: Minute[];
   projects: Project[];
-  users: User[];
+  /** من يُوجَّه إليهم العمل — أسماءٌ لا صلاحيات */
+  users: Addressee[];
   today: string;
   canManage: boolean;
   authorName: string;
   onSave: (minute: Minute) => void;
   onDelete: (minute: Minute) => void;
-  onSendDecision: (minute: Minute, decision: MinuteDecision, to: User) => void;
+  onSendDecision: (
+    minute: Minute,
+    decision: MinuteDecision,
+    to: Addressee
+  ) => void;
 }) {
   const [project, setProject] = useState("");
   const [editing, setEditing] = useState<Minute | null>(null);
@@ -9431,6 +9489,20 @@ function PartiesPage({
  */
 const ALL_USERS = "*";
 
+/**
+ * من يُوجَّه إليه عملٌ أو قرار.
+ *
+ * ولا يُطلب المستخدمُ كلُّه: فشاشتا الأعمال والتقارير تُناديان
+ * الإنسانَ باسمه، ولا تحتاجان دورَه ولا صلاحياتَه ولا تجزئةَ كلمته.
+ * وطلبُ ما لا يُحتاج يُغري بإرساله.
+ */
+type Addressee = {
+  id: string;
+  name: string;
+  jobTitle: string;
+  active: boolean;
+};
+
 function TasksPage({
   messages,
   users,
@@ -9441,7 +9513,8 @@ function TasksPage({
   onNavigate,
 }: {
   messages: Message[];
-  users: User[];
+  /** من يُوجَّه إليهم العمل — أسماءٌ لا صلاحيات */
+  users: Addressee[];
   me: { id: string; name: string };
   /** الشاشاتُ التي يُنجَز فيها العمل — يُنقل إليها بضغطة */
   pages: string[];
