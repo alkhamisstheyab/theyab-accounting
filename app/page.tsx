@@ -16349,8 +16349,33 @@ function BulkFixPanel({
   yearLocks: YearLocks;
   onApply: (fix: BulkFix, targets: Movement[], item?: ItemDefinition) => void;
 }) {
+  /*
+    وما بلغ غايتَه لا يُعَدّ هدفاً.
+
+    وقع هذا: كتبتُ ترشيحَ توحيدِ اسمٍ بصيغةٍ تُطابق الصيغَ الخاطئةَ
+    **والصيغةَ المقصودةَ معها**. فبقي التصحيحُ يُعرض بسبعة بعد تنفيذه،
+    فضغطه صاحبُ الشركة أربعَ مرّاتٍ ولا يرى تغييراً — وقال «كلّما
+    أضغط تظهر الرسالة وأضغط أوكي ولا يتمّ التصحيح». وكان قد تمّ من
+    أوّل مرّة.
+
+    والعلاجُ في المُحصي لا في الترشيح: صفٌّ قيمتُه قيمةُ المقصد ليس
+    محلّاً للتصحيح، أيّاً كان ترشيحُه. فيسقط من العدّ فيبلغ التصحيحُ
+    صفراً ويختفي من الشاشة — وهو الدليلُ على أنّه تمّ.
+  */
+  const settled = (fix: BulkFix, m: Movement): boolean => {
+    const same = (was: string | undefined, to: string | undefined) =>
+      to !== undefined && (was ?? "").trim() === to.trim();
+    /* ويُشترط أن يكون كلُّ ما يُغيّره قد بلغ مقصدَه، لا بعضُه */
+    const goals: boolean[] = [];
+    if (fix.toParty !== undefined) goals.push(same(m.party, fix.toParty));
+    if (fix.toPerson !== undefined) goals.push(same(m.person, fix.toPerson));
+    if (fix.toProject !== undefined) goals.push(same(m.project, fix.toProject));
+    if (fix.toAccount !== undefined) goals.push(same(m.debitCode, fix.toAccount));
+    return goals.length > 0 && goals.every(Boolean);
+  };
+
   const pending = BULK_FIXES.map((fix) => {
-    const matched = movements.filter(fix.match);
+    const matched = movements.filter((m) => fix.match(m) && !settled(fix, m));
     const targets = matched.filter((m) => !isYearClosed(yearLocks, m.fiscalYear));
     const lockedCount = matched.length - targets.length;
     // البند هو ما يربط الحركة بالحساب في شاشة الإدخال، فلا تصحيح قبل إنشائه
