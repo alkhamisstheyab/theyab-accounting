@@ -66,6 +66,7 @@
     "check:month": "node db/check-open-month.mjs",
     "check:qdelete": "node db/check-quotation-delete.mjs",
     "check:waiting": "node db/check-waiting-panel.mjs",
+    "check:split-entry": "node db/check-split-entry.mjs",
     "check:fixes": "node db/check-bulk-fixes.mjs",
     "check:tripartite": "node db/check-tripartite.mjs",
     "check:self-approval": "node db/check-self-approval.mjs",
