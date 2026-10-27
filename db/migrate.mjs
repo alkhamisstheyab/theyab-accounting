@@ -117,20 +117,34 @@ const stamp = (v) => (str(v) ? str(v) : null);
  * — فحقلٌ يُضاف إلى النوع في التطبيق ينتقل بلا تعديل مخطّط. وبغيره
  * يضيع الحقل صامتاً، ولا يُكتشف إلا بعد شهور.
  */
-async function fillData(db, table, objects, key = 'id') {
+/*
+  ويُسأل عن نوع المفتاح قبل أن يُقارَن.
+
+  كانت الدالّةُ تفترض أنّ مفتاحَ كلِّ جدولٍ uuid: تُحوّل المعرّفَ
+  بـ`uuidFor` وتقارن `t.id = v.id::uuid`. ثمّ أُضيفت ثلاثةُ جداولٍ
+  مفاتيحُها نصّ — الرسائلُ والأطرافُ وتقاريرُ الاجتماعات — فسقط النقلُ
+  المحليُّ على أوّلها بـ«operator does not exist: text = uuid».
+
+  وثمنُ ذلك أغلى من سطرٍ: خمسةُ فحوصٍ تكامليّةٍ تبني قاعدتَها بهذا
+  النقل — الكتابةُ والطريقُ والدخولُ والمزامنةُ ودورةُ التخزين — فبقيت
+  لا تعمل، ولا تُحصى في المُخفِق لأنّها لا تبلغ شرطاً أصلاً. فالفحصُ
+  الذي لا يعمل أخطرُ من الفحص الذي يُخفق: هذا يُرى وذاك يُظنّ سليماً.
+*/
+async function fillData(db, table, objects, key = 'id', idKind = 'uuid') {
   const rows = objects.filter((o) => o && o[key] != null);
+  const idOf = (o) => (idKind === 'uuid' ? uuidFor(o[key]) : String(o[key]));
   for (let i = 0; i < rows.length; i += 200) {
     const chunk = rows.slice(i, i + 200);
     const values = [];
     const params = [];
     chunk.forEach((o, n) => {
-      params.push(uuidFor(o[key]), JSON.stringify(o));
-      values.push("($" + (n * 2 + 1) + "::uuid, $" + (n * 2 + 2) + "::jsonb)");
+      params.push(idOf(o), JSON.stringify(o));
+      values.push("($" + (n * 2 + 1) + "::" + idKind + ", $" + (n * 2 + 2) + "::jsonb)");
     });
     try { await db.query(
       `UPDATE ${table} AS t SET data = v.d::jsonb
          FROM (VALUES ${values.join(',')}) AS v(id, d)
-        WHERE t.id = v.id::uuid`,
+        WHERE t.id = v.id::${idKind}`,
       params
     ); } catch (e) { throw new Error(table + ": " + e.message); }
   }
@@ -779,9 +793,9 @@ async function main() {
   await fillData(db, "invoices", d.invoices ?? []);
   await fillData(db, "payroll_runs", d.payrollRuns ?? []);
   await fillData(db, "audit_log", d.audit ?? []);
-  await fillData(db, "messages", d.messages ?? []);
-  await fillData(db, "parties", d.parties ?? []);
-  await fillData(db, "minutes", d.minutes ?? []);
+  await fillData(db, "messages", d.messages ?? [], "id", "text");
+  await fillData(db, "parties", d.parties ?? [], "id", "text");
+  await fillData(db, "minutes", d.minutes ?? [], "id", "text");
   for (const a of d.attendance ?? []) {
     if (!a?.employeeId || !date(a.date)) continue;
     await db.query(

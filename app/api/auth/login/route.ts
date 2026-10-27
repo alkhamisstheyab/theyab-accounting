@@ -26,11 +26,32 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const outcome = await login(
-    name,
-    password,
-    request.headers.get("user-agent") ?? ""
-  );
+  /*
+    وما خرج من `login` من خطأٍ يُقال، ولا يُترك الطريقُ يسقط صامتاً.
+
+    وقعت هذه في ٢٧ أكتوبر ٢٠٢٦: نضبت حصّةُ القاعدة فصارت ترفض كلَّ
+    اتصال، فخرج الطريقُ خمسَ مئةٍ بجسمٍ فارغ — فقرأ صاحبُ الشركة
+    «تعذّر الدخول» ولم يعرف أنّ العلّة في القاعدة لا في كلمته. والرسالةُ
+    لا تُفرّق بين اسمٍ خاطئٍ وكلمةٍ خاطئة، ولكنّها تُفرّق بين خطأِ
+    الداخلِ وخطأِ الخادم — وهذا ليس إفشاءً بل دلالةٌ على مَن يُراجَع.
+  */
+  let outcome;
+  try {
+    outcome = await login(
+      name,
+      password,
+      request.headers.get("user-agent") ?? ""
+    );
+  } catch (error) {
+    console.error("خطأ في /api/auth/login:", error);
+    return NextResponse.json(
+      {
+        error:
+          "قاعدة البيانات لا تستجيب — العلّة ليست في كلمة مرورك. أبلغ المسؤول.",
+      },
+      { status: 503 }
+    );
+  }
 
   if (!outcome.ok) {
     return NextResponse.json(

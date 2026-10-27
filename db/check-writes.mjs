@@ -98,6 +98,52 @@ const SAMPLE = {
     deductions: {},
     note: "فحص",
   },
+  /*
+    والمجموعاتُ الثلاثُ الأخيرةُ مفاتيحُها نصٌّ لا uuid، ولها أمثلةٌ
+    هنا لأنّ الواقعَ قد يُخليها: تقاريرُ الاجتماعات كانت صفراً في دفاتر
+    الشركة، فأخفق الفحصُ بـ«لا صفّ ولا مثال» — لا لخللٍ في الكتابة بل
+    لأنّ الفحصَ كان يستعير صفَّه من البيانات. فمن أضاف مجموعةً يضيف
+    مثالَها هنا، وإلا بقيت كتابتُها غيرَ مفحوصةٍ وهي تمرّ.
+  */
+  messages: {
+    id: "msg-فحص-1",
+    fromName: "فاحص",
+    toUser: "",
+    toName: "فاحص",
+    body: "طلبُ عملٍ للفحص",
+    page: "",
+    about: "",
+    state: "جديدة",
+    readAt: "",
+    doneAt: "",
+    doneNote: "",
+    createdAt: "2026-10-27T09:00:00.000Z",
+  },
+  parties: {
+    id: "party-فحص-1",
+    name: "طرفٌ للفحص",
+    kind: "مقاول",
+    specialty: "",
+    phone: "",
+    civilId: "",
+    address: "",
+    note: "",
+    active: true,
+  },
+  minutes: {
+    id: "minute-فحص-1",
+    date: "2026-10-27",
+    period: "طارئ",
+    project: "",
+    kind: "اجتماع",
+    title: "تقريرٌ للفحص",
+    attendees: "فاحص",
+    body: "",
+    decisions: [],
+    photos: [],
+    createdBy: "فاحص",
+    createdAt: "2026-10-27T09:00:00.000Z",
+  },
 };
 if (before.employees?.[0]) SAMPLE.attendance.employeeId = before.employees[0].id;
 const { COLLECTIONS } = await jiti.import("../lib/server/collections.ts");

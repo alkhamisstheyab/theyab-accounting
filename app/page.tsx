@@ -3747,7 +3747,7 @@ export default function HomeV2() {
               }}
               onImport={(next) => {
                 /*
-                  الحقول الواحد والعشرون كلها — لا ستةٌ منها.
+                  حقول الحالة كلها — لا ستةٌ منها.
 
                   كان يستورد الحركات والمشاريع والعقود والأرصدة والمواد
                   واستلامها وحدها، واسمه «يستبدل كل شيء». فمن استعاد نسخته
@@ -3779,6 +3779,16 @@ export default function HomeV2() {
                 setWorkItems(next.workItems);
                 setQuotations(next.quotations);
                 setInvoices(next.invoices);
+                /*
+                  والثلاثةُ الأخيرةُ أُضيفت بعد كتابة هذا المُعالِج فسقطت
+                  منه: الرسائلُ والأطرافُ وتقاريرُ الاجتماعات. فمن استعاد
+                  نسخته كان يفقد سجلَّ الأطراف وطلباتِ العمل كلَّها ولا
+                  رسالةَ تقول له — وهي العلّةُ نفسُها التي كُتبت أعلاه
+                  ووقعت مرّةً ثانية. ومحلُّ حرسِها `npm run check:import`.
+                */
+                setMessages(next.messages);
+                setParties(next.parties);
+                setMinutes(next.minutes);
                 setYear(availableYears(next.movements, next.openingBalances)[0]);
                 log(
                   "استيراد",

@@ -29,6 +29,7 @@
     "check:attendance-fill": "node db/check-attendance-fill.mjs",
     "check:pending-deletes": "node db/check-pending-deletes.mjs",
     "check:pull": "node db/check-pull.mjs",
+    "check:quiet": "node db/check-quiet-pull.mjs",
     "check:entry-collision": "node db/check-entry-collision.mjs",
     "check:permissions": "node db/check-server-permissions.mjs",
     "check:kuwait-day": "node db/check-kuwait-day.mjs",

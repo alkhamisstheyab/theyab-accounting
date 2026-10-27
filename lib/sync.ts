@@ -43,10 +43,15 @@ const QUIET_MS = 3000;
 const RETRY_MIN_MS = 5000;
 const RETRY_MAX_MS = 300_000;
 /*
-  القراءة من الخادم: كل ثماني ثوانٍ يُسأل عمّا استجدّ بعد آخر رقمٍ وصل.
-  ولا تُطلب الحالة كلها، بل ما تغيّر وحده — فلا يثقل الخادم ولا الشبكة.
+  القراءة من الخادم: يُسأل عمّا استجدّ بعد آخر رقمٍ وصل. ولا تُطلب
+  الحالة كلها، بل ما تغيّر وحده — فلا يثقل الخادم ولا الشبكة.
+
+  وكانت ثماني ثوانٍ فصارت ثلاثين. والسببُ أنّ القاعدة تُحاسَب بساعات
+  تشغيلها، والنبضُ كلَّ ثماني ثوانٍ يمنعها أن تنام أبداً — فنضبت حصّتُها
+  وأُوقف النظام في ٢٧ أكتوبر ٢٠٢٦. وستّةُ أشخاصٍ في مكتبٍ واحدٍ لا
+  يحتاجون ثماني ثوان، ومن أراد ما استجدّ في حينه فله زرُّ التحديث.
 */
-const PULL_MS = 8000;
+const PULL_MS = 30_000;
 
 export type SyncPhase =
   | "مطفأة"
@@ -1031,8 +1036,59 @@ function schedulePull(): void {
   if (pullTimer) clearTimeout(pullTimer);
   pullTimer = setTimeout(() => {
     pullTimer = null;
+    /*
+      والتبويبُ المخفيُّ لا يُسأل له الخادم: يُعاد الموعدُ وحده.
+
+      فالنظامُ يُقفل بعد دقيقتين من الإخفاء أصلاً، فنبضةٌ بعدها لا يراها
+      أحد — وهي مع ذلك تُبقي القاعدةَ مستيقظةً وتُحسب عليها ساعاتٍ.
+    */
+    if (typeof document !== "undefined" && document.hidden) {
+      schedulePull();
+      return;
+    }
     void pull().finally(schedulePull);
   }, PULL_MS);
+}
+
+/**
+ * يستيقظ النبضُ بالظهور.
+ *
+ * لمّا سكن في الخفاء وجب أن يُسأل الخادمُ عند الرجوع إلى التبويب، فيرى
+ * صاحبُه ما استجدّ في حينه لا بعد ثلاثين ثانية. ويُوصل مرّةً واحدة:
+ * التطويرُ يُعيد تحميل الوحدات فيُركَّب المستمعُ مرّتين لو لم يُحرَس.
+ */
+let watchingVisibility = false;
+
+function watchVisibility(): void {
+  if (watchingVisibility || typeof document === "undefined") return;
+  watchingVisibility = true;
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) return;
+    void pullNow();
+  });
+}
+
+/**
+ * يسأل الخادمَ الآنَ عمّا استجدّ، ولا يُنتظر الموعد.
+ *
+ * لمّا مُدَّ ما بين النبضتين إلى ثلاثين ثانيةً صار لمن يريد ما استجدّ في
+ * حينه بابٌ يطرقه. ومنه يستيقظ النبضُ عند الرجوع إلى التبويب، وبه
+ * تُجرّب الدورةُ في الفحوص بلا انتظارِ الموعد — فشرطٌ ينتظر ثابتاً
+ * بعينه يبلى يومَ يُغيَّر الثابت، وقد وقعت.
+ *
+ * ويُعاد ضبطُ الموعد بعده فلا تتزاحم نبضتان.
+ */
+export async function pullNow(): Promise<void> {
+  if (!syncEnabled()) return;
+  if (pullTimer) {
+    clearTimeout(pullTimer);
+    pullTimer = null;
+  }
+  try {
+    await pull();
+  } finally {
+    schedulePull();
+  }
 }
 
 /**
@@ -1105,4 +1161,5 @@ export function startSync(): void {
   publish({ enabled: true });
   void connect();
   schedulePull();
+  watchVisibility();
 }

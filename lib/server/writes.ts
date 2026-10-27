@@ -197,7 +197,21 @@ async function remove(
   if (!collection || ids.length === 0) return 0;
 
   for (const id of ids) {
-    await db.query(`DELETE FROM ${collection.table} WHERE id = $1::uuid`, [uuid(id)]);
+    /*
+      ويُقارَن المعرّفُ نصّاً، فمفاتيحُ الجداول ليست نوعاً واحداً.
+
+      كان الشرطُ `id = $1::uuid`، وهو يسقط على ثلاثة جداولَ مفاتيحُها
+      `text` — الرسائلُ والأطرافُ وتقاريرُ الاجتماعات — بـ«operator does
+      not exist: text = uuid»، ولو كانت قيمةُ المعرّف uuidاً صحيحاً:
+      فالعلّةُ في نوع العمود لا في قيمته. ومعناه أنّ حذفَ رسالةٍ أو طرفٍ
+      أو تقريرٍ كان يُخفق على الخادم، ولم يُكتشف لأنّ أحداً لم يحذف.
+
+      و`id::text` يصحّ في النوعين: الـuuid يُطبع صورةً واحدةً هي نفسُها
+      التي يُنتجها `uuidFor`. وثمنُه أن لا يُستعمل فهرسُ المفتاح في
+      الجداول الـuuidيّة — وهو ثمنٌ لا يُحسّ: الحذفُ صفٌّ صفٌّ ونادر،
+      وأكبرُ الجداول آلافُ الصفوف لا ملايينها.
+    */
+    await db.query(`DELETE FROM ${collection.table} WHERE id::text = $1`, [uuid(id)]);
     await db.query(
       `INSERT INTO deletions (collection, row_id, actor, rev)
        VALUES ($1, $2, $3, nextval('change_seq'))
@@ -418,6 +432,21 @@ export async function changesSince(
   const upserts: Record<string, Row[]> = {};
   const deletes: Record<string, string[]> = {};
 
+  /*
+    رقمُ التغيير يُقرأ أوّلاً، ويُردُّ السائلُ فارغاً إن لم يتغيّر شيء.
+
+    فتصير النبضةُ استفسارةً واحدةً بدل إحدى وعشرين — وأكثرُ النبضات لا
+    تجد جديداً. وكانت القاعدةُ تُسأل عن كلِّ مجموعةٍ في كلِّ نبضة، فنضبت
+    حصّةُ الحوسبة وأُوقف النظامُ في ٢٧ أكتوبر ٢٠٢٦ وحُجب عنه ستّةُ أشخاص.
+
+    ويُقرأ قبل الحلقة لا بعدها، وهذا أسلمُ لا أسرعُ فحسب: صفٌّ يُكتب
+    أثناءها كان رقمُه يدخل في الردّ ولا يدخل صفُّه، فيحسبه المتصفّح
+    واصلاً فلا يصل أبداً. فالمقروءُ أوّلاً حدٌّ أدنى، وما كُتب بعده
+    يأتي في النبضة التالية.
+  */
+  const rev = await currentRev(db);
+  if (rev <= since) return { rev, upserts, deletes };
+
   for (const collection of COLLECTIONS) {
     const { rows } = await db.query(
       `SELECT data FROM ${collection.table} WHERE rev > $1 ORDER BY rev`,
@@ -438,5 +467,5 @@ export async function changesSince(
     (deletes[String(r.collection)] ??= []).push(String(r.row_id));
   }
 
-  return { rev: await currentRev(db), upserts, deletes };
+  return { rev, upserts, deletes };
 }
