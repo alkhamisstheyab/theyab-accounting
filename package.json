@@ -42,6 +42,7 @@
     "check:reject-delete": "node db/check-reject-delete.mjs",
     "verify:live": "node db/verify-live.mjs",
     "check:dues": "node db/check-dues.mjs",
+    "check:due-unpaid": "node db/check-due-unpaid.mjs",
     "check:import": "node db/check-import.mjs",
     "check:staff-documents": "node db/check-staff-documents.mjs",
     "check:transfer-sheets": "node db/check-transfer-sheets.mjs",

@@ -28,10 +28,20 @@ import {
   daysSince,
 } from "./file-backup";
 import {
-  type Message, Contractor, Installment, Project, isInstallmentDue } from "./storage";
+  type Message, Contractor, Installment, Project, installmentNet, isInstallmentDue } from "./storage";
 import { allDurations, daysBetween } from "./contract-dates";
 
 export type NoticeTone = "action" | "warn" | "info";
+
+/**
+ * تصفيةٌ تُطبَّق على الشاشة التي يفتحها الإشعار.
+ *
+ * فالشاشةُ تعرض العقودَ كلَّها، والإشعارُ يتكلّم عن بضعةٍ منها — ومن
+ * فتحها من الإشعار كان يفتّش في الجميع ليعرف أيُّها المقصود. وطلبه صاحب
+ * الشركة في ٢٨ أكتوبر ٢٠٢٦: «لا يأخذني إلى جميع العقود وأبحث فيهم
+ * جميعهم… فهذا مضيعة للوقت، ومن الممكن أن يتأخّر صرفُ دفعة مستحقّة».
+ */
+export type NoticeFocus = "تنتظر إقرارك" | "مستحقة لم تُصرف";
 
 export type Notice = {
   id: string;
@@ -40,6 +50,8 @@ export type Notice = {
   detail: string;
   /** الشاشة التي يُعالَج فيها */
   page?: string;
+  /** وما يُعرض فيها من أول وهلة — فلا يُبحث عن المقصود بين الجميع */
+  focus?: NoticeFocus;
   /** العدد المعروض على الشارة */
   count?: number;
   /** الصلاحية التي بدونها لا يُعرض */
@@ -92,6 +104,60 @@ export function awaitingConfirmation(
   return rows;
 }
 
+/**
+ * دفعاتُ عقدٍ واحدٍ المستحقّةُ التي لم يُصرف منها شيء.
+ *
+ * وتُصفّى بها شاشةُ اعتماد المراحل أيضاً، فيُعرض ما في الإشعار وحده —
+ * والعدُّ والعرضُ من دالّةٍ واحدة، فلا يختلف ما يُقال عمّا يُرى.
+ */
+export function dueUnpaidOf(
+  contract: Contractor,
+  movements: Movement[]
+): { installment: Installment; value: number }[] {
+  if (contract.counterpartyType === "عميل") return []; // دفعات العميل واردة لا صادرة
+
+  const paid = new Map<number, number>();
+  for (const m of movements) {
+    if (!isApproved(m)) continue;
+    if (m.contractNumber !== contract.contractNumber) continue;
+
+    /*
+      المبلغُ الموزَّع يُنسب كلُّ حصّةٍ منه إلى دفعتها.
+
+      وكان يُقرأ رقمُ الدفعة وحده، والموزَّعُ لا رقمَ دفعةٍ له — فدفعةٌ
+      سُدّدت ضمن مبلغٍ موزَّعٍ على عدّة دفعات تبقى في التنبيه «لم يُصرف
+      منها شيء» أبداً. ومن أربعةٍ وعشرين سطراً عُرضت على صاحب الشركة في
+      ٢٨ أكتوبر ٢٠٢٦ كان سبعةٌ من هذا الباب — مدفوعةٌ تُعرض مستحقّة.
+    */
+    const splits = m.installmentSplits ?? [];
+    if (splits.length > 0) {
+      for (const part of splits) {
+        const no = Number(part.number) || 0;
+        paid.set(no, round3((paid.get(no) ?? 0) + (Number(part.amount) || 0)));
+      }
+      continue;
+    }
+
+    const key = Number(m.installmentNumber) || 0;
+    paid.set(key, round3((paid.get(key) ?? 0) + m.amount));
+  }
+
+  const rows: { installment: Installment; value: number }[] = [];
+  for (const installment of contract.installments) {
+    if (!isInstallmentDue(installment)) continue;
+    /*
+      والعبرةُ بالصافي بعد الخصم: دفعةٌ خُصمت بالكامل لا شيءَ فيها يُصرف،
+      فعرضُها مستحقّةً مطالبةٌ بمالٍ أُسقط. ودفعةُ العمر الأولى في ٥٠٠٦
+      (٧٠٠ قيمةً و٧٠٠ خصماً بعد إنهاء العقد بالتراضي) كانت منها.
+    */
+    const value = installmentNet(installment);
+    if (value <= 0) continue;
+    if ((paid.get(installment.number) ?? 0) > 0) continue;
+    rows.push({ installment, value });
+  }
+  return rows;
+}
+
 /** دفعات مستحقة لم يُصرف منها شيء */
 export function dueUnpaid(
   contractors: Contractor[],
@@ -100,23 +166,10 @@ export function dueUnpaid(
   const rows: { contract: Contractor; installment: Installment; value: number }[] =
     [];
 
-  for (const contract of contractors) {
-    if (contract.counterpartyType === "عميل") continue; // دفعات العميل واردة لا صادرة
-    const paid = new Map<number, number>();
-    for (const m of movements) {
-      if (!isApproved(m)) continue;
-      if (m.contractNumber !== contract.contractNumber) continue;
-      const key = Number(m.installmentNumber) || 0;
-      paid.set(key, round3((paid.get(key) ?? 0) + m.amount));
-    }
-    for (const installment of contract.installments) {
-      if (!isInstallmentDue(installment)) continue;
-      const value = round3(Number(installment.value) || 0);
-      if (value <= 0) continue;
-      if ((paid.get(installment.number) ?? 0) > 0) continue;
-      rows.push({ contract, installment, value });
-    }
-  }
+  for (const contract of contractors)
+    for (const row of dueUnpaidOf(contract, movements))
+      rows.push({ contract, ...row });
+
   return rows;
 }
 
@@ -443,6 +496,7 @@ export function buildNotices(input: NoticeInput): Notice[] {
       title: `${toConfirm.length} مرحلة اعتمدها المهندس وتنتظر إقرارك`,
       detail: `بمجموع ${fmt3(total)} د.ك — لا تصير الدفعة مستحقة قبل إقرارك.`,
       page: "اعتماد المراحل",
+      focus: "تنتظر إقرارك",
       count: toConfirm.length,
       needs: "contracts.confirm",
     });
@@ -457,6 +511,7 @@ export function buildNotices(input: NoticeInput): Notice[] {
       title: `${unpaid.length} دفعة مستحقة لم تُصرف`,
       detail: `بمجموع ${fmt3(total)} د.ك — أُقرّت ولم يُصرف منها شيء بعد.`,
       page: "اعتماد المراحل",
+      focus: "مستحقة لم تُصرف",
       count: unpaid.length,
       needs: "contractors.view",
     });

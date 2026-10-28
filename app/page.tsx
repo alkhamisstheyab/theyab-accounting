@@ -426,10 +426,12 @@ import {
 import { Guide, GUIDES, guideGroups, guidesFor } from "@/lib/guides";
 import {
   Notice,
+  NoticeFocus,
   NoticeTone,
   activitySince,
   awaitingConfirmation,
   buildNotices,
+  dueUnpaidOf,
   INSURANCE_ALERT_DAYS,
   projectInsurance,
 } from "@/lib/notifications";
@@ -582,6 +584,8 @@ const MOVEMENT_TYPES = [
 
 export default function HomeV2() {
   const [page, setPage] = useState("الرئيسية");
+  /* ما تُصفّى به شاشةُ اعتماد المراحل حين تُفتح من إشعارٍ — وفارغٌ يعني الكل */
+  const [approvalsFocus, setApprovalsFocus] = useState<NoticeFocus | null>(null);
   /*
     الدليلُ الجاري — يمشي مع صاحبه عبر الشاشات.
 
@@ -2144,7 +2148,14 @@ export default function HomeV2() {
               notices={notices}
               activity={activity}
               lastSeenAt={sessionLastSeen}
-              onGo={setPage}
+              /*
+                الإشعارُ يحمل تصفيتَه إلى الشاشة: فمن فتح «١٢ مرحلة تنتظر
+                إقرارك» لا يُفتَّش له في العقود كلِّها عن الاثنتي عشرة.
+              */
+              onGo={(target, focus) => {
+                setApprovalsFocus(focus ?? null);
+                setPage(target);
+              }}
             />
           )}
 
@@ -3127,6 +3138,8 @@ export default function HomeV2() {
               approverName={currentUser.name}
               canApprove={allow("contracts.approve")}
               canConfirm={allow("contracts.confirm")}
+              focus={approvalsFocus}
+              onClearFocus={() => setApprovalsFocus(null)}
               setContractors={setContractors}
               /*
                 إنهاءُ العقد: وجهٌ مثبَتٌ باسم من أنهاه ويومِه وسببه.
@@ -4006,11 +4019,13 @@ function Banner({
   tone,
   children,
 }: {
-  tone: "ok" | "warn" | "error";
+  tone: "ok" | "info" | "warn" | "error";
   children: ReactNode;
 }) {
   const styles = {
     ok: "bg-green-50 text-green-800 border-green-200",
+    /* خبرٌ عن حال الشاشة لا تحذير — كوسم التصفية القادمة من إشعار */
+    info: "bg-blue-50 text-blue-900 border-blue-200",
     warn: "bg-amber-50 text-amber-900 border-amber-200",
     error: "bg-red-50 text-red-800 border-red-200",
   }[tone];
@@ -21403,7 +21418,7 @@ function NoticesPanel({
   notices: Notice[];
   activity: AuditEntry[];
   lastSeenAt: string;
-  onGo: (page: string) => void;
+  onGo: (page: string, focus?: NoticeFocus) => void;
 }) {
   if (notices.length === 0 && activity.length === 0) {
     return (
@@ -21442,7 +21457,7 @@ function NoticesPanel({
                 </div>
                 {notice.page && (
                   <button
-                    onClick={() => onGo(notice.page as string)}
+                    onClick={() => onGo(notice.page as string, notice.focus)}
                     className="rounded-lg bg-slate-900 px-5 py-2 text-sm font-bold text-white"
                   >
                     {notice.page} ←
@@ -22529,6 +22544,8 @@ function ApprovalsPage({
   approverName,
   canApprove,
   canConfirm,
+  focus,
+  onClearFocus,
   setContractors,
   onLog,
   onQuittance,
@@ -22544,6 +22561,9 @@ function ApprovalsPage({
   canApprove: boolean;
   /** الإدارة: تُقرّ فتصير الدفعة مستحقة */
   canConfirm: boolean;
+  /** ما جاء به الإشعار: لا يُعرض إلا العقود التي فيه */
+  focus: NoticeFocus | null;
+  onClearFocus: () => void;
   setContractors: Dispatch<SetStateAction<Contractor[]>>;
   onLog: (
     action: AuditAction,
@@ -22794,7 +22814,32 @@ function ApprovalsPage({
   );
   const settledCount = inProject.filter((c) => settlements.get(c.id)?.settled)
     .length;
+
+  /*
+    دفعاتُ كلِّ عقدٍ التي يتكلّم عنها الإشعار — تُحسب مرّةً وتُستعمل في
+    التصفية وفي وسم الصفوف، فما يُعدُّ في الإشعار هو ما يُرى في الجدول.
+  */
+  const focused = useMemo(() => {
+    const map = new Map<string, Set<number>>();
+    if (!focus) return map;
+    for (const c of contractors) {
+      const numbers =
+        focus === "تنتظر إقرارك"
+          ? c.installments
+              .filter((i) => isPayableInstallment(i) && i.approved && !i.confirmed)
+              .map((i) => i.number)
+          : dueUnpaidOf(c, movements).map((r) => r.installment.number);
+      if (numbers.length > 0) map.set(c.id, new Set(numbers));
+    }
+    return map;
+  }, [contractors, movements, focus]);
+
   const visible = inProject.filter((c) => {
+    /*
+      والتصفيةُ من الإشعار تسبق حالَ العقد: فعقدٌ لم يبقَ فيه شيءٌ قد
+      تكون فيه مرحلةٌ تنتظر إقراراً، فإخفاؤه يُخفي ما جاء له.
+    */
+    if (focus) return focused.has(c.id);
     const done = settlements.get(c.id)?.settled ?? false;
     if (stateFilter === "الجارية") return !done;
     if (stateFilter === "المنتهية") return done;
@@ -23117,6 +23162,28 @@ function ApprovalsPage({
           <Banner tone="warn">
             لديك صلاحية الاطلاع فقط — الاعتماد يحتاج «اعتماد إنجاز المراحل»،
             والإقرار يحتاج «إقرار المرحلة بعد اعتماد المهندس».
+          </Banner>
+        )}
+
+        {/*
+          وسمُ ما جاء به الإشعار — ولا إخفاءَ صامت: يُقال ما المعروض، وكم
+          هو، وبابُ الرجوع إلى الكل مفتوحٌ بضغطة.
+        */}
+        {focus && (
+          <Banner tone="info">
+            <span className="flex flex-wrap items-center justify-between gap-3">
+              <span>
+                معروضٌ ما جئتَ له وحده: <b>{focus}</b> —{" "}
+                {[...focused.values()].reduce((sum, set) => sum + set.size, 0)} دفعة
+                في {focused.size} عقداً. وبقيةُ العقود مُخفاةٌ حتى تُنهيَها.
+              </span>
+              <button
+                onClick={onClearFocus}
+                className="shrink-0 rounded-lg border border-slate-300 bg-white px-4 py-1.5 text-sm font-bold"
+              >
+                اعرض كل العقود
+              </button>
+            </span>
           </Banner>
         )}
 
@@ -23543,10 +23610,16 @@ function ApprovalsPage({
                         ? { text: `مدفوع منها ${fmt(paid)}`, cls: "text-blue-700" }
                         : { text: "مدفوعة بالكامل", cls: "font-bold text-green-700" };
 
+                      /* الصفُّ الذي جاء له الإشعار يُعلَّم، فلا يُقرأ الجدول كلُّه */
+                      const wanted =
+                        focused.get(contract.id)?.has(installment.number) ?? false;
+
                       return (
                         <tr
                           key={installment.number}
-                          className="border-b border-slate-100 align-top"
+                          className={`border-b border-slate-100 align-top ${
+                            wanted ? "bg-blue-50" : ""
+                          }`}
                         >
                           <Td>{installment.number}</Td>
                           <Td>
