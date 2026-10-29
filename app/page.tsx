@@ -668,6 +668,8 @@ export default function HomeV2() {
   const [parties, setParties] = useState<Party[]>([]);
   /* تقاريرُ الاجتماعات — وصورُها في المخزن لا في الصفّ */
   const [minutes, setMinutes] = useState<Minute[]>([]);
+  /* تقريرُ اجتماعٍ مفتوحٌ ورقةً تُطبع أو تُحفظ PDF */
+  const [minuteSheet, setMinuteSheet] = useState<Minute | null>(null);
   const [yearLocks, setYearLocks] = useState<YearLocks>({});
   const [chart, setChart] = useState<Account[]>(GENERATED_CHART);
   const [items, setItems] = useState<ItemDefinition[]>(GENERATED_ITEMS);
@@ -1751,7 +1753,10 @@ export default function HomeV2() {
           payslip ||
           transferSheet ||
           quoteSheet ||
-          invoiceSheet
+          invoiceSheet ||
+          quittanceFor ||
+          clientStatement ||
+          minuteSheet
             ? "hide-when-printing"
             : ""
         }`}
@@ -2555,6 +2560,7 @@ export default function HomeV2() {
               today={todayISO()}
               canManage={allow("projects.manage")}
               authorName={currentUser?.name ?? ""}
+              onPrint={setMinuteSheet}
               onSave={(minute) => {
                 setMinutes((prev) => {
                   const had = prev.some((m) => m.id === minute.id);
@@ -3982,6 +3988,15 @@ export default function HomeV2() {
           company={company}
           internal={quoteSheet.internal}
           onClose={() => setQuoteSheet(null)}
+        />
+      )}
+
+      {minuteSheet && (
+        <MinuteSheet
+          minute={minuteSheet}
+          company={company}
+          today={todayISO()}
+          onClose={() => setMinuteSheet(null)}
         />
       )}
 
@@ -7853,6 +7868,323 @@ function ClientStatementSheet({
  * والقرارُ غيرُ الكلام: ما قيل يُكتب نصّاً، وما التُزم به يُكتب سطراً
  * له صاحبٌ وموعد — فيُتابَع، ويُحوَّل طلبَ عملٍ يبلغ صاحبَه.
  */
+/* ================================================================== */
+/* ورقة تقرير الاجتماع — تُطبع وتُشارَك                                  */
+/* ================================================================== */
+
+/**
+ * يطبع المستندَ باسمٍ معلوم.
+ *
+ * واسمُ الملفّ الذي يحفظه المتصفّح عند اختيار الوجهة «حفظ كـ PDF» هو
+ * عنوانُ المستند لا اسمُ الزرّ. فلو تُرك لوصل العميلَ ملفٌّ باسم النظام،
+ * وعشرةٌ مثلُه في بريده لا يُفرَّق بينها. فيُسمّى قبل الطباعة ويُعاد
+ * الاسمُ بعدها، ولو أُلغيت النافذة.
+ */
+function printAs(name: string) {
+  const was = document.title;
+  let done = false;
+  const restore = () => {
+    if (done) return;
+    done = true;
+    document.title = was;
+    window.removeEventListener("afterprint", restore);
+  };
+  document.title = name;
+  window.addEventListener("afterprint", restore);
+  window.print();
+  /* ومن المتصفّحات ما لا يُطلق afterprint، فلا يبقى الاسمُ معلّقاً فيه */
+  window.setTimeout(restore, 60000);
+}
+
+/** اسمُ ملفّ التقرير — بما تقبله أنظمةُ الملفّات */
+function minuteFileName(minute: Minute): string {
+  return [`تقرير ${minute.kind}`, minute.project, minute.date]
+    .filter(Boolean)
+    .join(" - ")
+    .replace(/[\\/:*?"<>|]/g, "-");
+}
+
+/**
+ * تقريرُ الاجتماع ورقةً تُطبع وتُشارَك.
+ *
+ * وطلبُه نصّاً: «أريد أن أضيف إمكانية الطباعة بعد كتابة التقرير، وكذلك
+ * تجهيزه على هيئة PDF لمشاركته مع العميل أو أيّ طرفٍ آخر». فما اتُّفق
+ * عليه في الاجتماع لا يبلغ العميلَ وهو في شاشةٍ لا يدخلها، وإنّما كُتب
+ * التقريرُ ليُحتجّ به.
+ *
+ * ولا مولِّدَ PDF فيها ولا يُحتاج: في نافذة الطباعة وجهةُ «حفظ كـ PDF»
+ * في كلّ متصفّح — فالمطبوعةُ نفسُها هي الملفّ، ونصُّه يبقى منتقىً يُبحث
+ * فيه ويُنسخ ويُقرأ على الهاتف، بخلاف ما يُصوَّر صورةً فيثقل ولا يُقرأ.
+ *
+ * والشكلُ شكلُ الفاتورة المعتمد — قرارُ المجلس أنّ مستندات الشركة بشكلٍ
+ * واحد.
+ */
+function MinuteSheet({
+  minute,
+  company,
+  today,
+  onClose,
+}: {
+  minute: Minute;
+  company: CompanyProfile;
+  today: string;
+  onClose: () => void;
+}) {
+  const state = minuteState(minute, today);
+  const title = minute.title || `${minute.kind} ${minute.date}`;
+  const fileName = minuteFileName(minute);
+
+  const columns: { label: string; value: string }[][] = [
+    [
+      { label: "التاريخ", value: minute.date },
+      { label: "النوع", value: minute.kind },
+      { label: "الدوريّة", value: minute.period },
+    ],
+    [
+      { label: "المشروع", value: minute.project },
+      { label: "الحاضرون", value: minute.attendees },
+    ],
+    [
+      { label: "كتبه", value: minute.createdBy },
+      { label: "تاريخ الكتابة", value: (minute.createdAt || "").slice(0, 10) },
+    ],
+  ];
+
+  return (
+    <div
+      className="voucher-sheet fixed inset-0 z-50 overflow-auto bg-slate-800/60 p-6"
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="voucher-body designed-sheet mx-auto flex max-w-3xl flex-col bg-white shadow-xl"
+        style={{ minHeight: "27cm" }}
+      >
+        <div className="p-6 pb-0 no-print">
+          <div className="flex justify-end gap-3">
+            <button
+              onClick={() => printAs(fileName)}
+              className="rounded-lg bg-slate-900 px-6 py-3 font-bold text-white"
+            >
+              🖨 اطبع أو احفظ PDF
+            </button>
+            <button
+              onClick={onClose}
+              className="rounded-lg bg-slate-200 px-6 py-3 font-bold"
+            >
+              إغلاق
+            </button>
+          </div>
+          <p className="mt-3 text-sm text-slate-600">
+            لمشاركته مع العميل أو أيّ طرفٍ آخر: اضغط الزرّ، ثمّ اختر في نافذة
+            الطباعة الوجهةَ <b>«حفظ كـ PDF»</b> بدل الطابعة — يُحفظ ملفّاً
+            باسم <b>{fileName}</b>.
+          </p>
+        </div>
+
+        {/* الشريط العلوي */}
+        <div style={{ height: 14, background: DOC_GOLD_SOFT }} />
+
+        <div className="flex-1 px-10 pt-8">
+          <div className="flex items-start justify-between gap-6">
+            <div
+              style={{ color: DOC_GOLD }}
+              className="text-3xl font-bold tracking-wide"
+            >
+              MEETING REPORT
+            </div>
+            <div className="text-left">
+              <div className="text-xl font-bold">{company.name}</div>
+              {company.nameEn && <div className="text-xs">{company.nameEn}</div>}
+            </div>
+          </div>
+
+          <h3 className="mt-8 text-2xl font-bold">{title}</h3>
+
+          {/* أعمدة البيانات — كأعمدة الفاتورة */}
+          <div className="mt-6 flex justify-between gap-6">
+            {columns.map((column, index) => (
+              <div
+                key={index}
+                className="flex-1"
+                style={
+                  index < columns.length - 1
+                    ? {
+                        borderInlineEnd: `2px solid ${DOC_BAND}`,
+                        paddingInlineEnd: 20,
+                      }
+                    : undefined
+                }
+              >
+                {column.map((row) => (
+                  <div key={row.label} className="mb-3">
+                    <div
+                      style={{ color: DOC_GOLD }}
+                      className="text-sm font-bold"
+                    >
+                      {row.label}
+                    </div>
+                    <div className="text-sm font-bold leading-snug">
+                      {row.value || "—"}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+
+          {minute.body && (
+            <>
+              <h4 style={{ color: DOC_GOLD }} className="mt-8 text-sm font-bold">
+                ما قيل
+              </h4>
+              <div
+                className="mt-1"
+                style={{ borderBottom: `2px solid ${DOC_GOLD_SOFT}` }}
+              />
+              <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed">
+                {minute.body}
+              </p>
+            </>
+          )}
+
+          {minute.decisions.length > 0 && (
+            <>
+              <h4 style={{ color: DOC_GOLD }} className="mt-8 text-sm font-bold">
+                ما التُزم به
+              </h4>
+              <table className="mt-1 w-full text-right">
+                <thead>
+                  <tr style={{ color: DOC_GOLD }}>
+                    <th className="w-10 pb-2 text-right text-sm font-bold">م</th>
+                    <th className="pb-2 text-right text-sm font-bold">
+                      الالتزام
+                    </th>
+                    <th className="w-32 pb-2 text-right text-sm font-bold">
+                      على من
+                    </th>
+                    <th className="w-28 pb-2 text-right text-sm font-bold">
+                      الموعد
+                    </th>
+                    <th className="w-24 pb-2 text-right text-sm font-bold">
+                      الحال
+                    </th>
+                  </tr>
+                  <tr>
+                    <td
+                      colSpan={5}
+                      style={{ borderBottom: `2px solid ${DOC_GOLD_SOFT}` }}
+                    />
+                  </tr>
+                </thead>
+                <tbody>
+                  {minute.decisions.map((decision, index) => (
+                    <tr
+                      key={decision.id}
+                      style={{ borderBottom: `1px solid ${DOC_BAND}` }}
+                    >
+                      <td className="py-3 text-sm font-bold">{index + 1}</td>
+                      <td className="py-3 text-sm font-bold">{decision.text}</td>
+                      <td className="py-3 text-sm font-bold">
+                        {decision.owner || "—"}
+                      </td>
+                      <td className="py-3 text-sm font-bold tabular-nums">
+                        {decision.due || "—"}
+                      </td>
+                      <td className="py-3 text-sm font-bold">
+                        {decision.done
+                          ? "أُنجز"
+                          : decision.due && decision.due < today
+                            ? "مضى موعدُه"
+                            : "قائم"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {state.overdue.length > 0 && (
+                <p className="mt-2 text-xs font-bold">
+                  منها {state.overdue.length} مضى موعدُه ولم يُنجَز.
+                </p>
+              )}
+            </>
+          )}
+
+          {minute.photos.length > 0 && (
+            <>
+              <h4 style={{ color: DOC_GOLD }} className="mt-8 text-sm font-bold">
+                الصور
+              </h4>
+              <div className="mt-2 flex flex-wrap gap-4">
+                {minute.photos.map((photo) => (
+                  <div key={photo.id} style={{ width: 160 }}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={`/api/photos?path=${encodeURIComponent(photo.path)}`}
+                      alt={photo.caption || "صورة"}
+                      style={{ width: 160, height: 120, objectFit: "cover" }}
+                      className="rounded border border-slate-300"
+                    />
+                    {photo.caption && (
+                      <span className="mt-1 block text-xs">{photo.caption}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+
+          {/* التوقيعان: التقريرُ يُشارَك مع طرفٍ آخر، فله موضعُ إقرار */}
+          <div className="mt-16 flex justify-between gap-10 text-sm font-bold">
+            <div className="flex-1">
+              <div>عن الشركة</div>
+              <div
+                className="mt-10"
+                style={{ borderTop: `1px solid ${DOC_GOLD_SOFT}` }}
+              />
+              <div className="mt-2 text-xs">الاسم والتوقيع</div>
+            </div>
+            <div className="flex-1">
+              <div>الطرف الآخر</div>
+              <div
+                className="mt-10"
+                style={{ borderTop: `1px solid ${DOC_GOLD_SOFT}` }}
+              />
+              <div className="mt-2 text-xs">الاسم والتوقيع</div>
+            </div>
+          </div>
+        </div>
+
+        {/* التذييل */}
+        <div
+          className="mt-10 flex items-center justify-between gap-6 px-10 py-6"
+          style={{ background: DOC_BAND }}
+        >
+          <div>
+            {company.logo ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={company.logo} alt="" style={{ height: 64 }} />
+            ) : (
+              <div className="text-xs text-slate-400">الشعار</div>
+            )}
+          </div>
+          <div className="text-left">
+            <div className="text-xs leading-relaxed">
+              {company.address && <div>العنوان: {company.address}</div>}
+              {company.phone && <div>الهاتف: {company.phone}</div>}
+              {company.email && <div>البريد الإلكتروني: {company.email}</div>}
+            </div>
+            <div className="mt-2 text-xs font-bold" style={{ color: DOC_GOLD }}>
+              تقرير {minute.kind} · {minute.date}
+              {company.crNumber && ` · س.ت ${company.crNumber}`}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function MinutesPage({
   minutes,
   projects,
@@ -7863,6 +8195,7 @@ function MinutesPage({
   onSave,
   onDelete,
   onSendDecision,
+  onPrint,
 }: {
   minutes: Minute[];
   projects: Project[];
@@ -7878,6 +8211,8 @@ function MinutesPage({
     decision: MinuteDecision,
     to: Addressee
   ) => void;
+  /** يفتح ورقةَ التقرير للطباعة أو للحفظ PDF */
+  onPrint: (minute: Minute) => void;
 }) {
   const [project, setProject] = useState("");
   const [editing, setEditing] = useState<Minute | null>(null);
@@ -7940,6 +8275,33 @@ function MinutesPage({
     }
     setUploading(false);
     if (fileRef.current) fileRef.current.value = "";
+  };
+
+  /**
+   * يحفظ التحرير ويُعيد ما حُفظ.
+   *
+   * ويُعيده ليُطبع بعده: فالزرّان يحفظان حفظاً واحداً، والمطبوعُ هو
+   * المحفوظُ نفسُه لا ما في الشاشة — ولو طُبع ما في الشاشة لطُبع سطرُ
+   * التزامٍ فارغٌ يُسقطه الحفظ.
+   */
+  const commit = (): Minute | null => {
+    if (!editing) return null;
+    if (!editing.date) {
+      window.alert("اكتب تاريخ الاجتماع");
+      return null;
+    }
+    if (editing.body.trim().length < 10 && editing.decisions.length === 0) {
+      window.alert("اكتب ما قيل أو ما التُزم به — وتقريرٌ فارغٌ لا يُحتجّ به");
+      return null;
+    }
+    const clean: Minute = {
+      ...editing,
+      decisions: editing.decisions.filter((d) => d.text.trim() !== ""),
+    };
+    onSave(clean);
+    setEditing(null);
+    setNotice("");
+    return clean;
   };
 
   return (
@@ -8023,6 +8385,12 @@ function MinutesPage({
                           {state.overdue.length} مضى موعدُه
                         </span>
                       )}
+                      <button
+                        onClick={() => onPrint(minute)}
+                        className="rounded bg-blue-50 px-3 py-1 text-xs font-bold text-blue-800"
+                      >
+                        🖨 طباعة · PDF
+                      </button>
                       {canManage && (
                         <>
                           <button
@@ -8440,31 +8808,25 @@ function MinutesPage({
             </p>
           )}
 
-          <div className="mt-4 flex gap-3">
+          <div className="mt-4 flex flex-wrap gap-3">
             <button
-              onClick={() => {
-                if (!editing.date) {
-                  window.alert("اكتب تاريخ الاجتماع");
-                  return;
-                }
-                if (editing.body.trim().length < 10 && editing.decisions.length === 0) {
-                  window.alert(
-                    "اكتب ما قيل أو ما التُزم به — وتقريرٌ فارغٌ لا يُحتجّ به"
-                  );
-                  return;
-                }
-                onSave({
-                  ...editing,
-                  decisions: editing.decisions.filter(
-                    (d) => d.text.trim() !== ""
-                  ),
-                });
-                setEditing(null);
-                setNotice("");
-              }}
+              onClick={() => commit()}
               className="rounded-lg bg-slate-900 px-6 py-3 font-bold text-white"
             >
               احفظ التقرير
+            </button>
+            {/*
+              وطلبُه الطباعةَ «بعد كتابة التقرير» — فتُفتح ورقتُه بزرٍّ
+              واحد، ولا يُحفظ ثمّ يُبحث عنه في القائمة ليُطبع.
+            */}
+            <button
+              onClick={() => {
+                const saved = commit();
+                if (saved) onPrint(saved);
+              }}
+              className="rounded-lg bg-blue-600 px-6 py-3 font-bold text-white"
+            >
+              احفظ واطبع
             </button>
             <button
               onClick={() => {
