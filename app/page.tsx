@@ -26585,6 +26585,21 @@ function EmployeesPage({
                     + بدل
                   </button>
                 </div>
+                {/*
+                  وعنوانا العمودين مكتوبان: الخانتان بلا عنوانٍ إلا نصٌّ
+                  رماديٌّ داخلهما، فسُئل عن موضع الاسم — «ليس هناك خانة
+                  أكتب بها الاسم». والنصُّ الداخليُّ يُقرأ بعد الضغط لا
+                  قبله، فمن لم يضغط لم يره.
+                */}
+                {allowances.length > 0 && (
+                  <div className="mb-1 flex gap-2 text-xs text-slate-500">
+                    <span className="flex-1">
+                      اسم البدل — واكتب فيه شهرَ استحقاقه، فلا تاريخَ له في
+                      الملفّ
+                    </span>
+                    <span className="w-40">المبلغ (د.ك)</span>
+                  </div>
+                )}
                 {allowances.map((a, index) => (
                   <div key={index} className="mb-2 flex gap-2">
                     <input
