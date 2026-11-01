@@ -27628,14 +27628,25 @@ function AttendancePage({
         prev.map((a) => (a.id === existing.id ? { ...a, ...stamp } : a))
       );
     } else {
+      /*
+        يومٌ لم يُسجَّل حضورُه بعد: يُفتح له صفٌّ ثم تُوضع عليه المكافأة.
+
+        ويومُ الراحة يبقى راحةً — وكان هذا الموضعُ يفتحه «حاضراً» بثماني
+        ساعات، والجزاءُ يفتحه راحةً. فوقع: أُثبتت مكافأتان على الجمعة
+        ٣٠ أكتوبر ٢٠٢٦ لعاملَين، فصار شهرُهما سبعةً وعشرين يوم عملٍ
+        وأربعةَ أيام راحةٍ من بين الناس كلِّهم، فسأل صاحبُ الشركة عن
+        السبب. ولا يُنقص ذلك أجراً — الشهريُّ يبدأ كاملاً — لكنّه
+        يُسجّل على الورق أنّ العاملَ عمل راحتَه ولم يُعطَ بدلَها.
+      */
+      const rest = dayName(bonus.date) === employee.restDay;
       setAttendance((prev) => [
         ...prev,
         {
           id: newId(),
           employeeId: employee.id,
           date: bonus.date,
-          status: "حاضر",
-          hours: settings.dailyHours,
+          status: rest ? "راحة أسبوعية" : "حاضر",
+          hours: rest ? 0 : settings.dailyHours,
           overtimeHours: 0,
           restDayHours: 0,
           holidayHours: 0,
