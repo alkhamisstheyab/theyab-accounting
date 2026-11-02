@@ -77,10 +77,68 @@ console.log("\nفإن تجاوز الخصمُ التكملةَ نُبِّه إل
 
 out = transferSheets([line("a", "عاملٌ مسجَّل", 60)], [employees[0]]);
 check("المسجَّل نقص اضطراراً", out.lines[0].registered === 60);
+check("ولا يُعدّ ذلك مبلغاً يُستردّ", out.lines[0].refund === 0, "فالخصمُ لم يُحوَّل له");
 check("ولا تكملة", out.lines[0].topUp === 0);
 check(
   "ويُكشف ليُراجَع قبل الرفع",
   out.shortfalls.length === 1 && out.shortfalls[0].employeeName === "عاملٌ مسجَّل"
+);
+
+/*
+  ومن اتُّفق معه أن يُحوَّل له المسجَّلُ كاملاً ويعيد الفرق.
+
+  وقرار صاحب الشركة في م. نوح (٢ نوفمبر ٢٠٢٦): «اتفقنا أن يكون راتبه
+  في الشؤون ٦٠٠ دينار ويعيد بعد أن ينزل له الراتب في حسابه ١٥٠ إلى
+  حساب الشركة… لكنني مسجّل في ملف نوح بأن راتبه ٤٥٠ وفي الشؤون ٦٠٠،
+  فيجب أن يظهر في الرواتب على أنه ٦٠٠». وكان الحسابُ يقصر المسجَّلَ
+  على الصافي فيُظهره ٤٥٠ ويُعلّمه ناقصاً — وذاك يُقرأ في الوزارة أنّ
+  الموظفَ أُخذ من راتبه الرسمي.
+*/
+console.log("\nومن يُحوَّل له المسجَّل كاملاً يُعيد الفرق:\n");
+
+const noah = worker({
+  id: "n",
+  name: "م. نوح",
+  registeredWage: 600,
+  payRegisteredInFull: true,
+});
+out = transferSheets([line("n", "م. نوح", 450)], [noah]);
+check(
+  "كشفُ الشؤون يرفع المسجَّلَ كاملاً",
+  out.lines[0].registered === 600,
+  String(out.lines[0].registered)
+);
+check("ولا تكملةَ له", out.lines[0].topUp === 0);
+check(
+  "والفرقُ يُعرض مبلغاً يُستردّ",
+  out.lines[0].refund === 150 && out.refundTotal === 150,
+  `${out.lines[0].refund} · المجموع ${out.refundTotal}`
+);
+check("ويُسمَّى من عليه", out.refunds.length === 1 && out.refunds[0].employeeId === "n");
+check(
+  "ولا يُعلَّم ناقصاً — فالمسجَّلُ رُفع كما في الملفّ",
+  out.shortfalls.length === 0 && out.lines[0].short === false
+);
+check(
+  "والصافي المستحقُّ هو أجرُه الفعليّ",
+  out.netTotal === 450,
+  String(out.netTotal)
+);
+check(
+  "والمعادلة تستقيم: المسجَّل + التكملة − المستردّ = الصافي",
+  out.registeredTotal + out.topUpTotal - out.refundTotal === out.netTotal
+);
+
+/* ومن لم يُختر له ذلك يبقى على القاعدة */
+out = transferSheets([line("n", "م. نوح", 450)], [
+  { ...noah, payRegisteredInFull: false },
+]);
+check(
+  "ومن لم يُختر له ذلك يُقصر على الصافي ويُعلَّم ناقصاً",
+  out.lines[0].registered === 450 &&
+    out.lines[0].refund === 0 &&
+    out.shortfalls.length === 1,
+  "فلا يُحوَّل لأحدٍ ما لم يستحقّه إلا باختيارٍ مكتوب"
 );
 
 console.log("\nوالصافي الصفر لا يُحوَّل له شيء:\n");

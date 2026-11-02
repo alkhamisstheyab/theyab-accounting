@@ -57,6 +57,23 @@ export type Employee = {
    * لا في احتساب المسيّر. صفر يعني غير مسجّل أو مطابق للفعلي.
    */
   registeredWage: number;
+  /**
+   * يُحوَّل له الأجرُ المسجَّل كاملاً ويُعيد الفرق.
+   *
+   * وأصلُ كشف الشؤون أن يُرفع كما في الملفّ لا يزيد ولا ينقص. لكنّ
+   * الحسابَ كان يقصره على الصافي — «لا يُحوَّل ما ليس مستحقاً» — فمن
+   * أجرُه الفعليُّ أقلُّ من مسجَّله ظهر في الكشف بالفعليّ وعُلّم
+   * ناقصاً، وذاك يُقرأ في الوزارة أنّ الموظفَ أُخذ من راتبه الرسمي.
+   *
+   * وقرار صاحب الشركة في م. نوح (٢ نوفمبر ٢٠٢٦): «اتفقنا أن يكون
+   * راتبه في الشؤون ٦٠٠ دينار ويعيد بعد أن ينزل له الراتب في حسابه
+   * ١٥٠ إلى حساب الشركة». فيُحوَّل المسجَّلُ كاملاً، ويُعرض الفرقُ
+   * مبلغاً يُستردّ — ويبقى معروضاً حتى يُقيَّد ردُّه.
+   *
+   * وهو خيارٌ لكلِّ موظفٍ بنفسه لا قاعدةٌ عامّة: فمن نقص صافيه بغيابٍ
+   * أو سدادِ سلفةٍ لا يُحوَّل له ما لم يستحقّه.
+   */
+  payRegisteredInFull: boolean;
   allowances: Allowance[];
   /** رقم الآيبان لكشوف التحويل البنكي */
   iban: string;
@@ -495,6 +512,13 @@ export type TransferLine = {
   net: number;
   /** الخصم تجاوز التكملة فاضطُرّ إلى المسجَّل */
   short: boolean;
+  /**
+   * ما يُعيده الموظفُ بعد نزول راتبه.
+   *
+   * ولا يكون إلا لمن اختير له `payRegisteredInFull`: حُوّل له المسجَّلُ
+   * كاملاً وأجرُه الفعليُّ أقلُّ منه، فالفرقُ دَينٌ عليه حتى يردّه.
+   */
+  refund: number;
 };
 
 export type TransferSheets = {
@@ -504,6 +528,9 @@ export type TransferSheets = {
   netTotal: number;
   /** من نقص مسجَّلهم لأن خصمهم تجاوز تكملتهم */
   shortfalls: TransferLine[];
+  /** ما يُنتظر ردُّه — مجموعاً ومَن عليه */
+  refundTotal: number;
+  refunds: TransferLine[];
 };
 
 export function transferSheets(
@@ -517,9 +544,19 @@ export function transferSheets(
     const registeredWage = round3(Number(employee?.registeredWage) || 0);
     const net = round3(line.net);
 
-    /* المسجَّل لا يتجاوز الصافي: لا يُحوَّل ما ليس مستحقاً */
-    const registered = round3(Math.min(registeredWage, Math.max(net, 0)));
-    const topUp = round3(net - registered);
+    /*
+      المسجَّل لا يتجاوز الصافي: لا يُحوَّل ما ليس مستحقاً.
+
+      إلا من اتُّفق معه على أن يُحوَّل له المسجَّلُ كاملاً ويعيد الفرق،
+      فذاك يُرفع كما في ملفّ الشؤون — والفرقُ يُعرض مبلغاً يُستردّ.
+    */
+    const inFull = employee?.payRegisteredInFull === true && registeredWage > 0;
+    const registered = inFull
+      ? registeredWage
+      : round3(Math.min(registeredWage, Math.max(net, 0)));
+    const difference = round3(net - registered);
+    const topUp = Math.max(difference, 0);
+    const refund = Math.max(round3(-difference), 0);
 
     rows.push({
       employeeId: line.employeeId,
@@ -529,6 +566,7 @@ export function transferSheets(
       topUp,
       net,
       short: registeredWage > 0 && registered < registeredWage - 0.0005,
+      refund,
     });
   }
 
@@ -541,6 +579,8 @@ export function transferSheets(
     topUpTotal: sum((r) => r.topUp),
     netTotal: sum((r) => r.net),
     shortfalls: rows.filter((r) => r.short),
+    refundTotal: sum((r) => r.refund),
+    refunds: rows.filter((r) => r.refund > 0),
   };
 }
 

@@ -25872,6 +25872,7 @@ const BLANK_EMPLOYEE = {
   wageType: "شهري" as WageType,
   basicWage: "",
   registeredWage: "",
+  payRegisteredInFull: false,
   iban: "",
   wageAccount: "",
   restDay: "الجمعة",
@@ -26131,6 +26132,7 @@ function EmployeesPage({
       wageType: e.wageType,
       basicWage: String(e.basicWage),
       registeredWage: e.registeredWage ? String(e.registeredWage) : "",
+      payRegisteredInFull: e.payRegisteredInFull === true,
       iban: e.iban,
       wageAccount: e.wageAccount,
       restDay: e.restDay,
@@ -26181,6 +26183,7 @@ function EmployeesPage({
       wageType: form.wageType,
       basicWage: wage,
       registeredWage: round3(Number(form.registeredWage) || 0),
+      payRegisteredInFull: form.payRegisteredInFull === true,
       iban: form.iban.trim(),
       wageAccount: form.wageAccount,
       allowances: allowances
@@ -26546,6 +26549,32 @@ function EmployeesPage({
                     onChange={(e) => set("registeredWage", e.target.value)}
                     className={inputClass}
                   />
+                  {/*
+                    وكشفُ الشؤون يُقصَر على الصافي، فمن مسجَّلُه أكبرُ من
+                    أجره الفعليّ ظهر فيه بالفعليّ وعُلّم ناقصاً. فهنا
+                    يُختار أن يُرفع المسجَّلُ كاملاً ويُعاد الفرق.
+                  */}
+                  {Number(form.registeredWage) >
+                    Number(form.basicWage || 0) && (
+                    <label className="mt-2 flex items-start gap-2 text-xs">
+                      <input
+                        type="checkbox"
+                        checked={form.payRegisteredInFull === true}
+                        onChange={(e) =>
+                          set("payRegisteredInFull", e.target.checked)
+                        }
+                        className="mt-0.5"
+                      />
+                      <span>
+                        يُحوَّل له المسجَّل كاملاً ويُعيد الفرق (
+                        {fmt(
+                          Number(form.registeredWage) -
+                            Number(form.basicWage || 0)
+                        )}{" "}
+                        د.ك) إلى حساب الشركة
+                      </span>
+                    </label>
+                  )}
                 </Field>
                 <div className="flex items-end pb-1">
                   <div className="w-full rounded-lg bg-slate-100 px-4 py-3 text-sm">
@@ -29264,7 +29293,14 @@ function PayrollPage({
               {[
                 ["كشف الشؤون", sheets.registeredTotal, "text-slate-900"],
                 ["كشف التكملة", sheets.topUpTotal, "text-blue-800"],
-                ["مجموعهما", sheets.netTotal, "font-bold"],
+                ...(sheets.refundTotal > 0
+                  ? ([["يُستردّ منهم", sheets.refundTotal, "text-amber-800"]] as [
+                      string,
+                      number,
+                      string,
+                    ][])
+                  : []),
+                ["الصافي المستحقّ", sheets.netTotal, "font-bold"],
               ].map(([label, value, cls]) => (
                 <div key={String(label)} className="rounded-lg bg-slate-50 p-3">
                   <p className="text-sm text-slate-500">{label}</p>
@@ -29274,6 +29310,24 @@ function PayrollPage({
                 </div>
               ))}
             </div>
+
+            {/*
+              وما يُستردّ لا يُحوَّل من البنك، بل يرجع إليه. فيُقال هنا
+              كم هو وعلى من، ويُذكَّر بقيده — فمالٌ خرج ولم يُقيَّد رجوعُه
+              يبقى مصروفاً في الدفاتر وقد عاد.
+            */}
+            {sheets.refunds.length > 0 && (
+              <Banner tone="info">
+                حُوّل لهم الأجرُ المسجَّل كاملاً، ويُعيدون الفرق:{" "}
+                <b>
+                  {sheets.refunds
+                    .map((r) => `${r.employeeName} ${fmt(r.refund)}`)
+                    .join(" · ")}
+                </b>
+                . وبعد وصوله اكتب قيداً لكلٍّ منهم: <b>مدين 1112</b> (البنك) /{" "}
+                <b>دائن حساب أجره</b> — فيرجع المصروفُ إلى حقيقته.
+              </Banner>
+            )}
 
             {sheets.shortfalls.length > 0 && (
               <Banner tone="warn">
@@ -29291,6 +29345,7 @@ function PayrollPage({
                     <Th>الموظف</Th>
                     <Th>كشف الشؤون</Th>
                     <Th>كشف التكملة</Th>
+                    {sheets.refundTotal > 0 && <Th>يُستردّ</Th>}
                     <Th>الصافي</Th>
                     <Th>الآيبان</Th>
                   </tr>
@@ -29301,6 +29356,11 @@ function PayrollPage({
                       <Td>{row.employeeName}</Td>
                       <Td>{row.registered > 0 ? <Money value={row.registered} /> : "—"}</Td>
                       <Td>{row.topUp > 0 ? <Money value={row.topUp} /> : "—"}</Td>
+                      {sheets.refundTotal > 0 && (
+                        <Td className="text-amber-800">
+                          {row.refund > 0 ? <Money value={row.refund} /> : "—"}
+                        </Td>
+                      )}
                       <Td>
                         <Money value={row.net} bold />
                       </Td>

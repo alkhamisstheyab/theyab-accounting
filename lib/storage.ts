@@ -880,6 +880,7 @@ function migrateEmployee(raw: unknown): Employee {
     wageType: e.wageType === "يومي" ? "يومي" : "شهري",
     basicWage: round3(Number(e.basicWage) || 0),
     registeredWage: round3(Number(e.registeredWage) || 0),
+    payRegisteredInFull: e.payRegisteredInFull === true,
     iban: str(e.iban),
     wageAccount: str(e.wageAccount),
     allowances: allowances.map((a) => {
