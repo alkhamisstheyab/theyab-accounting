@@ -255,9 +255,22 @@ const out = normalizeState({
       penaltyApprovedBy: "ذياب",
     },
     { id: "a2", employeeId: "e1", date: "2026-09-02", status: "حاضر", hours: 8 },
+    {
+      id: "a3",
+      employeeId: "e1",
+      date: "2026-09-03",
+      status: "حاضر",
+      hours: 8,
+      bonus: 40,
+      bonusReason: "فرق علاوة شهرين",
+      bonusBy: "م. نوح",
+      bonusApproved: true,
+      bonusApprovedBy: "ذياب",
+      bonusApprovedAt: "2026-09-03T10:00:00.000Z",
+    },
   ],
 });
-const [a1, a2] = out.attendance;
+const [a1, a2, a3] = out.attendance;
 check("المبلغ يعبر", a1.penalty === 15);
 check("والسبب", a1.penaltyReason === "إهمال عدّة");
 check("ومن أثبته ومن أقرّه", a1.penaltyBy === "م. نوح" && a1.penaltyApprovedBy === "ذياب");
@@ -268,6 +281,51 @@ check(
 );
 const again = normalizeState(JSON.parse(JSON.stringify(out)));
 check("ويعبر الدورة ثانيةً", again.attendance[0].penalty === 15);
+
+/*
+  والمكافأةُ توأمُه، فتُفحص بما يُفحص به — ولولا ذلك مضى عليها ما مضى.
+
+  وقعت في ١ نوفمبر ٢٠٢٦: أُمر بمكافأتَين، فكُتب الأمرُ في سجلّ التدقيق
+  ولم يبقَ للمكافأة أثرٌ في يومها — لأنّ `migrateAttendance` كان يُسقط
+  حقولَها الستّة كلَّها. فلا تبلغ الخادمَ ولا تعبر إغلاق المتصفّح ولا
+  تدخل مسيّراً. وكان هذا الفحصُ يشترط عبورَ الجزاء ولا يشترط عبورَها.
+*/
+console.log("\nوالمكافأةُ تعبرها كالجزاء:\n");
+
+check("المبلغ يعبر", a3.bonus === 40, String(a3.bonus));
+check("والسبب", a3.bonusReason === "فرق علاوة شهرين");
+check(
+  "ومن أثبتها ومن أمر بها ومتى",
+  a3.bonusBy === "م. نوح" &&
+    a3.bonusApprovedBy === "ذياب" &&
+    a3.bonusApprovedAt === "2026-09-03T10:00:00.000Z"
+);
+check("والأمرُ بها", a3.bonusApproved === true);
+check(
+  "ويومٌ بلا مكافأةٍ يبقى بلا مكافأة — لا صفراً",
+  a2.bonus === undefined && a2.bonusApproved === undefined
+);
+check(
+  "وتعبر الدورة ثانيةً",
+  again.attendance[2].bonus === 40 && again.attendance[2].bonusApproved === true
+);
+
+/*
+  وحقولُ التوأمين تُقابَل عدداً بعدد: فمن أضاف حقلاً لأحدهما ونسي
+  الآخر أخفق الفحصُ هنا، ولا يُكتب في الشرط عددٌ يبلى.
+*/
+const store2 = fs.readFileSync("lib/storage.ts", "utf8");
+const block = store2.slice(
+  store2.indexOf("function migrateAttendance"),
+  store2.indexOf("note: str(a.note),", store2.indexOf("function migrateAttendance"))
+);
+const penaltyFields = (block.match(/\bpenalty\w*:/g) ?? []).length;
+const bonusFields = (block.match(/\bbonus\w*:/g) ?? []).length;
+check(
+  "وحقولُ المكافأة بعددِ حقول الجزاء في دورة التخزين",
+  penaltyFields > 0 && penaltyFields === bonusFields,
+  `جزاء ${penaltyFields} · مكافأة ${bonusFields}`
+);
 
 console.log(
   bad === 0

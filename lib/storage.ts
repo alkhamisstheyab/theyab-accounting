@@ -972,6 +972,25 @@ function migrateAttendance(raw: unknown): AttendanceDay[] {
         penaltyApproved: a.penaltyApproved === true ? true : undefined,
         penaltyApprovedBy: str(a.penaltyApprovedBy) || undefined,
         penaltyApprovedAt: str(a.penaltyApprovedAt) || undefined,
+        /*
+          والمكافأةُ مثلُه حقلاً بحقل — وكانت ساقطةً من هذا الموضع كلِّه.
+
+          فكلُّ شيءٍ فيها كان يعمل: النموذجُ يُثبتها، والسجلُّ يكتبها،
+          والمسيّرُ يجمعها — ثمّ تمرّ من هنا فتُحذف. فلا تبلغ الخادمَ،
+          ولا تعبر إغلاق المتصفّح، ولا تدخل مسيّراً. ولم تعمل المكافأةُ
+          يوماً منذ كُتبت.
+          وظهرت في ١ نوفمبر ٢٠٢٦: أمر صاحبُ الشركة بمكافأتَين — أربعين
+          لنابتي أشو وأربعين لسولوماني ديارا عن فرق علاوة شهرين — فكُتب
+          الأمرُ في سجلّ التدقيق ولم يبقَ للمكافأة أثرٌ في يومها.
+          و«فحصُ الجزاء» كان يشترط عبورَ الجزاء دورةَ التخزين ولا يشترط
+          عبورَ المكافأة: فالتوأمُ الذي كُتب أوّلاً حُرس، والثاني لا.
+        */
+        bonus: Number(a.bonus) || undefined,
+        bonusReason: str(a.bonusReason) || undefined,
+        bonusBy: str(a.bonusBy) || undefined,
+        bonusApproved: a.bonusApproved === true ? true : undefined,
+        bonusApprovedBy: str(a.bonusApprovedBy) || undefined,
+        bonusApprovedAt: str(a.bonusApprovedAt) || undefined,
         note: str(a.note),
       };
     })
