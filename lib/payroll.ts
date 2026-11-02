@@ -533,6 +533,16 @@ export type TransferSheets = {
   refunds: TransferLine[];
 };
 
+/**
+ * بيانُ قيد استرداد فرق الأجر المسجَّل.
+ *
+ * ونصُّه واحدٌ في موضعين: يُكتب به القيدُ، ويُعرف به أنّه كُتب. فلو
+ * اختلف الموضعان ظهر الزرُّ أبداً وكُتب القيدُ مرّتين — ومالٌ يرجع
+ * مرّةً لا يُقيَّد مرّتين.
+ */
+export const refundDescription = (name: string, monthName: string): string =>
+  `استرداد فرق الأجر المسجَّل — ${name} — ${monthName}`;
+
 export function transferSheets(
   lines: PayrollLine[],
   employees: Employee[]

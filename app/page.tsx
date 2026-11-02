@@ -93,6 +93,7 @@ import {
   dailyWage,
   defaultPayrollSettings,
   transferSheets,
+  refundDescription,
   type TransferLine,
   type TransferSheets,
   defaultWageAccount,
@@ -3524,6 +3525,15 @@ export default function HomeV2() {
                   `مسيّر رواتب ${monthLabel(run.month)} — ${posted.length} قيداً بإجمالي ${fmt(
                     round3(posted.reduce((s, m) => s + m.amount, 0))
                   )} د.ك`
+                );
+              }}
+              onRefund={(movement, who) => {
+                setMovements((prev) => [...prev, stampApproval(movement)]);
+                log(
+                  "إنشاء",
+                  "حركة",
+                  `استرداد فرق الأجر المسجَّل — ${who} — ${fmt(movement.amount)} د.ك`,
+                  { after: movement.description }
                 );
               }}
               onPayslip={(run, line) => setPayslip({ run, line })}
@@ -28666,6 +28676,7 @@ function PayrollPage({
   nextEntryNo,
   setRuns,
   onPost,
+  onRefund,
   onPayslip,
   onTransferSheet,
   onLog,
@@ -28683,6 +28694,8 @@ function PayrollPage({
   nextEntryNo: number;
   setRuns: Dispatch<SetStateAction<PayrollRun[]>>;
   onPost: (run: PayrollRun, movements: Movement[]) => void;
+  /** يكتب قيد استرداد فرق الأجر المسجَّل — بضغطةٍ واحدة */
+  onRefund: (movement: Movement, employeeName: string) => void;
   onPayslip: (run: PayrollRun, line: PayrollLine) => void;
   onTransferSheet: (sheets: TransferSheets, month: string) => void;
   onLog: (
@@ -28982,6 +28995,56 @@ function PayrollPage({
 
   /* كشفا التحويل — يُحسبان من الأجر المسجَّل في ملفّ كل موظف */
   const sheets = transferSheets(lines, employees);
+
+  /*
+    قيدُ الاسترداد بضغطةٍ واحدة.
+
+    وطلبُه: «عندما يُصرف الراتب وعندما يعيد نوحٌ الذي عليه يكون هناك
+    زرٌّ جاهزٌ يُنشئ الحركة بضغطةٍ منّي ثمّ تُعتمد — حتى لا أنسى الحركةَ
+    وتسجيلَها». فمالٌ خرج من البنك ورجع إليه ولم يُقيَّد رجوعُه يبقى
+    مصروفاً في الدفاتر وقد عاد.
+
+    ولا يُكتب مرّتين: يُعرف المكتوبُ ببيانه — ونصُّ البيان من
+    `refundDescription` نفسِها التي يُكتب بها.
+  */
+  const refundEntry = (row: TransferLine): Movement | undefined =>
+    movements.find(
+      (m) => m.description === refundDescription(row.employeeName, monthLabel(month))
+    );
+
+  const writeRefund = (row: TransferLine) => {
+    const employee = employees.find((e) => e.id === row.employeeId);
+    if (!employee || row.refund <= 0) return;
+    if (refundEntry(row)) return;
+    const account = wageAccountOf(employee);
+    onRefund(
+      {
+        id: newId(),
+        entryNo: nextEntryNo,
+        fiscalYear: year,
+        date: todayISO(),
+        /* كسابقتَيه في الدفاتر: المرتجعُ يُنقص المصروف ولا يُعدّ إيراداً */
+        movementType: "إيرادات",
+        description: refundDescription(row.employeeName, monthLabel(month)),
+        itemCode: "",
+        itemName: "رواتب",
+        debitCode: "1112",
+        creditCode: account,
+        amount: row.refund,
+        project: wageBucket(employee.project, account),
+        person: row.employeeName,
+        paymentMethod: "تحويل بنكي",
+        party: row.employeeName,
+        source: "app",
+        /* والاعتمادُ تختمه الأمُّ بقاعدتها — فحدُّ الاعتماد التلقائيّ واحدٌ للكلّ */
+        approval: "بانتظار الاعتماد",
+        approvedBy: "",
+        approvedAt: "",
+        approvalNote: "",
+      },
+      row.employeeName
+    );
+  };
 
   const statusTone =
     existing?.status === "مرحّل"
@@ -29317,16 +29380,50 @@ function PayrollPage({
               يبقى مصروفاً في الدفاتر وقد عاد.
             */}
             {sheets.refunds.length > 0 && (
-              <Banner tone="info">
-                حُوّل لهم الأجرُ المسجَّل كاملاً، ويُعيدون الفرق:{" "}
-                <b>
-                  {sheets.refunds
-                    .map((r) => `${r.employeeName} ${fmt(r.refund)}`)
-                    .join(" · ")}
-                </b>
-                . وبعد وصوله اكتب قيداً لكلٍّ منهم: <b>مدين 1112</b> (البنك) /{" "}
-                <b>دائن حساب أجره</b> — فيرجع المصروفُ إلى حقيقته.
-              </Banner>
+              <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
+                <p className="font-bold text-amber-900">
+                  يُعيدون فرقَ الأجر المسجَّل
+                </p>
+                <p className="mt-1 text-sm text-amber-900">
+                  حُوّل لهم المسجَّلُ كاملاً إلى حسابهم. وبعد أن يصل ما يُعيدونه
+                  إلى حساب الشركة، اضغط الزرَّ فيُكتب القيدُ وينتظر اعتمادَك —
+                  <b> مدين 1112 البنك / دائن حساب أجره</b>، فيرجع المصروفُ إلى
+                  حقيقته.
+                </p>
+                <table className="mt-3 w-full text-right text-sm">
+                  <tbody>
+                    {sheets.refunds.map((row) => {
+                      const written = refundEntry(row);
+                      return (
+                        <tr key={row.employeeId} className="border-t border-amber-200">
+                          <Td>{row.employeeName}</Td>
+                          <Td>
+                            <Money value={row.refund} bold /> د.ك
+                          </Td>
+                          <Td>
+                            {written ? (
+                              <span className="font-bold text-green-800">
+                                ✓ قُيّد — قيدُ رقم {written.entryNo}
+                                {written.approval !== "معتمدة" &&
+                                  " · ينتظر اعتمادك"}
+                              </span>
+                            ) : (
+                              canRun && (
+                                <button
+                                  onClick={() => writeRefund(row)}
+                                  className="rounded-lg bg-amber-700 px-5 py-2 font-bold text-white no-print"
+                                >
+                                  اكتب قيد الاسترداد
+                                </button>
+                              )
+                            )}
+                          </Td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             )}
 
             {sheets.shortfalls.length > 0 && (

@@ -141,6 +141,56 @@ check(
   "فلا يُحوَّل لأحدٍ ما لم يستحقّه إلا باختيارٍ مكتوب"
 );
 
+/*
+  وقيدُ الاسترداد بضغطةٍ واحدة.
+
+  وطلبُه: «عندما يُصرف الراتب وعندما يعيد نوحٌ الذي عليه يكون هناك زرٌّ
+  جاهزٌ يُنشئ الحركة بضغطةٍ منّي ثمّ تُعتمد — حتى لا أنسى الحركةَ
+  وتسجيلَها».
+*/
+console.log("\nوقيدُ الاسترداد يُكتب بضغطةٍ ولا يُكتب مرّتين:\n");
+
+const { refundDescription } = await jiti.import("../lib/payroll.ts");
+const screen = fs
+  .readFileSync("app/page.tsx", "utf8")
+  .replace(/\r\n/g, "\n");
+
+check(
+  "للمستردّ لوحةٌ تسمّي من عليه",
+  /يُعيدون فرقَ الأجر المسجَّل/.test(screen)
+);
+check("وزرٌّ يكتب القيد", /اكتب قيد الاسترداد/.test(screen));
+check(
+  "والقيدُ من البنك إلى حساب أجره",
+  /debitCode: "1112",\s*\n\s*creditCode: account,/.test(screen),
+  "فالمرتجعُ يُنقص المصروف ولا يُعدّ إيراداً"
+);
+check(
+  "وينتظر الاعتماد ولا يَنفذ وحدَه",
+  /approval: "بانتظار الاعتماد",/.test(screen) &&
+    /stampApproval\(movement\)/.test(screen)
+);
+check(
+  "ولا يُكتب مرّتين — يُعرف المكتوبُ ببيانه",
+  /if \(refundEntry\(row\)\) return;/.test(screen)
+);
+check(
+  "ونصُّ البيان من دالّةٍ واحدةٍ يُكتب بها ويُعرف بها",
+  (screen.match(/refundDescription\(row\.employeeName, monthLabel\(month\)\)/g) ?? [])
+    .length === 2,
+  "فلو اختلف الموضعان ظهر الزرُّ أبداً وكُتب القيدُ مرّتين"
+);
+check(
+  "والبيانُ يحمل الاسمَ والشهر",
+  refundDescription("م. نوح", "أكتوبر 2026") ===
+    "استرداد فرق الأجر المسجَّل — م. نوح — أكتوبر 2026",
+  refundDescription("م. نوح", "أكتوبر 2026")
+);
+check(
+  "ومن قُيّد استردادُه يُقال له قُيّد ورقمُه",
+  /قُيّد — قيدُ رقم \{written\.entryNo\}/.test(screen)
+);
+
 console.log("\nوالصافي الصفر لا يُحوَّل له شيء:\n");
 out = transferSheets([line("a", "عاملٌ مسجَّل", 0)], [employees[0]]);
 check("لا في هذا ولا في ذاك", out.registeredTotal === 0 && out.topUpTotal === 0);
