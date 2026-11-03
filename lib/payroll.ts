@@ -74,6 +74,18 @@ export type Employee = {
    * أو سدادِ سلفةٍ لا يُحوَّل له ما لم يستحقّه.
    */
   payRegisteredInFull: boolean;
+  /**
+   * ما يُعيده إلى حساب الشركة كلَّ شهرٍ بعد نزول راتبه.
+   *
+   * وثلاثةٌ عند الشركة على هذا، ولكلٍّ سببٌ غيرُ سبب الآخر: نوحٌ يُعيد
+   * **فرقَ** المسجَّل عن الفعليّ، وسامي الأسد يُعيد **راتبَه كلَّه** —
+   * ومسجَّلُه يساوي فعليَّه فلا فرقَ يُحتسب — وخالدٌ يُعيد **راتبَ
+   * الملفّ** ثمّ تُدفع أعمالُه وحدَها.
+   *
+   * فلا يُستنبط المبلغُ من فرقٍ: يُكتب صريحاً. وصفرٌ يعني لا شيء — إلا
+   * من اختير له `payRegisteredInFull` فيُحتسب فرقُه.
+   */
+  monthlyRefund: number;
   allowances: Allowance[];
   /** رقم الآيبان لكشوف التحويل البنكي */
   iban: string;
@@ -541,7 +553,16 @@ export type TransferSheets = {
  * مرّةً لا يُقيَّد مرّتين.
  */
 export const refundDescription = (name: string, monthName: string): string =>
-  `استرداد فرق الأجر المسجَّل — ${name} — ${monthName}`;
+  `استرداد من راتب ${monthName} — ${name}`;
+
+/**
+ * بيانُ قيد إيداع ما استُردّ.
+ *
+ * فالمستردُّ يرجع نقداً مبلغاً واحداً من ثلاثةٍ ثمّ يُودع في الحساب —
+ * وقيدُ الإيداع واحدٌ لا ثلاثة، لأنّ الإيداعَ واحد.
+ */
+export const refundDepositDescription = (monthName: string): string =>
+  `إيداع المستردّ من رواتب ${monthName}`;
 
 export function transferSheets(
   lines: PayrollLine[],
@@ -566,7 +587,20 @@ export function transferSheets(
       : round3(Math.min(registeredWage, Math.max(net, 0)));
     const difference = round3(net - registered);
     const topUp = Math.max(difference, 0);
-    const refund = Math.max(round3(-difference), 0);
+
+    /*
+      المستردُّ: ما كُتب صريحاً في ملفّه، وإلّا فرقُ المسجَّل عن الفعليّ.
+
+      والصريحُ مقدَّمٌ لأنّ أسبابَ الردِّ ليست واحدة: من يُعيد راتبَه
+      كلَّه مسجَّلُه يساوي فعليَّه فلا فرقَ يُحتسب له، فلو بُني الأمرُ
+      على الفرق وحدَه لم يظهر له شيء.
+
+      ولا يُستردُّ أكثرُ من الذي حُوّل له — فردُّ ما لم يُقبَض دعوى.
+    */
+    const received = round3(registered + topUp);
+    const declared = round3(Number(employee?.monthlyRefund) || 0);
+    const gap = Math.max(round3(-difference), 0);
+    const refund = Math.min(declared > 0 ? declared : gap, Math.max(received, 0));
 
     rows.push({
       employeeId: line.employeeId,

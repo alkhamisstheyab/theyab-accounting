@@ -94,6 +94,7 @@ import {
   defaultPayrollSettings,
   transferSheets,
   refundDescription,
+  refundDepositDescription,
   type TransferLine,
   type TransferSheets,
   defaultWageAccount,
@@ -25883,6 +25884,7 @@ const BLANK_EMPLOYEE = {
   basicWage: "",
   registeredWage: "",
   payRegisteredInFull: false,
+  monthlyRefund: "",
   iban: "",
   wageAccount: "",
   restDay: "الجمعة",
@@ -26143,6 +26145,7 @@ function EmployeesPage({
       basicWage: String(e.basicWage),
       registeredWage: e.registeredWage ? String(e.registeredWage) : "",
       payRegisteredInFull: e.payRegisteredInFull === true,
+      monthlyRefund: e.monthlyRefund ? String(e.monthlyRefund) : "",
       iban: e.iban,
       wageAccount: e.wageAccount,
       restDay: e.restDay,
@@ -26194,6 +26197,7 @@ function EmployeesPage({
       basicWage: wage,
       registeredWage: round3(Number(form.registeredWage) || 0),
       payRegisteredInFull: form.payRegisteredInFull === true,
+      monthlyRefund: round3(Number(form.monthlyRefund) || 0),
       iban: form.iban.trim(),
       wageAccount: form.wageAccount,
       allowances: allowances
@@ -26585,6 +26589,22 @@ function EmployeesPage({
                       </span>
                     </label>
                   )}
+                </Field>
+                {/*
+                  وما يُعيده يُكتب صريحاً لا يُستنبط من فرق: فمن يُعيد
+                  راتبَه كلَّه مسجَّلُه يساوي فعليَّه، فلا فرقَ يُحتسب له.
+                */}
+                <Field
+                  label="يُعيده شهرياً إلى حساب الشركة"
+                  hint="اتركه فارغاً إن لم يُعِد شيئاً"
+                >
+                  <input
+                    type="number"
+                    step="0.001"
+                    value={form.monthlyRefund}
+                    onChange={(e) => set("monthlyRefund", e.target.value)}
+                    className={inputClass}
+                  />
                 </Field>
                 <div className="flex items-end pb-1">
                   <div className="w-full rounded-lg bg-slate-100 px-4 py-3 text-sm">
@@ -28996,6 +29016,10 @@ function PayrollPage({
   /* كشفا التحويل — يُحسبان من الأجر المسجَّل في ملفّ كل موظف */
   const sheets = transferSheets(lines, employees);
 
+  /* أين يُقبض المستردّ: نقداً في الصندوق أم إيداعاً في البنك */
+  const [refundVia, setRefundVia] = useState<"الصندوق" | "البنك">("الصندوق");
+  const refundAccount = refundVia === "الصندوق" ? "1111" : "1112";
+
   /*
     قيدُ الاسترداد بضغطةٍ واحدة.
 
@@ -29028,12 +29052,12 @@ function PayrollPage({
         description: refundDescription(row.employeeName, monthLabel(month)),
         itemCode: "",
         itemName: "رواتب",
-        debitCode: "1112",
+        debitCode: refundAccount,
         creditCode: account,
         amount: row.refund,
         project: wageBucket(employee.project, account),
         person: row.employeeName,
-        paymentMethod: "تحويل بنكي",
+        paymentMethod: refundVia === "الصندوق" ? "نقدي" : "تحويل بنكي",
         party: row.employeeName,
         source: "app",
         /* والاعتمادُ تختمه الأمُّ بقاعدتها — فحدُّ الاعتماد التلقائيّ واحدٌ للكلّ */
@@ -29043,6 +29067,54 @@ function PayrollPage({
         approvalNote: "",
       },
       row.employeeName
+    );
+  };
+
+  /*
+    قيدُ الإيداع: المستردُّ يرجع نقداً من عدّةٍ ثمّ يُودع مبلغاً واحداً.
+
+    فلا يُكتب إلا بعد أن تُقيَّد المستردّاتُ كلُّها نقداً — وإلّا أُودع
+    ما لم يُقبَض. ومبلغُه مجموعُ ما قُيّد في الصندوق لا مجموعُ المتوقَّع،
+    فما لم يرجع لا يُودع.
+  */
+  const cashRefunds = sheets.refunds
+    .map((row) => refundEntry(row))
+    .filter((m): m is Movement => !!m && m.debitCode === "1111");
+
+  const depositEntry = movements.find(
+    (m) => m.description === refundDepositDescription(monthLabel(month))
+  );
+
+  const depositTotal = round3(
+    cashRefunds.reduce((sum, m) => sum + m.amount, 0)
+  );
+
+  const writeDeposit = () => {
+    if (depositEntry || depositTotal <= 0) return;
+    onRefund(
+      {
+        id: newId(),
+        entryNo: nextEntryNo,
+        fiscalYear: year,
+        date: todayISO(),
+        movementType: "تحويل",
+        description: refundDepositDescription(monthLabel(month)),
+        itemCode: "",
+        itemName: "تحويل بنكي",
+        debitCode: "1112",
+        creditCode: "1111",
+        amount: depositTotal,
+        project: "عام",
+        person: currentUserName,
+        paymentMethod: "تحويل بنكي",
+        party: "",
+        source: "app",
+        approval: "بانتظار الاعتماد",
+        approvedBy: "",
+        approvedAt: "",
+        approvalNote: "",
+      },
+      cashRefunds.map((m) => m.party || m.person).join("، ")
     );
   };
 
@@ -29381,14 +29453,33 @@ function PayrollPage({
             */}
             {sheets.refunds.length > 0 && (
               <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
-                <p className="font-bold text-amber-900">
-                  يُعيدون فرقَ الأجر المسجَّل
-                </p>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <p className="font-bold text-amber-900">
+                    ما يُعيدونه إلى حساب الشركة
+                  </p>
+                  <label className="flex items-center gap-2 text-sm no-print">
+                    يُقبض
+                    <select
+                      value={refundVia}
+                      onChange={(e) =>
+                        setRefundVia(e.target.value as "الصندوق" | "البنك")
+                      }
+                      className="rounded border border-amber-300 bg-white px-3 py-1"
+                    >
+                      <option value="الصندوق">نقداً في الصندوق</option>
+                      <option value="البنك">إيداعاً في البنك</option>
+                    </select>
+                  </label>
+                </div>
                 <p className="mt-1 text-sm text-amber-900">
-                  حُوّل لهم المسجَّلُ كاملاً إلى حسابهم. وبعد أن يصل ما يُعيدونه
-                  إلى حساب الشركة، اضغط الزرَّ فيُكتب القيدُ وينتظر اعتمادَك —
-                  <b> مدين 1112 البنك / دائن حساب أجره</b>، فيرجع المصروفُ إلى
-                  حقيقته.
+                  نزل راتبُهم في حسابهم، ويُعيدون ما عليهم. وبعد أن يصل، اضغط
+                  الزرَّ فيُكتب القيدُ وينتظر اعتمادَك —{" "}
+                  <b>
+                    مدين {refundAccount}{" "}
+                    {refundVia === "الصندوق" ? "الصندوق" : "البنك"} / دائن حساب
+                    أجره
+                  </b>
+                  ، فيرجع المصروفُ إلى حقيقته.
                 </p>
                 <table className="mt-3 w-full text-right text-sm">
                   <tbody>
@@ -29423,6 +29514,42 @@ function PayrollPage({
                     })}
                   </tbody>
                 </table>
+
+                {/*
+                  وما قُبض نقداً يُودع مبلغاً واحداً — فالإيداعُ واحدٌ وإن
+                  كان المستردُّ من ثلاثة.
+                */}
+                {cashRefunds.length > 0 && (
+                  <div className="mt-3 border-t border-amber-300 pt-3 text-sm">
+                    {depositEntry ? (
+                      <span className="font-bold text-green-800">
+                        ✓ أُودع {fmt(depositEntry.amount)} د.ك في البنك — قيدُ
+                        رقم {depositEntry.entryNo}
+                        {depositEntry.approval !== "معتمدة" &&
+                          " · ينتظر اعتمادك"}
+                      </span>
+                    ) : (
+                      <div className="flex flex-wrap items-center gap-3">
+                        <span className="text-amber-900">
+                          قُبض نقداً <b>{fmt(depositTotal)}</b> د.ك من{" "}
+                          {cashRefunds.length}
+                          {cashRefunds.length === sheets.refunds.length
+                            ? ""
+                            : ` من ${sheets.refunds.length}`}
+                          .
+                        </span>
+                        {canRun && (
+                          <button
+                            onClick={writeDeposit}
+                            className="rounded-lg bg-slate-900 px-5 py-2 font-bold text-white no-print"
+                          >
+                            اكتب قيد الإيداع في البنك
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 

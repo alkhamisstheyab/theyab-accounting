@@ -129,6 +129,35 @@ check(
   out.registeredTotal + out.topUpTotal - out.refundTotal === out.netTotal
 );
 
+/*
+  ومن يُعيد راتبَه كلَّه: مسجَّلُه يساوي فعليَّه فلا فرقَ يُحتسب له.
+
+  وهذا سامي الأسد (٣ نوفمبر ٢٠٢٦): «هو أيضاً يعيد الراتب الـ٦٠٠ دينار
+  إلى حساب الشركة». فلو بُني المستردُّ على الفرق وحدَه لم يظهر له شيء.
+*/
+out = transferSheets([line("s", "سامي الأسد", 600)], [
+  worker({ id: "s", name: "سامي الأسد", registeredWage: 600, monthlyRefund: 600 }),
+]);
+check(
+  "المستردُّ يُقرأ من ملفّه صريحاً",
+  out.lines[0].refund === 600 && out.refundTotal === 600,
+  String(out.lines[0].refund)
+);
+check("وكشفُ الشؤون كما هو", out.lines[0].registered === 600);
+check(
+  "ولا يُستردُّ أكثرُ من الذي حُوّل له",
+  transferSheets([line("s", "سامي الأسد", 600)], [
+    worker({ id: "s", name: "سامي الأسد", registeredWage: 600, monthlyRefund: 900 }),
+  ]).lines[0].refund === 600,
+  "فردُّ ما لم يُقبَض دعوى"
+);
+check(
+  "والصريحُ مقدَّمٌ على الفرق",
+  transferSheets([line("n", "م. نوح", 450)], [
+    { ...noah, monthlyRefund: 150 },
+  ]).lines[0].refund === 150
+);
+
 /* ومن لم يُختر له ذلك يبقى على القاعدة */
 out = transferSheets([line("n", "م. نوح", 450)], [
   { ...noah, payRegisteredInFull: false },
@@ -157,12 +186,12 @@ const screen = fs
 
 check(
   "للمستردّ لوحةٌ تسمّي من عليه",
-  /يُعيدون فرقَ الأجر المسجَّل/.test(screen)
+  /ما يُعيدونه إلى حساب الشركة/.test(screen)
 );
 check("وزرٌّ يكتب القيد", /اكتب قيد الاسترداد/.test(screen));
 check(
-  "والقيدُ من البنك إلى حساب أجره",
-  /debitCode: "1112",\s*\n\s*creditCode: account,/.test(screen),
+  "والقيدُ من موضع القبض إلى حساب أجره",
+  /debitCode: refundAccount,\s*\n\s*creditCode: account,/.test(screen),
   "فالمرتجعُ يُنقص المصروف ولا يُعدّ إيراداً"
 );
 check(
@@ -183,8 +212,29 @@ check(
 check(
   "والبيانُ يحمل الاسمَ والشهر",
   refundDescription("م. نوح", "أكتوبر 2026") ===
-    "استرداد فرق الأجر المسجَّل — م. نوح — أكتوبر 2026",
+    "استرداد من راتب أكتوبر 2026 — م. نوح",
   refundDescription("م. نوح", "أكتوبر 2026")
+);
+check(
+  "ويُقبض نقداً أو بالبنك باختياره",
+  /const refundAccount = refundVia === "الصندوق" \? "1111" : "1112";/.test(
+    screen
+  ) && /debitCode: refundAccount,/.test(screen)
+);
+check(
+  "ولا يُودع إلا ما قُبض نقداً",
+  /m\.debitCode === "1111"/.test(screen) &&
+    /cashRefunds\.reduce\(\(sum, m\) => sum \+ m\.amount, 0\)/.test(screen),
+  "فمجموعُ المقبوض لا مجموعُ المتوقَّع"
+);
+check(
+  "وقيدُ الإيداع واحدٌ من الصندوق إلى البنك",
+  /debitCode: "1112",\s*\n\s*creditCode: "1111",/.test(screen) &&
+    /اكتب قيد الإيداع في البنك/.test(screen)
+);
+check(
+  "ولا يُكتب الإيداعُ مرّتين",
+  /if \(depositEntry \|\| depositTotal <= 0\) return;/.test(screen)
 );
 check(
   "ومن قُيّد استردادُه يُقال له قُيّد ورقمُه",

@@ -881,6 +881,7 @@ function migrateEmployee(raw: unknown): Employee {
     basicWage: round3(Number(e.basicWage) || 0),
     registeredWage: round3(Number(e.registeredWage) || 0),
     payRegisteredInFull: e.payRegisteredInFull === true,
+    monthlyRefund: round3(Number(e.monthlyRefund) || 0),
     iban: str(e.iban),
     wageAccount: str(e.wageAccount),
     allowances: allowances.map((a) => {
