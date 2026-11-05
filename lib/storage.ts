@@ -2109,15 +2109,38 @@ function writeArray(key: string, label: string, value: unknown[]): string | null
 /** نقطة استعادة: نسخة من التخزين تُؤخذ مرة واحدة في الجلسة قبل أول كتابة */
 const RESTORE_KEY = "restorePoint";
 
+/**
+ * أكبرُ ما تُؤخذ له نقطةُ استعادة.
+ *
+ * فالنقطةُ صورةٌ كاملة، فهي تُضاعف المحفوظ. وحدُّ المتصفّح نحو خمسة
+ * ميغا، فدفاترُ فوق المليون وربع تملأ النصفَ وتملأ صورتُها النصفَ
+ * الآخر — ثمّ يُخفق الحفظُ. والخادمُ اليومَ هو الدفاتر، و«استرداد من
+ * الخادم» هو طريقُ الرجوع، فلا يُخاطَر بالحفظ لأجل صورةٍ ثانية.
+ */
+const RESTORE_MAX_BYTES = 1_250_000;
+
 export function captureRestorePoint(): void {
   try {
     if (sessionStorage.getItem("restorePointTaken")) return;
     const snapshot: Record<string, string> = {};
+    let bytes = 0;
     for (const key of Object.values(KEYS)) {
       const value = localStorage.getItem(key);
-      if (value) snapshot[key] = value;
+      if (value) {
+        snapshot[key] = value;
+        bytes += value.length;
+      }
     }
     if (Object.keys(snapshot).length === 0) return;
+    /*
+      ولا تُؤخذ ناقصةً: صورةٌ فيها بعضُ المجموعات واستُعيدت خلطت قديماً
+      بجديد. فإمّا كاملةً وإمّا لا شيء.
+    */
+    if (bytes > RESTORE_MAX_BYTES) {
+      localStorage.removeItem(RESTORE_KEY);
+      sessionStorage.setItem("restorePointTaken", "1");
+      return;
+    }
     localStorage.setItem(
       RESTORE_KEY,
       JSON.stringify({ at: new Date().toISOString(), snapshot })
@@ -2128,14 +2151,40 @@ export function captureRestorePoint(): void {
   }
 }
 
-export function readRestorePoint(): { at: string; keys: number } | null {
+export function readRestorePoint():
+  | { at: string; keys: number; bytes: number }
+  | null {
   try {
     const raw = localStorage.getItem(RESTORE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as { at: string; snapshot: Record<string, string> };
-    return { at: parsed.at, keys: Object.keys(parsed.snapshot ?? {}).length };
+    return {
+      at: parsed.at,
+      keys: Object.keys(parsed.snapshot ?? {}).length,
+      bytes: raw.length,
+    };
   } catch {
     return null;
+  }
+}
+
+/**
+ * تُمحى نقطةُ الاستعادة فتُفرَّغ مساحتُها.
+ *
+ * وهي صورةٌ كاملةٌ من التخزين، فحجمُها حجمُ الدفاتر كلِّها. وكانت
+ * الشاشةُ تعرض زرَّ الاستعادة وحدَه — وهو الخطر — ولا تعرض المحو وهو
+ * السلامة. فطلب صاحبُ الشركة الحفظَ في ٥ نوفمبر ٢٠٢٦ فجاءه «تعذّر
+ * الحفظ في التخزين المحلي»: دفاترُه ٢٫٦ ميغا والنقطةُ مثلُها، وحدُّ
+ * المتصفّح خمسة. فصارت الحمايةُ سببَ الخلل الذي بُنيت لتمنعه.
+ */
+export function clearRestorePoint(): boolean {
+  try {
+    localStorage.removeItem(RESTORE_KEY);
+    /* وتُؤخذ ثانيةً في الجلسة القادمة لا في هذه — فلا تُحذف ثمّ تُكتب فوراً */
+    sessionStorage.setItem("restorePointTaken", "1");
+    return true;
+  } catch {
+    return false;
   }
 }
 

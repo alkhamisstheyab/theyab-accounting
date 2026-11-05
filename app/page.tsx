@@ -186,6 +186,7 @@ import {
   defaultCompany,
   hashPin,
   applyRestorePoint,
+  clearRestorePoint,
   emptyState,
   exportBackup,
   isYearClosed,
@@ -15816,23 +15817,50 @@ function SettingsPage({
               <p className="mb-3 text-sm text-slate-600">
                 صورة من بياناتك أُخذت تلقائياً قبل أول تعديل في هذه الجلسة —{" "}
                 <b>{new Date(point.at).toLocaleString("ar")}</b> · {point.keys}{" "}
-                مجموعة. استعملها إن اختفت بيانات فجأة.
+                مجموعة · <b>{(point.bytes / 1024 / 1024).toFixed(2)} ميغا</b>.
+                استعملها إن اختفت بيانات فجأة.
               </p>
-              <button
-                onClick={() => {
-                  if (
-                    window.confirm(
-                      "استعادة البيانات إلى ما كانت عليه قبل أول تعديل في هذه الجلسة؟\n\nكل ما أدخلته بعدها سيضيع."
-                    )
-                  ) {
-                    if (applyRestorePoint()) window.location.reload();
-                    else setError("تعذّرت الاستعادة");
-                  }
-                }}
-                className="rounded-lg bg-amber-100 px-5 py-2 font-bold text-amber-900"
-              >
-                ↩ استعادة نقطة الأمان
-              </button>
+              {/*
+                وتُمحى: فهي صورةٌ كاملةٌ تُضاعف المحفوظ، وحدُّ المتصفّح نحو
+                خمسة ميغا. وكان الزرُّ الواحدُ هو الاستعادة — وهي الخطر —
+                فيقف من امتلأ تخزينُه بلا باب.
+              */}
+              <div className="flex flex-wrap gap-3">
+                <button
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        "استعادة البيانات إلى ما كانت عليه قبل أول تعديل في هذه الجلسة؟\n\nكل ما أدخلته بعدها سيضيع."
+                      )
+                    ) {
+                      if (applyRestorePoint()) window.location.reload();
+                      else setError("تعذّرت الاستعادة");
+                    }
+                  }}
+                  className="rounded-lg bg-amber-100 px-5 py-2 font-bold text-amber-900"
+                >
+                  ↩ استعادة نقطة الأمان
+                </button>
+                <button
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        `محو نقطة الأمان وتفريغ ${(
+                          point.bytes /
+                          1024 /
+                          1024
+                        ).toFixed(2)} ميغا من تخزين المتصفّح؟\n\nلا يُمسّ شيءٌ من دفاترك — هذه صورةٌ ثانيةٌ منها. والرجوعُ بعدها من «استرداد من الخادم».`
+                      )
+                    ) {
+                      if (clearRestorePoint()) window.location.reload();
+                      else setError("تعذّر المحو");
+                    }
+                  }}
+                  className="rounded-lg bg-slate-900 px-5 py-2 font-bold text-white"
+                >
+                  🧹 امحُ نقطة الأمان وفرّغ المساحة
+                </button>
+              </div>
             </div>
           );
         })()}
