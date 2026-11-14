@@ -8232,6 +8232,24 @@ function MinutesPage({
   const [notice, setNotice] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
+  /*
+    النموذجُ يُفتح أسفل القائمة، فيُنزَل إليه.
+
+    وقال صاحبُ الشركة: «لا يفتح معي تقرير جديد؟» — وصلاحيتُه قائمة
+    والزرُّ يعمل، لكنّ لوحةَ التحرير تُعرض **تحت** بطاقات التقارير،
+    والبطاقةُ الواحدة طويلةٌ بمتنها وجدول التزاماتها وصورها. فيضغط
+    الزرَّ فلا يرى في شاشته تغييراً، فيحسب الزرَّ معطوباً.
+
+    والتبعيّةُ على **معرّف** المحرَّر لا على الكائن: فالكائنُ يتغيّر مع
+    كلِّ حرفٍ يُكتب، فلو عُلّق عليه لانتقلت الشاشةُ عند كلّ ضغطة مفتاح.
+  */
+  const editorRef = useRef<HTMLDivElement>(null);
+  const editingId = editing?.id ?? null;
+  useEffect(() => {
+    if (!editingId) return;
+    editorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [editingId]);
+
   const rows = useMemo(() => minutesOf(minutes, project), [minutes, project]);
   const sum = useMemo(() => minutesSummary(minutes, today), [minutes, today]);
 
@@ -8569,6 +8587,7 @@ function MinutesPage({
 
       {/* ---- التحرير ---- */}
       {editing && canManage && (
+        <div ref={editorRef}>
         <Panel
           title={editing.title ? `تعديل: ${editing.title}` : "تقريرٌ جديد"}
           subtitle="والقرارُ غيرُ الكلام: ما قيل يُكتب نصّاً، وما التُزم به سطراً له صاحبٌ وموعد"
@@ -8851,6 +8870,7 @@ function MinutesPage({
             </button>
           </div>
         </Panel>
+        </div>
       )}
     </>
   );
