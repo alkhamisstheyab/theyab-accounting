@@ -349,6 +349,25 @@ import {
   type Party,
 } from "@/lib/parties";
 import {
+  BASES,
+  DEPARTMENTS as MATERIAL_DEPARTMENTS,
+  DEFAULT_BASIS,
+  EMPTY_INPUTS,
+  UNITS,
+  byDepartment,
+  cheapestSupplier,
+  counted,
+  defaultPick,
+  estimateFileName,
+  estimateLines,
+  estimateTotal,
+  pricelessIncluded,
+  type EstimateBasis,
+  type EstimateInputs,
+  type EstimateLine,
+  type EstimatePick,
+} from "@/lib/estimates";
+import {
   REVIEW_RANGES,
   reviewMovements,
   reviewSummary,
@@ -477,6 +496,7 @@ const PAGES = [
   "متابعة السلف",
   "المستحقات",
   "استلام المواد",
+  "تقدير المواد",
   "الموظفون",
   "الحضور والانصراف",
   "تقييم العمل",
@@ -533,6 +553,7 @@ const PAGE_GROUPS: { group: string; pages: string[] }[] = [
       "المطلوب من العملاء",
       "ربط الحركات",
       "استلام المواد",
+      "تقدير المواد",
       "عروض الأسعار",
       "بنود الأعمال",
       "الفواتير",
@@ -673,6 +694,7 @@ export default function HomeV2() {
   const [minutes, setMinutes] = useState<Minute[]>([]);
   /* تقريرُ اجتماعٍ مفتوحٌ ورقةً تُطبع أو تُحفظ PDF */
   const [minuteSheet, setMinuteSheet] = useState<Minute | null>(null);
+  const [estimateSheet, setEstimateSheet] = useState<EstimatePrint | null>(null);
   const [yearLocks, setYearLocks] = useState<YearLocks>({});
   const [chart, setChart] = useState<Account[]>(GENERATED_CHART);
   const [items, setItems] = useState<ItemDefinition[]>(GENERATED_ITEMS);
@@ -1759,7 +1781,8 @@ export default function HomeV2() {
           invoiceSheet ||
           quittanceFor ||
           clientStatement ||
-          minuteSheet
+          minuteSheet ||
+          estimateSheet
             ? "hide-when-printing"
             : ""
         }`}
@@ -3447,6 +3470,19 @@ export default function HomeV2() {
             />
           )}
 
+          {page === "تقدير المواد" && (
+            <EstimatePage
+              materials={materials}
+              parties={parties}
+              receipts={materialReceipts}
+              company={company}
+              canManage={allow("materials.manage")}
+              setMaterials={setMaterials}
+              onPrint={setEstimateSheet}
+              onLog={log}
+            />
+          )}
+
           {page === "المستخدمون" && (
             <UsersPage
               users={users}
@@ -4009,6 +4045,19 @@ export default function HomeV2() {
           company={company}
           today={todayISO()}
           onClose={() => setMinuteSheet(null)}
+        />
+      )}
+
+      {estimateSheet && (
+        <EstimateSheet
+          title={estimateSheet.title}
+          inputs={estimateSheet.inputs}
+          groups={estimateSheet.groups}
+          total={estimateSheet.total}
+          gaps={estimateSheet.gaps}
+          company={company}
+          today={todayISO()}
+          onClose={() => setEstimateSheet(null)}
         />
       )}
 
@@ -14611,6 +14660,1073 @@ function AdvancesPage({
 /* استلام مواد المواقع                                                 */
 /* ================================================================== */
 
+/**
+ * ما تحمله الورقةُ المطبوعة.
+ *
+ * ويُرفع إلى أعلى الشِّفْر لا يبقى داخل الشاشة: فالورقةُ تُحضَر في جذر
+ * التطبيق لتُخفى القائمةُ وما حولها عند الطباعة.
+ */
+type EstimatePrint = {
+  title: string;
+  inputs: EstimateInputs;
+  groups: { department: string; lines: EstimateLine[]; total: number }[];
+  total: number;
+  gaps: EstimateLine[];
+};
+
+/**
+ * ورقةُ التقدير تُطبع وتُشارَك.
+ *
+ * وهي **تقديرٌ لا عرضُ سعر**: مكتوبٌ في رأسها وفي تذييلها أنّها تقريبيّةٌ
+ * لا تُلزم. فورقةٌ بخطِّ الشركة وشعارِها تُقرأ عقداً عند من لا يقرأ
+ * الحواشي — ومن وصلته أرقامٌ بلا هذا القيد طالَب بها.
+ */
+function EstimateSheet({
+  title,
+  inputs,
+  groups,
+  total,
+  gaps,
+  company,
+  today,
+  onClose,
+}: {
+  title: string;
+  inputs: EstimateInputs;
+  groups: { department: string; lines: EstimateLine[]; total: number }[];
+  total: number;
+  gaps: EstimateLine[];
+  company: CompanyProfile;
+  today: string;
+  onClose: () => void;
+}) {
+  const fileName = estimateFileName(title, today);
+
+  const columns: { label: string; value: string }[][] = [
+    [
+      { label: "التاريخ", value: today },
+      { label: "الغرض", value: title || "تقدير عام" },
+    ],
+    [
+      { label: "مساحة الدور", value: `${fmt(inputs.area)} م²` },
+      { label: "عدد الأدوار", value: String(inputs.floors) },
+    ],
+    [
+      { label: "عدد الحمّامات", value: String(inputs.bathrooms) },
+      { label: "عدد البنود", value: String(groups.length) },
+    ],
+  ];
+
+  return (
+    <div
+      className="voucher-sheet fixed inset-0 z-50 overflow-auto bg-slate-800/60 p-6"
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="voucher-body designed-sheet mx-auto flex max-w-3xl flex-col bg-white shadow-xl"
+        style={{ minHeight: "27cm" }}
+      >
+        <div className="p-6 pb-0 no-print">
+          <div className="flex justify-end gap-3">
+            <button
+              onClick={() => printAs(fileName)}
+              className="rounded-lg bg-slate-900 px-6 py-3 font-bold text-white"
+            >
+              🖨 اطبع أو احفظ PDF
+            </button>
+            <button
+              onClick={onClose}
+              className="rounded-lg bg-slate-200 px-6 py-3 font-bold"
+            >
+              إغلاق
+            </button>
+          </div>
+          <p className="mt-3 text-sm text-slate-600">
+            لمشاركته مع العميل أو المورّد: اضغط الزرّ، ثمّ اختر في نافذة
+            الطباعة الوجهةَ <b>«حفظ كـ PDF»</b> بدل الطابعة — يُحفظ ملفّاً
+            باسم <b>{fileName}</b>.
+          </p>
+        </div>
+
+        <div style={{ height: 14, background: DOC_GOLD_SOFT }} />
+
+        <div className="flex-1 px-10 pt-8">
+          <div className="flex items-start justify-between gap-6">
+            <div
+              style={{ color: DOC_GOLD }}
+              className="text-3xl font-bold tracking-wide"
+            >
+              MATERIAL ESTIMATE
+            </div>
+            <div className="text-left">
+              <div className="text-xl font-bold">{company.name}</div>
+              {company.nameEn && <div className="text-xs">{company.nameEn}</div>}
+            </div>
+          </div>
+
+          <h3 className="mt-8 text-2xl font-bold">
+            تقديرُ تكلفةِ المواد{title ? ` — ${title}` : ""}
+          </h3>
+          <p className="mt-2 text-sm font-bold" style={{ color: DOC_GOLD }}>
+            أرقامٌ تقريبيّةٌ للاسترشاد — ليست عرضَ سعرٍ ولا تُلزم الشركة
+          </p>
+
+          <div className="mt-6 flex justify-between gap-6">
+            {columns.map((column, index) => (
+              <div
+                key={index}
+                className="flex-1"
+                style={
+                  index < columns.length - 1
+                    ? {
+                        borderInlineEnd: `2px solid ${DOC_BAND}`,
+                        paddingInlineEnd: 20,
+                      }
+                    : undefined
+                }
+              >
+                {column.map((row) => (
+                  <div key={row.label} className="mb-3">
+                    <div
+                      style={{ color: DOC_GOLD }}
+                      className="text-sm font-bold"
+                    >
+                      {row.label}
+                    </div>
+                    <div className="text-sm font-bold leading-snug">
+                      {row.value || "—"}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+
+          {groups.map((group) => (
+            <div key={group.department} className="mt-8">
+              <h4 style={{ color: DOC_GOLD }} className="text-sm font-bold">
+                {group.department}
+              </h4>
+              <table className="mt-1 w-full text-right">
+                <thead>
+                  <tr style={{ color: DOC_GOLD }}>
+                    <th className="pb-2 text-right text-sm font-bold">المادة</th>
+                    <th className="w-24 pb-2 text-right text-sm font-bold">
+                      الوحدة
+                    </th>
+                    <th className="w-24 pb-2 text-right text-sm font-bold">
+                      الكمّية
+                    </th>
+                    <th className="w-28 pb-2 text-right text-sm font-bold">
+                      سعر الوحدة
+                    </th>
+                    <th className="w-28 pb-2 text-right text-sm font-bold">
+                      الإجمالي
+                    </th>
+                  </tr>
+                  <tr>
+                    <td
+                      colSpan={5}
+                      style={{ borderBottom: `2px solid ${DOC_GOLD_SOFT}` }}
+                    />
+                  </tr>
+                </thead>
+                <tbody>
+                  {group.lines.map((line) => (
+                    <tr
+                      key={line.material.id}
+                      style={{ borderBottom: `1px solid ${DOC_BAND}` }}
+                    >
+                      <td className="py-2 text-sm font-bold">
+                        {line.material.name}
+                      </td>
+                      <td className="py-2 text-sm font-bold">
+                        {line.material.unit || "—"}
+                      </td>
+                      <td className="py-2 text-sm font-bold tabular-nums">
+                        {fmt(line.quantity)}
+                      </td>
+                      <td className="py-2 text-sm font-bold tabular-nums">
+                        {line.unitPrice == null ? "—" : fmt(line.unitPrice)}
+                      </td>
+                      <td className="py-2 text-sm font-bold tabular-nums">
+                        {line.total == null ? "—" : fmt(line.total)}
+                      </td>
+                    </tr>
+                  ))}
+                  <tr>
+                    <td colSpan={4} className="py-2 text-sm font-bold">
+                      مجموع {group.department}
+                    </td>
+                    <td className="py-2 text-sm font-bold tabular-nums">
+                      {fmt(group.total)}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          ))}
+
+          <div
+            className="mt-8 flex items-center justify-between px-4 py-4"
+            style={{ background: DOC_BAND }}
+          >
+            <span className="text-lg font-bold">الإجمالي التقديريُّ للمواد</span>
+            <span className="text-lg font-bold tabular-nums">
+              {fmt(total)} د.ك
+            </span>
+          </div>
+
+          {gaps.length > 0 && (
+            <p className="mt-4 text-xs font-bold">
+              ولم يدخل الإجماليَّ {gaps.length} بنداً بلا سعرٍ معرَّف:{" "}
+              {gaps.map((l) => l.material.name).join(" · ")}. فالإجماليُّ أقلُّ
+              من التكلفة بقدرها.
+            </p>
+          )}
+
+          <p className="mt-6 text-xs leading-relaxed">
+            هذا التقديرُ مبنيٌّ على أسعارٍ مسجّلةٍ بتاريخ إعداده وعلى كمّياتٍ
+            متوسّطةٍ لكلِّ وحدةٍ من المساحة أو العدد. والكمّياتُ الفعليّةُ
+            تُحصر في الموقع، والأسعارُ تتغيّر. ولا يشمل أجورَ التنفيذ ولا
+            النقلَ ولا الهالك.
+          </p>
+        </div>
+
+        <div
+          className="mt-10 flex items-center justify-between gap-6 px-10 py-6"
+          style={{ background: DOC_BAND }}
+        >
+          <div>
+            {company.logo ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={company.logo} alt="" style={{ height: 64 }} />
+            ) : (
+              <div className="text-xs text-slate-400">الشعار</div>
+            )}
+          </div>
+          <div className="text-left">
+            <div className="text-xs leading-relaxed">
+              {company.address && <div>العنوان: {company.address}</div>}
+              {company.phone && <div>الهاتف: {company.phone}</div>}
+              {company.email && <div>البريد الإلكتروني: {company.email}</div>}
+            </div>
+            <div className="mt-2 text-xs font-bold" style={{ color: DOC_GOLD }}>
+              تقدير مواد · {today}
+              {company.crNumber && ` · س.ت ${company.crNumber}`}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * تقديرُ المواد: سجلُّ الأسعار، وفاتورةٌ تقريبيّةٌ تُخرج منه.
+ *
+ * ولا تُحفظ الفاتورةُ في الدفاتر ولا تُرفع إلى الخادم: المحفوظُ هو
+ * **سجلُّ المواد** — أسماؤها وأقسامُها وكمّياتُها المقترحةُ وأسعارُ
+ * مورّديها — وهو الذي يُرفع ويُشارَك. والمساحةُ والعددُ والاختياراتُ
+ * تبقى على الجهاز وحدَه، فهي سؤالُ لحظةٍ لا سجلُّ شركة.
+ */
+function EstimatePage({
+  materials,
+  parties,
+  receipts,
+  company,
+  canManage,
+  setMaterials,
+  onPrint,
+  onLog,
+}: {
+  materials: Material[];
+  parties: Party[];
+  receipts: MaterialReceipt[];
+  company: CompanyProfile;
+  canManage: boolean;
+  setMaterials: Dispatch<SetStateAction<Material[]>>;
+  onPrint: (sheet: EstimatePrint) => void;
+  onLog: (
+    action: AuditAction,
+    entity: AuditEntity,
+    summary: string,
+    change?: { before?: string; after?: string }
+  ) => void;
+}) {
+  const [title, setTitle] = useState("");
+  const [inputs, setInputs] = useState<EstimateInputs>(EMPTY_INPUTS);
+  const [picks, setPicks] = useState<Record<string, EstimatePick>>({});
+  const [error, setError] = useState("");
+  const [openSuppliers, setOpenSuppliers] = useState<string | null>(null);
+
+  const blank = {
+    name: "",
+    department: "",
+    unit: "",
+    basis: DEFAULT_BASIS as EstimateBasis,
+    perUnit: "",
+    unitPrice: "",
+    note: "",
+  };
+  const [form, setForm] = useState(blank);
+  const set = (key: keyof typeof blank, value: string) =>
+    setForm((prev) => ({ ...prev, [key]: value }));
+
+  /* أسماءُ الموردين من سجلّ الأطراف، فلا تُكتب الأسماءُ مرّتين بصيغتين */
+  const suppliers = useMemo(
+    () =>
+      parties
+        .filter((p) => p.kind === "مورّد" && p.active)
+        .map((p) => p.name)
+        .sort((a, b) => a.localeCompare(b, "ar")),
+    [parties]
+  );
+
+  const lines = useMemo(
+    () => estimateLines(materials, inputs, picks),
+    [materials, inputs, picks]
+  );
+  const groups = useMemo(() => byDepartment(lines), [lines]);
+  const total = estimateTotal(lines);
+  const gaps = pricelessIncluded(lines);
+  const includedCount = counted(lines).length;
+
+  const pickOf = (id: string): EstimatePick => picks[id] ?? defaultPick();
+  const setPick = (id: string, patch: Partial<EstimatePick>) =>
+    setPicks((prev) => ({ ...prev, [id]: { ...pickOf(id), ...patch } }));
+
+  const printGroups = groups
+    .map((g) => ({
+      department: g.department,
+      lines: g.lines.filter((l) => l.include && l.quantity > 0),
+      total: g.total,
+    }))
+    .filter((g) => g.lines.length > 0);
+
+  const addMaterial = () => {
+    const name = form.name.trim();
+    if (!name) return setError("اسمُ المادة مطلوب");
+    if (materials.some((m) => m.name === name))
+      return setError("المادةُ مسجّلةٌ بهذا الاسم — عدّلها في الجدول");
+    const material: Material = {
+      id: newId(),
+      name,
+      unitPrice: form.unitPrice === "" ? null : round3(Number(form.unitPrice)),
+      department: form.department.trim(),
+      unit: form.unit.trim(),
+      basis: form.basis,
+      perUnit: round3(Number(form.perUnit) || 0),
+      suppliers: [],
+      note: form.note.trim(),
+    };
+    setMaterials((prev) => [...prev, material]);
+    onLog("إنشاء", "مادة", `إضافة مادة ${name} إلى سجلّ التسعير`, {
+      after: `${name} · ${material.department || "بلا قسم"} · ${
+        material.unitPrice == null ? "بلا سعر" : fmt(material.unitPrice)
+      }`,
+    });
+    setForm(blank);
+    setError("");
+  };
+
+  const patchMaterial = (id: string, patch: Partial<Material>) =>
+    setMaterials((prev) =>
+      prev.map((m) => (m.id === id ? { ...m, ...patch } : m))
+    );
+
+  const removeMaterial = (material: Material) => {
+    const used = receipts.filter((r) => r.material === material.name).length;
+    if (used > 0)
+      return setError(
+        `لا تُحذف «${material.name}»: عليها ${used} سجلَّ استلامٍ تفقد اسمَها. اتركها وصفِّر سعرَها إن بطلت.`
+      );
+    setMaterials((prev) => prev.filter((m) => m.id !== material.id));
+    onLog("حذف", "مادة", `حذف مادة ${material.name} من سجلّ التسعير`, {
+      before: `${material.name} · ${material.department || "بلا قسم"}`,
+    });
+    setError("");
+  };
+
+  const addSupplier = (material: Material, party: string, price: string) => {
+    const name = party.trim();
+    if (!name) return setError("اسمُ المورّد مطلوب");
+    if (material.suppliers.some((s) => s.party === name))
+      return setError(`${name} مسجَّلٌ على هذه المادة — عدّل سعرَه`);
+    patchMaterial(material.id, {
+      suppliers: [
+        ...material.suppliers,
+        { id: newId(), party: name, price: round3(Number(price) || 0) },
+      ],
+    });
+    onLog(
+      "تعديل",
+      "مادة",
+      `سعرُ ${material.name} عند ${name}: ${fmt(round3(Number(price) || 0))}`
+    );
+    setError("");
+  };
+
+  return (
+    <>
+      <Panel
+        title="الفاتورة التقديريّة للمواد"
+        subtitle="أرقامٌ تقريبيّةٌ للاسترشاد — لا تمسُّ الدفاترَ ولا تُنشئ قيداً، ولا تُنسَب إلى قسيمةٍ حتى تنسبَها بيدك"
+      >
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+          <Field label="الغرض" hint="يظهر في رأس المطبوعة">
+            <input
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="دورٌ نموذجيٌّ · مرحلةُ التشطيب"
+              className={inputClass}
+            />
+          </Field>
+          <Field label="مساحة الدور (م²)">
+            <input
+              type="number"
+              step="1"
+              min="0"
+              value={inputs.area || ""}
+              onChange={(e) =>
+                setInputs((p) => ({ ...p, area: Number(e.target.value) || 0 }))
+              }
+              className={inputClass}
+            />
+          </Field>
+          <Field label="عدد الأدوار" hint="تُضرب فيه موادُّ المساحة">
+            <input
+              type="number"
+              step="1"
+              min="0"
+              value={inputs.floors || ""}
+              onChange={(e) =>
+                setInputs((p) => ({ ...p, floors: Number(e.target.value) || 0 }))
+              }
+              className={inputClass}
+            />
+          </Field>
+          <Field label="عدد الحمّامات">
+            <input
+              type="number"
+              step="1"
+              min="0"
+              value={inputs.bathrooms || ""}
+              onChange={(e) =>
+                setInputs((p) => ({
+                  ...p,
+                  bathrooms: Number(e.target.value) || 0,
+                }))
+              }
+              className={inputClass}
+            />
+          </Field>
+        </div>
+
+        <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-3">
+          <div className="rounded-xl bg-slate-900 p-4 text-white">
+            <div className="text-xs text-slate-300">الإجماليُّ التقديري</div>
+            <div className="mt-1 text-2xl font-bold tabular-nums">
+              {fmt(total)} د.ك
+            </div>
+          </div>
+          <div className="rounded-xl bg-slate-100 p-4">
+            <div className="text-xs text-slate-500">بنودٌ محسوبة</div>
+            <div className="mt-1 text-2xl font-bold tabular-nums">
+              {includedCount} من {materials.length}
+            </div>
+          </div>
+          <div
+            className={`rounded-xl p-4 ${
+              gaps.length > 0 ? "bg-amber-100" : "bg-slate-100"
+            }`}
+          >
+            <div className="text-xs text-slate-500">بلا سعرٍ فلم تُحسب</div>
+            <div className="mt-1 text-2xl font-bold tabular-nums">
+              {gaps.length}
+            </div>
+          </div>
+        </div>
+
+        {gaps.length > 0 && (
+          <p className="mt-4 rounded-xl bg-amber-50 p-4 text-sm">
+            <b>والإجماليُّ أقلُّ من التكلفة:</b> {gaps.length} بنداً مُدخلاً في
+            الفاتورة بلا سعرٍ معرَّف — {gaps.map((l) => l.material.name).join(" · ")}
+            . فإمّا أن تُسعّرها في السجلّ أسفلَ هذه الشاشة، وإمّا أن تُخرجها
+            بإزالة علامتها، كي لا يُقرأ الإجماليُّ على أنّه تمامُ التكلفة.
+          </p>
+        )}
+
+        {error && (
+          <p className="mt-4 rounded-xl bg-red-50 p-4 text-sm font-bold text-red-700">
+            {error}
+          </p>
+        )}
+
+        <div className="mt-5 flex flex-wrap gap-3">
+          <button
+            onClick={() => {
+              if (printGroups.length === 0)
+                return setError("لا بندَ في الفاتورة — أدخل مساحةً أو عدداً أولاً");
+              setError("");
+              onPrint({ title, inputs, groups: printGroups, total, gaps });
+            }}
+            className="rounded-lg bg-slate-900 px-6 py-3 font-bold text-white"
+          >
+            🖨 اطبع الفاتورة · PDF
+          </button>
+          <button
+            onClick={() => {
+              setPicks({});
+              setError("");
+            }}
+            className="rounded-lg bg-slate-200 px-6 py-3 font-bold"
+          >
+            أعِد كلَّ الاختيارات
+          </button>
+        </div>
+
+        {materials.length === 0 ? (
+          <Empty>
+            سجلُّ المواد خالٍ. أضِف الموادَّ وأسعارَها في الجدول أسفلَ هذه
+            الشاشة، فالفاتورةُ تُبنى منها.
+          </Empty>
+        ) : (
+          <div className="mt-6 space-y-6">
+            {groups.map((group) => (
+              <div key={group.department}>
+                <div className="flex items-baseline justify-between">
+                  <h4 className="text-lg font-bold">{group.department}</h4>
+                  <span className="text-sm font-bold tabular-nums">
+                    {fmt(group.total)} د.ك
+                  </span>
+                </div>
+                <div className="mt-2 overflow-x-auto">
+                  <table className="w-full text-right text-sm">
+                    <thead className="bg-slate-100">
+                      <tr>
+                        <Th>تُحسب</Th>
+                        <Th>المادة</Th>
+                        <Th>الأساس</Th>
+                        <Th>لكلِّ وحدة</Th>
+                        <Th>الكمّية</Th>
+                        <Th>المورّد</Th>
+                        <Th>سعر الوحدة</Th>
+                        <Th>الإجمالي</Th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {group.lines.map((line) => {
+                        const pick = pickOf(line.material.id);
+                        return (
+                          <tr
+                            key={line.material.id}
+                            className={`border-t border-slate-100 ${
+                              line.include ? "" : "opacity-40"
+                            }`}
+                          >
+                            <Td>
+                              <input
+                                type="checkbox"
+                                checked={line.include}
+                                onChange={(e) =>
+                                  setPick(line.material.id, {
+                                    include: e.target.checked,
+                                  })
+                                }
+                                className="h-5 w-5"
+                              />
+                            </Td>
+                            <Td className="font-bold">
+                              {line.material.name}
+                              {line.material.unit && (
+                                <span className="text-xs font-normal text-slate-500">
+                                  {" "}
+                                  / {line.material.unit}
+                                </span>
+                              )}
+                            </Td>
+                            <Td>{line.material.basis}</Td>
+                            <Td className="tabular-nums">
+                              {fmt(line.material.perUnit)}
+                            </Td>
+                            <Td>
+                              <input
+                                type="number"
+                                step="0.001"
+                                min="0"
+                                value={pick.quantity ?? ""}
+                                placeholder={fmt(line.computed)}
+                                onChange={(e) =>
+                                  setPick(line.material.id, {
+                                    quantity:
+                                      e.target.value === ""
+                                        ? null
+                                        : Number(e.target.value),
+                                  })
+                                }
+                                className="w-24 rounded border border-slate-300 px-2 py-1 tabular-nums"
+                              />
+                              {line.overridden && (
+                                <span className="ms-1 text-xs text-amber-700">
+                                  بيدك
+                                </span>
+                              )}
+                            </Td>
+                            <Td>
+                              {line.material.suppliers.length === 0 ? (
+                                <span className="text-xs text-slate-400">
+                                  بلا مورّدٍ مسعَّر
+                                </span>
+                              ) : (
+                                <select
+                                  value={pick.supplier}
+                                  onChange={(e) =>
+                                    setPick(line.material.id, {
+                                      supplier: e.target.value,
+                                    })
+                                  }
+                                  className="rounded border border-slate-300 px-2 py-1"
+                                >
+                                  <option value="">السعر الاسترشادي</option>
+                                  {line.material.suppliers.map((s) => (
+                                    <option key={s.id} value={s.party}>
+                                      {s.party} — {fmt(s.price)}
+                                    </option>
+                                  ))}
+                                </select>
+                              )}
+                            </Td>
+                            <Td className="tabular-nums">
+                              {line.unitPrice == null ? (
+                                <span className="text-xs font-bold text-amber-700">
+                                  بلا سعر
+                                </span>
+                              ) : (
+                                fmt(line.unitPrice)
+                              )}
+                            </Td>
+                            <Td className="tabular-nums font-bold">
+                              {line.total == null ? "—" : fmt(line.total)}
+                            </Td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Panel>
+
+      <Panel
+        title="سجلُّ المواد وأسعارُها"
+        subtitle="هذا هو المحفوظُ المرفوع — وما فوقَه حسابُ لحظةٍ يبقى على جهازك"
+      >
+        {canManage && (
+          <>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+              <Field label="اسم المادة">
+                <input
+                  type="text"
+                  value={form.name}
+                  onChange={(e) => set("name", e.target.value)}
+                  placeholder="بايب 4 إنش · سويتش مفرد"
+                  className={inputClass}
+                />
+              </Field>
+              <Field label="القسم">
+                <input
+                  type="text"
+                  list="estimate-departments"
+                  value={form.department}
+                  onChange={(e) => set("department", e.target.value)}
+                  placeholder="صحّي · كهرباء · إنارة"
+                  className={inputClass}
+                />
+                <datalist id="estimate-departments">
+                  {MATERIAL_DEPARTMENTS.map((d) => (
+                    <option key={d} value={d} />
+                  ))}
+                </datalist>
+              </Field>
+              <Field label="الوحدة">
+                <input
+                  type="text"
+                  list="estimate-units"
+                  value={form.unit}
+                  onChange={(e) => set("unit", e.target.value)}
+                  placeholder="حبّة · متر · لفّة"
+                  className={inputClass}
+                />
+                <datalist id="estimate-units">
+                  {UNITS.map((u) => (
+                    <option key={u} value={u} />
+                  ))}
+                </datalist>
+              </Field>
+              <Field
+                label="الأساس"
+                hint="على أيِّ شيءٍ تُضرب الكمّيةُ المقترحة"
+              >
+                <select
+                  value={form.basis}
+                  onChange={(e) => set("basis", e.target.value)}
+                  className={inputClass}
+                >
+                  {BASES.map((b) => (
+                    <option key={b} value={b}>
+                      {b}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field
+                label="الكمّية المقترحة لكلِّ وحدة"
+                hint="0.25 يعني ربعَ وحدةٍ لكلِّ متر مربع"
+              >
+                <input
+                  type="number"
+                  step="0.001"
+                  min="0"
+                  value={form.perUnit}
+                  onChange={(e) => set("perUnit", e.target.value)}
+                  className={inputClass}
+                />
+              </Field>
+              <Field
+                label="السعر الاسترشادي"
+                hint="اتركه فارغاً إن لم يكن معروفاً — لن تُحتسب تكلفة"
+              >
+                <input
+                  type="number"
+                  step="0.001"
+                  min="0"
+                  value={form.unitPrice}
+                  onChange={(e) => set("unitPrice", e.target.value)}
+                  className={inputClass}
+                />
+              </Field>
+              <div className="md:col-span-2">
+                <Field label="ملاحظة">
+                  <input
+                    type="text"
+                    value={form.note}
+                    onChange={(e) => set("note", e.target.value)}
+                    placeholder="من أين جاءت الكمّيةُ المقترحة"
+                    className={inputClass}
+                  />
+                </Field>
+              </div>
+            </div>
+            <button
+              onClick={addMaterial}
+              className="mt-4 rounded-lg bg-blue-600 px-6 py-3 font-bold text-white"
+            >
+              أضِف المادة
+            </button>
+          </>
+        )}
+
+        {materials.length === 0 ? (
+          <Empty>لا مادةَ بعد.</Empty>
+        ) : (
+          <div className="mt-6 overflow-x-auto">
+            <table className="w-full text-right text-sm">
+              <thead className="bg-slate-100">
+                <tr>
+                  <Th>المادة</Th>
+                  <Th>القسم</Th>
+                  <Th>الوحدة</Th>
+                  <Th>الأساس</Th>
+                  <Th>لكلِّ وحدة</Th>
+                  <Th>السعر الاسترشادي</Th>
+                  <Th>المورّدون</Th>
+                  {canManage && <Th>—</Th>}
+                </tr>
+              </thead>
+              <tbody>
+                {materials.map((material) => {
+                  const cheapest = cheapestSupplier(material);
+                  return (
+                    <Fragment key={material.id}>
+                      <tr className="border-t border-slate-100">
+                        <Td className="font-bold">{material.name}</Td>
+                        <Td>
+                          {canManage ? (
+                            <input
+                              type="text"
+                              list="estimate-departments"
+                              value={material.department}
+                              onChange={(e) =>
+                                patchMaterial(material.id, {
+                                  department: e.target.value,
+                                })
+                              }
+                              className="w-32 rounded border border-slate-300 px-2 py-1"
+                            />
+                          ) : (
+                            material.department || "—"
+                          )}
+                        </Td>
+                        <Td>
+                          {canManage ? (
+                            <input
+                              type="text"
+                              list="estimate-units"
+                              value={material.unit}
+                              onChange={(e) =>
+                                patchMaterial(material.id, {
+                                  unit: e.target.value,
+                                })
+                              }
+                              className="w-24 rounded border border-slate-300 px-2 py-1"
+                            />
+                          ) : (
+                            material.unit || "—"
+                          )}
+                        </Td>
+                        <Td>
+                          {canManage ? (
+                            <select
+                              value={material.basis}
+                              onChange={(e) =>
+                                patchMaterial(material.id, {
+                                  basis: e.target.value as EstimateBasis,
+                                })
+                              }
+                              className="rounded border border-slate-300 px-2 py-1"
+                            >
+                              {BASES.map((b) => (
+                                <option key={b} value={b}>
+                                  {b}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            material.basis
+                          )}
+                        </Td>
+                        <Td className="tabular-nums">
+                          {canManage ? (
+                            <input
+                              type="number"
+                              step="0.001"
+                              min="0"
+                              value={material.perUnit || ""}
+                              onChange={(e) =>
+                                patchMaterial(material.id, {
+                                  perUnit: round3(Number(e.target.value) || 0),
+                                })
+                              }
+                              className="w-20 rounded border border-slate-300 px-2 py-1 tabular-nums"
+                            />
+                          ) : (
+                            fmt(material.perUnit)
+                          )}
+                        </Td>
+                        <Td className="tabular-nums">
+                          {canManage ? (
+                            <input
+                              type="number"
+                              step="0.001"
+                              min="0"
+                              value={material.unitPrice ?? ""}
+                              placeholder="بلا سعر"
+                              onChange={(e) =>
+                                patchMaterial(material.id, {
+                                  unitPrice:
+                                    e.target.value === ""
+                                      ? null
+                                      : round3(Number(e.target.value)),
+                                })
+                              }
+                              className="w-24 rounded border border-slate-300 px-2 py-1 tabular-nums"
+                            />
+                          ) : material.unitPrice == null ? (
+                            "بلا سعر"
+                          ) : (
+                            fmt(material.unitPrice)
+                          )}
+                        </Td>
+                        <Td>
+                          <button
+                            onClick={() =>
+                              setOpenSuppliers(
+                                openSuppliers === material.id ? null : material.id
+                              )
+                            }
+                            className="rounded bg-slate-100 px-3 py-1 font-bold"
+                          >
+                            {material.suppliers.length} مورّد
+                            {cheapest && ` · أرخصُهم ${fmt(cheapest.price)}`}
+                          </button>
+                        </Td>
+                        {canManage && (
+                          <Td>
+                            <button
+                              onClick={() => removeMaterial(material)}
+                              className="rounded bg-red-50 px-3 py-1 font-bold text-red-700"
+                            >
+                              احذف
+                            </button>
+                          </Td>
+                        )}
+                      </tr>
+                      {openSuppliers === material.id && (
+                        <tr className="bg-slate-50">
+                          <Td colSpan={canManage ? 8 : 7}>
+                            <SupplierRows
+                              material={material}
+                              suppliers={suppliers}
+                              canManage={canManage}
+                              onAdd={addSupplier}
+                              onPatch={patchMaterial}
+                            />
+                          </Td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Panel>
+    </>
+  );
+}
+
+/** أسعارُ مورّدي مادةٍ واحدة — تُفتح تحت صفّها */
+function SupplierRows({
+  material,
+  suppliers,
+  canManage,
+  onAdd,
+  onPatch,
+}: {
+  material: Material;
+  suppliers: string[];
+  canManage: boolean;
+  onAdd: (material: Material, party: string, price: string) => void;
+  onPatch: (id: string, patch: Partial<Material>) => void;
+}) {
+  const [party, setParty] = useState("");
+  const [price, setPrice] = useState("");
+
+  return (
+    <div>
+      <div className="mb-3 text-sm font-bold">
+        أسعارُ {material.name} عند المورّدين
+        {material.note && (
+          <span className="ms-2 text-xs font-normal text-slate-500">
+            — {material.note}
+          </span>
+        )}
+      </div>
+
+      {material.suppliers.length === 0 ? (
+        <p className="text-sm text-slate-500">
+          لا مورّدَ مسعَّراً بعد — يُحسب التقديرُ بالسعر الاسترشادي.
+        </p>
+      ) : (
+        <table className="w-full max-w-xl text-right text-sm">
+          <tbody>
+            {material.suppliers.map((s) => (
+              <tr key={s.id} className="border-t border-slate-200">
+                <Td className="font-bold">{s.party}</Td>
+                <Td className="tabular-nums">
+                  {canManage ? (
+                    <input
+                      type="number"
+                      step="0.001"
+                      min="0"
+                      value={s.price || ""}
+                      onChange={(e) =>
+                        onPatch(material.id, {
+                          suppliers: material.suppliers.map((x) =>
+                            x.id === s.id
+                              ? { ...x, price: round3(Number(e.target.value) || 0) }
+                              : x
+                          ),
+                        })
+                      }
+                      className="w-24 rounded border border-slate-300 px-2 py-1 tabular-nums"
+                    />
+                  ) : (
+                    fmt(s.price)
+                  )}
+                </Td>
+                {canManage && (
+                  <Td>
+                    <button
+                      onClick={() =>
+                        onPatch(material.id, {
+                          suppliers: material.suppliers.filter(
+                            (x) => x.id !== s.id
+                          ),
+                        })
+                      }
+                      className="rounded bg-red-50 px-3 py-1 font-bold text-red-700"
+                    >
+                      أزِل
+                    </button>
+                  </Td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      {canManage && (
+        <div className="mt-4 flex flex-wrap items-end gap-3">
+          <Field label="المورّد">
+            <input
+              type="text"
+              list="estimate-suppliers"
+              value={party}
+              onChange={(e) => setParty(e.target.value)}
+              placeholder="اختر من سجلّ الموردين"
+              className="rounded-lg border border-slate-300 px-4 py-2"
+            />
+            <datalist id="estimate-suppliers">
+              {suppliers.map((s) => (
+                <option key={s} value={s} />
+              ))}
+            </datalist>
+          </Field>
+          <Field label="سعرُه">
+            <input
+              type="number"
+              step="0.001"
+              min="0"
+              value={price}
+              onChange={(e) => setPrice(e.target.value)}
+              className="w-28 rounded-lg border border-slate-300 px-4 py-2 tabular-nums"
+            />
+          </Field>
+          <button
+            onClick={() => {
+              onAdd(material, party, price);
+              setParty("");
+              setPrice("");
+            }}
+            className="rounded-lg bg-blue-600 px-5 py-2 font-bold text-white"
+          >
+            أضِف سعرَ المورّد
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MaterialsPage({
   year,
   projects,
@@ -15039,6 +16155,13 @@ function MaterialsPage({
                         newMaterial.unitPrice === ""
                           ? null
                           : round3(Number(newMaterial.unitPrice)),
+                      /* وتمامُها في «تقدير المواد»: القسمُ والأساسُ والمورّدون */
+                      department: "",
+                      unit: "",
+                      basis: DEFAULT_BASIS,
+                      perUnit: 0,
+                      suppliers: [],
+                      note: "",
                     },
                   ]);
                   setNewMaterial({ name: "", unitPrice: "" });

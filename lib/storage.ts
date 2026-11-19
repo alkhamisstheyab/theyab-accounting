@@ -26,6 +26,12 @@ import {
   round3,
 } from "./accounting";
 import { ALL_PERMISSIONS, Permission, ROLES, RoleKey } from "./permissions";
+import {
+  DEFAULT_BASIS,
+  isBasis,
+  type EstimateBasis,
+  type MaterialSupplier,
+} from "./estimates";
 import { AUDIT_LIMIT, AuditEntry } from "./audit";
 import {
   ATTENDANCE_STATUSES,
@@ -553,12 +559,30 @@ export type Contractor = {
   notes: string;
 };
 
-/** صنف مادة في كتالوج المواد، بسعر وحدة استرشادي */
+/**
+ * صنفُ مادةٍ في كتالوج المواد — بسعرِ وحدةٍ استرشاديٍّ وأسعارِ مورّديه.
+ *
+ * وكان الصنفُ اسماً وسعراً وحدَهما، يُقترح عند استلام المواد. ثمّ طُلب
+ * منه ما هو أكبر: تقديرُ تكلفةِ دورٍ لم يُبنَ بعد (lib/estimates.ts).
+ * فلا يكفي أن يُعرف سعرُ البايب — يلزم أن يُعرف كم بايباً يأخذ المترُ
+ * المربّع، وفي أيِّ قسمٍ يُحسب، وبكم يبيعه كلُّ مورّدٍ من مورّديه.
+ */
 export type Material = {
   id: string;
   name: string;
   /** فارغ يعني بلا سعر معرّف — يُدخل يدوياً عند الاستلام */
   unitPrice: number | null;
+  /** القسم: صحّي · كهرباء · إنارة · سويتشات وبلاكات · أطقم حمّام … */
+  department: string;
+  /** وحدةُ القياس — حبّة · متر · لفّة · كيس */
+  unit: string;
+  /** على أيِّ شيءٍ تُضرب الكمّيةُ المقترحة */
+  basis: EstimateBasis;
+  /** الكمّيةُ المقترحةُ لكلِّ وحدةٍ من الأساس */
+  perUnit: number;
+  /** أسعارُ المورّدين — فالمادةُ الواحدةُ بأسعارٍ عدّة */
+  suppliers: MaterialSupplier[];
+  note: string;
 };
 
 /** سجلّ استلام مواد في موقع مشروع — تتبّع عيني لا قيد محاسبي */
@@ -1896,12 +1920,41 @@ const optionalPrice = (v: unknown): number | null => {
   return Number.isFinite(n) ? round3(n) : null;
 };
 
+/**
+ * مورّدُ مادةٍ بسعره.
+ *
+ * والمورّدُ بلا اسمٍ لا يُحفظ: صفٌّ فارغٌ في القائمة المنسدلة يُختار
+ * سهواً فيُحسب سعرُه صفراً، فتخرج الفاتورةُ ناقصةً ولا يُدرى لماذا.
+ */
+function migrateSupplier(raw: unknown): MaterialSupplier {
+  const s = (raw ?? {}) as Record<string, unknown>;
+  return {
+    id: str(s.id) || newId(),
+    party: str(s.party),
+    price: round3(Number(s.price) || 0),
+  };
+}
+
+/*
+  وكلُّ حقلٍ جديدٍ يُذكر هنا أو لا وجودَ له: فـ asStored تُبنى من هذه
+  الدالّة، فما أسقطته لا تراه المقارنةُ ولا يُرفع إلى الخادم أبداً.
+  وقعت تلك في المكافآت: كُتبت في الشاشة وسُجّلت في التدقيق، ثمّ لم
+  تُحفظ — لأنّ migrateAttendance لم تكن تعرفها.
+*/
 function migrateMaterial(raw: unknown): Material {
   const m = (raw ?? {}) as Record<string, unknown>;
   return {
     id: str(m.id) || newId(),
     name: str(m.name),
     unitPrice: optionalPrice(m.unitPrice),
+    department: str(m.department),
+    unit: str(m.unit),
+    basis: isBasis(m.basis) ? m.basis : DEFAULT_BASIS,
+    perUnit: round3(Number(m.perUnit) || 0),
+    suppliers: Array.isArray(m.suppliers)
+      ? m.suppliers.map(migrateSupplier).filter((s) => s.party !== "")
+      : [],
+    note: str(m.note),
   };
 }
 

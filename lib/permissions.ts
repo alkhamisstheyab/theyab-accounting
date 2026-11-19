@@ -385,6 +385,8 @@ export const PAGE_PERMISSION: Record<string, Permission> = {
   "متابعة السلف": "advances.view",
   المستحقات: "dues.view",
   "استلام المواد": "materials.view",
+  // التقديرُ قراءةٌ لسجلّ الأسعار، وتحريرُه يحتاج materials.manage داخلَ الشاشة
+  "تقدير المواد": "materials.view",
   "دليل الحسابات": "chart.view",
   "الأرصدة الافتتاحية": "opening.view",
   المستخدمون: "users.manage",
